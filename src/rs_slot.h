@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ringsocket.h" // rs_ret
+#include <ringsocket.h> // rs_ret
 
 struct rs_slots {
     uint8_t * bytes; // Array in which each bit signifies availability of 1 slot

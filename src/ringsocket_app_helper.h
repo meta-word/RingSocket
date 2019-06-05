@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ringsocket.h"
+#include <ringsocket.h>
 
 // Inline functions allowing apps to only include a single
 // #include <ringsocket.h>, while avoiding function call overhead.

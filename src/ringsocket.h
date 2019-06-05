@@ -23,8 +23,8 @@
 #include <threads.h> // thread stuff
 
 // The following headers are used internally -- not part of the RS public API
-#include "ringsocket_variadic.h"
-#include "ringsocket_util.h"
+#include <ringsocket_variadic.h>
+#include <ringsocket_util.h>
 
 typedef struct rs rs_t;
 
@@ -73,10 +73,10 @@ typedef struct rs rs_t;
     __VA_ARGS__) // See rs_util.h
 
 // The following headers are used internally -- not part of the RingSocket API
-#include "ringsocket_conf.h"
-#include "ringsocket_peer.h"
-#include "ringsocket_ring.h"
-#include "ringsocket_app.h"
+#include <ringsocket_conf.h>
+#include <ringsocket_peer.h>
+#include <ringsocket_ring.h>
+#include <ringsocket_app.h>
 
 // Expanded in ringsocket_app.h
 #define RS_APP(init_macro, open_macro, read_macro, close_macro, timer_macro) \

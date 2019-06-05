@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ringsocket.h"
+#include <ringsocket.h>
 
 rs_ret init_rings(
     struct rs_conf const * conf,
