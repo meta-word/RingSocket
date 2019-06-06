@@ -47,5 +47,5 @@ clean:
 .PHONY: install
 install:
 	cp $(NAME) $(BIN_DIR)/ && \
-		cd $(SRC_DIR) && cp $(SYSTEM_HEADERS) $(INCLUDE_DIR)/ && cd .. && \
+		cp $(SRC_DIR)/$(SYSTEM_HEADERS) $(INCLUDE_DIR)/ && \
 		(useradd --system --shell $(BIN_DIR)/false ringsocket || true)
