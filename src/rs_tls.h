@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "ringsocket.h"
+#include <ringsocket.h>
 
 int derive_cert_index_from_hostname(
     struct rs_conf const * conf,

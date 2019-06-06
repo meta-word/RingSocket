@@ -41,10 +41,10 @@ static rs_ret get_ringsocket_credentials(
             "created.");
             return RS_FATAL;
     }
-    *uid = pw.pw_uid;
-    *gid = pw.pw_gid;
-    // Verify that pw.pw_shell equals "/(usr/)(s)bin/['false'|'nologin']"
-    char * ch = pw.pw_shell;
+    *uid = pw->pw_uid;
+    *gid = pw->pw_gid;
+    // Verify that pw->pw_shell equals "/(usr/)(s)bin/['false'|'nologin']"
+    char * ch = pw->pw_shell;
     if (*ch++ == '/' && (*ch != 'u' || (ch++, *ch++ == 's' && *ch++ == 'r' &&
                                         *ch++ == '/'))) {
         // Verify that the remainder equals "(s)bin/['false'|'nologin']"
@@ -66,7 +66,7 @@ static rs_ret get_ringsocket_credentials(
     }
     RS_LOG(LOG_CRIT, "The system user \"ringsocket\" should have no login "
         "shell: its shell path must be either (/usr)/(s)bin/false or "
-        "(/usr)/(s)bin/nologin, but \"%s\" was found instead.", pw.pw_shell);
+        "(/usr)/(s)bin/nologin, but \"%s\" was found instead.", pw->pw_shell);
     return RS_FATAL;
 }
 
@@ -100,7 +100,7 @@ static rs_ret remove_supplementary_groups(
         "executable must be executed by either a user with the CAP_SETGID "
         "capability set (e.g., user \"root\"), such that it can remove such "
         "groups; or by a user that does not belong to any such groups in the "
-        "first place."
+        "first place.");
     return RS_FATAL;
 }
 
@@ -294,7 +294,7 @@ static rs_ret spawn_app_and_worker_threads(
     // of the all_io_pairs array are not the io_pairs structs themselves, but
     // pointers to said structs that will only change once: when the threads
     // corresponding to their write ends allocate them.
-    struct rs_thread_io_pairs * all_io_pairs[conf.app_c];
+    struct rs_thread_io_pairs * all_io_pairs[conf->app_c];
     memset(all_io_pairs, 0, sizeof(all_io_pairs));
 
     struct rs_thread_sleep_state * app_sleep_states = NULL;
@@ -304,52 +304,52 @@ static rs_ret spawn_app_and_worker_threads(
     // to know all app sleep states anyway ("true sharing"); but
     // worker_sleep_states should be initialized in a different thread, because
     // worker threads need not know about other worker threads (false sharing).
-    RS_CACHE_ALIGNED_CALLOC(app_sleep_states, conf.app_c);
+    RS_CACHE_ALIGNED_CALLOC(app_sleep_states, conf->app_c);
     // worker_sleep_states are initialized by the app thread with app_i == 0.
 
     // Apps use futex_wait() directly on their app_sleep_states, but dormant
     // worker threads only wake on file descriptor events through epoll_wait(),
     // so they need to be awoken with eventfds instead, to be used in accordance
     // with their worker_sleep_states.
-    int worker_eventfds[conf.worker_c];
+    int worker_eventfds[conf->worker_c];
 
-    for (int * e = worker_eventfds; e < worker_eventfds + conf.worker_c; e++) {
+    for (int * e = worker_eventfds; e < worker_eventfds + conf->worker_c; e++) {
         *e = eventfd(0, EFD_NONBLOCK);
         if (*e == -1) {
             RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful eventfd(0, EFD_NONBLOCK)");
         }
     }
     
-    struct rs_app_args app_args[conf.app_c];
-    for (size_t i = 0; i < conf.app_c; i++) {
-        app_args[i].conf = &conf;
+    struct rs_app_args app_args[conf->app_c];
+    for (size_t i = 0; i < conf->app_c; i++) {
+        app_args[i].conf = conf;
         app_args[i].app_io_pairs = all_io_pairs + i;
         app_args[i].app_sleep_state = app_sleep_states + i;
         app_args[i].worker_sleep_states = &worker_sleep_states;
         app_args[i].worker_eventfds = worker_eventfds;
         app_args[i].app_i = i;
         app_args[i].log_mask = _rs_log_mask;
-        RS_GUARD(start_app(conf.apps[i].app_path, app_args + i));
+        RS_GUARD(start_app(conf->apps[i].app_path, app_args + i));
     }
 
     // Wait for all apps to sleep on futex_wait(), to ensure that all io_pairs
     // and worker_sleep_states have been allocated, and worker threads get
     // up-to-date thread_io_pairs pointers and worker_sleep_state pointers.
-    for (size_t i = 0; i < conf.app_c; i++) {
+    for (size_t i = 0; i < conf->app_c; i++) {
         while (!app_sleep_states[i].is_asleep) {
             thrd_sleep(&(struct timespec){ .tv_nsec = 1000000 }, NULL); // 1 ms
         }
     }
 
-    struct rs_worker_args worker_args[conf.worker_c];
+    struct rs_worker_args worker_args[conf->worker_c];
     for (size_t i = 0;; i++) {
-        worker_args[i].conf = &conf;
+        worker_args[i].conf = conf;
         worker_args[i].all_io_pairs = all_io_pairs;
         worker_args[i].app_sleep_states = app_sleep_states;
         worker_args[i].worker_sleep_state = worker_sleep_states + i;
         worker_args[i].worker_eventfd = worker_eventfds[i];
         worker_args[i].worker_i = i;
-        if (i + 1 >= conf.worker_c) {
+        if (i + 1 >= conf->worker_c) {
             // All apps and workers have been spawned, except for the last
             // worker, so now this thread will assume the role of that last
             // worker.
@@ -384,7 +384,7 @@ static rs_ret start(
     RS_GUARD(set_limits(&conf));
     RS_GUARD(bind_to_ports(&conf));
     // todo: remove_capabilities_no_longer_needed()
-    return spawn_app_and_worker_threads(conf);
+    return spawn_app_and_worker_threads(&conf);
 }
     
 int main(

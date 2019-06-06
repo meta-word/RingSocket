@@ -24,7 +24,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "utf8.h"
+#include "rs_utf8.h"
 
 #include <stdint.h> // uint8_t
 
