@@ -68,7 +68,7 @@ struct rs {
     uint16_t src_worker_thread_i;
 };
 
-#include <rs_app_helper.h>
+#include <ringsocket_app_helper.h>
 
 #define _RS_APP(init_macro, open_macro, read_macro, close_macro, \
     timer_macro) \
