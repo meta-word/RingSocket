@@ -41,10 +41,10 @@ static rs_ret get_ringsocket_credentials(
             "created.");
             return RS_FATAL;
     }
-    *uid = pw.pw_uid;
-    *gid = pw.pw_gid;
-    // Verify that pw.pw_shell equals "/(usr/)(s)bin/['false'|'nologin']"
-    char * ch = pw.pw_shell;
+    *uid = pw->pw_uid;
+    *gid = pw->pw_gid;
+    // Verify that pw->pw_shell equals "/(usr/)(s)bin/['false'|'nologin']"
+    char * ch = pw->pw_shell;
     if (*ch++ == '/' && (*ch != 'u' || (ch++, *ch++ == 's' && *ch++ == 'r' &&
                                         *ch++ == '/'))) {
         // Verify that the remainder equals "(s)bin/['false'|'nologin']"
@@ -66,7 +66,7 @@ static rs_ret get_ringsocket_credentials(
     }
     RS_LOG(LOG_CRIT, "The system user \"ringsocket\" should have no login "
         "shell: its shell path must be either (/usr)/(s)bin/false or "
-        "(/usr)/(s)bin/nologin, but \"%s\" was found instead.", pw.pw_shell);
+        "(/usr)/(s)bin/nologin, but \"%s\" was found instead.", pw->pw_shell);
     return RS_FATAL;
 }
 
