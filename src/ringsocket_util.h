@@ -67,7 +67,7 @@ extern thread_local char _rs_thread_id_str[];
 
 #define _RS_SYSLOG(lvl, ...) do { \
     if ((lvl) & _rs_log_mask) { \
-        syslog((lvl), "%s" __FILE__ ":%s:" RS_STRINGIFY(__LINE__) \
+        syslog((lvl), "%s" __FILE__ ":%s():" RS_STRINGIFY(__LINE__) \
             __VA_ARGS__); \
     } \
 } while (0)

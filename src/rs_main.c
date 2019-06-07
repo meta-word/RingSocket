@@ -261,10 +261,10 @@ static rs_ret start_app(
         return RS_FATAL;
     }
     int (*cb)(void *) = NULL;
-    *(void * *) (&cb) = dlsym(so, "ringsocket_cb");
+    *(void * *) (&cb) = dlsym(so, "ringsocket_app");
     if (!cb) {
-        RS_LOG(LOG_ERR, "Unsuccessful dlsym(so, \"ringsocket_cb\"). \"%s\" "
-            "does not seem to expose the required \"ringsocket_cb\" callback "
+        RS_LOG(LOG_ERR, "Unsuccessful dlsym(so, \"ringsocket_app\"). \"%s\" "
+            "does not seem to expose the required \"ringsocket_app\" callback "
             "function (as defined by RS_APP()): %s", so_path, dlerror());
         return RS_FATAL;
     }

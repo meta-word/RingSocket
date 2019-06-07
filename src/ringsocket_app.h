@@ -82,7 +82,7 @@ int _rs_log_mask = LOG_UPTO(LOG_WARNING); \
 \
 thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}; \
 \
-rs_ret rs_app( \
+rs_ret ringsocket_app( \
     struct rs_app_args * app_args \
 ) { \
     struct rs_conf const * conf = app_args->conf; \
