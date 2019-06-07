@@ -11,142 +11,146 @@
 // API functions
 
 inline uint64_t rs_get_client_id(
-    struct rs * n
+    struct rs_app_cb_args * rs
 ) {
-    return *((uint64_t *) (uint32_t []){n->src_worker_thread_i, n->src_peer_i});
+    return *((uint64_t *) (uint32_t []){
+        rs->src_worker_thread_i,
+        rs->src_peer_i
+    });
 }
 
 inline rs_ret rs_check_app_wsize(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     size_t incr_size
 ) {
-    if (!*n->wbuf) {
-        RS_CALLOC(*n->wbuf, *n->wbuf_size);
+    if (!*rs->wbuf) {
+        RS_CALLOC(*rs->wbuf, *rs->wbuf_size);
     }
-    if (n->wbuf_i + incr_size >= *n->wbuf_size) {
-        *n->wbuf_size = n->conf->realloc_multiplier * (n->wbuf_i + incr_size);
-        RS_REALLOC(*n->wbuf, *n->wbuf_size);
+    if (rs->wbuf_i + incr_size >= *rs->wbuf_size) {
+        *rs->wbuf_size =
+            rs->conf->realloc_multiplier * (rs->wbuf_i + incr_size);
+        RS_REALLOC(*rs->wbuf, *rs->wbuf_size);
     }
     return RS_OK;
 }
 
 inline void rs_w_p(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     void const * src,
     size_t size
 ) {
-    RS_GUARD_APP(rs_check_app_wsize(n, size));
-    memcpy(*n->wbuf + n->wbuf_i, src, size);
-    n->wbuf_i += size;
+    RS_GUARD_APP(rs_check_app_wsize(rs, size));
+    memcpy(*rs->wbuf + rs->wbuf_i, src, size);
+    rs->wbuf_i += size;
 }
 
 inline void rs_w_uint8(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint8_t u8
 ) {
-    RS_GUARD_APP(rs_check_app_wsize(n, 1));
-    (*n->wbuf)[n->wbuf_i++] = u8;
+    RS_GUARD_APP(rs_check_app_wsize(rs, 1));
+    (*rs->wbuf)[rs->wbuf_i++] = u8;
 }
 
 inline void rs_w_uint16(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint16_t u16
 ) {
-    RS_GUARD_APP(rs_check_app_wsize(n, 2));
-    *((uint16_t *) (*n->wbuf + n->wbuf_i)) = u16;
-    n->wbuf_i += 2;
+    RS_GUARD_APP(rs_check_app_wsize(rs, 2));
+    *((uint16_t *) (*rs->wbuf + rs->wbuf_i)) = u16;
+    rs->wbuf_i += 2;
 }
 
 inline void rs_w_uint32(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint32_t u32
 ) {
-    RS_GUARD_APP(rs_check_app_wsize(n, 4));
-    *((uint32_t *) (*n->wbuf + n->wbuf_i)) = u32;
-    n->wbuf_i += 4;
+    RS_GUARD_APP(rs_check_app_wsize(rs, 4));
+    *((uint32_t *) (*rs->wbuf + rs->wbuf_i)) = u32;
+    rs->wbuf_i += 4;
 }
 
 inline void rs_w_uint64(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint32_t u64
 ) {
-    RS_GUARD_APP(rs_check_app_wsize(n, 8));
-    *((uint64_t *) (*n->wbuf + n->wbuf_i)) = u64;
-    n->wbuf_i += 8;
+    RS_GUARD_APP(rs_check_app_wsize(rs, 8));
+    *((uint64_t *) (*rs->wbuf + rs->wbuf_i)) = u64;
+    rs->wbuf_i += 8;
 }
 
 inline void rs_w_uint16_hton(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint16_t u16
 ) {
-    rs_w_uint16(n, RS_HTON16(u16));
+    rs_w_uint16(rs, RS_HTON16(u16));
 }
 
 inline void rs_w_uint32_hton(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint32_t u32
 ) {
-    rs_w_uint32(n, RS_HTON32(u32));
+    rs_w_uint32(rs, RS_HTON32(u32));
 }
 
 inline void rs_w_uint64_hton(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     uint64_t u64
 ) {
-    rs_w_uint64(n, RS_HTON64(u64));
+    rs_w_uint64(rs, RS_HTON64(u64));
 }
 
 inline void rs_w_int8(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int8_t i8
 ) {
-    rs_w_uint8(n, i8);
+    rs_w_uint8(rs, i8);
 }
 
 inline void rs_w_int16(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int16_t i16
 ) {
-    rs_w_uint16(n, i16);
+    rs_w_uint16(rs, i16);
 }
 
 inline void rs_w_int32(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int32_t i32
 ) {
-    rs_w_uint32(n, i32);
+    rs_w_uint32(rs, i32);
 }
 
 inline void rs_w_int64(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int64_t i64
 ) {
-    rs_w_uint64(n, i64);
+    rs_w_uint64(rs, i64);
 }
 
 inline void rs_w_int16_hton(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int16_t i16
 ) {
-    rs_w_uint16_hton(n, i16);
+    rs_w_uint16_hton(rs, i16);
 }
 
 inline void rs_w_int32_hton(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int32_t i32
 ) {
-    rs_w_uint32_hton(n, i32);
+    rs_w_uint32_hton(rs, i32);
 }
 
 inline void rs_w_int64_hton(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     int64_t i64
 ) {
-    rs_w_uint64_hton(n, i64);
+    rs_w_uint64_hton(rs, i64);
 }
 
 inline void rs_send(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     size_t worker_i,
     enum rs_outbound_kind outbound_kind,
     uint32_t const * recipients,
@@ -155,8 +159,8 @@ inline void rs_send(
     void const * p,
     size_t size
 ) {
-    size_t payload_size = n->wbuf_i + size;
-    if (payload_size > n->conf->max_ws_msg_size) {
+    size_t payload_size = rs->wbuf_i + size;
+    if (payload_size > rs->conf->max_ws_msg_size) {
         return RS_FATAL;
     }
     size_t msg_size = payload_size;
@@ -168,8 +172,8 @@ inline void rs_send(
         msg_size += 2;
     }
     msg_size++;
-    struct rs_ring * ring = n->outbound_rings + worker_i;
-    RS_GUARD_APP(rs_prepare_ring_write(&n->io_pairs[worker_i].outbound,
+    struct rs_ring * ring = rs->outbound_rings + worker_i;
+    RS_GUARD_APP(rs_prepare_ring_write(&rs->io_pairs[worker_i].outbound,
         ring, msg_size));
     *ring->writer++ = (uint8_t) outbound_kind;
     if (recipient_c) {
@@ -192,40 +196,40 @@ inline void rs_send(
         RS_W_HTON16(ring->writer, payload_size);
         ring->writer += 2;
     }
-    if (n->wbuf_i) {
-        memcpy(ring->writer, *n->wbuf, n->wbuf_i);
-        ring->writer += n->wbuf_i;
+    if (rs->wbuf_i) {
+        memcpy(ring->writer, *rs->wbuf, rs->wbuf_i);
+        ring->writer += rs->wbuf_i;
     }
     if (size) {
         memcpy(ring->writer, p, size);
         ring->writer += size;
     }
-    RS_GUARD_APP(rs_enqueue_ring_update(n->ring_update_queue, n->io_pairs,
-        n->worker_sleep_states, n->worker_eventfds, ring->writer, worker_i,
+    RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
+        rs->worker_sleep_states, rs->worker_eventfds, ring->writer, worker_i,
         true));
 }
 
 inline void rs_to_single(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     uint64_t client_id,
     void const * p,
     size_t size
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
-    rs_send(n, *u32, RS_OUTBOUND_SINGLE, u32 + 1, 1, is_utf8, p, size);
-    n->wbuf_i = 0;
+    rs_send(rs, *u32, RS_OUTBOUND_SINGLE, u32 + 1, 1, is_utf8, p, size);
+    rs->wbuf_i = 0;
 }
 
 inline void rs_to_multi(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     uint64_t const * client_ids,
     size_t client_c,
     void const * p,
     size_t size
 ) {
-    for (size_t i = 0; i < n->conf->worker_c; i++) {
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
         uint32_t cur_clients[client_c];
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
@@ -238,68 +242,69 @@ inline void rs_to_multi(
         case 0:
             continue;
         case 1:
-            rs_send(n, i, RS_OUTBOUND_SINGLE, cur_clients, 1, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_SINGLE, cur_clients, 1, is_utf8, p,
+                size);
             continue;
         default:
-            rs_send(n, i, RS_OUTBOUND_ARRAY, cur_clients, cur_client_c, is_utf8,
-                p, size);
+            rs_send(rs, i, RS_OUTBOUND_ARRAY, cur_clients, cur_client_c,
+                is_utf8, p, size);
             continue;
         }
     }
-    n->wbuf_i = 0;
+    rs->wbuf_i = 0;
 }
 
 inline void rs_to_cur(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     void const * p,
     size_t size
 ) {
-    rs_send(n, n->src_worker_thread_i, RS_OUTBOUND_SINGLE,
-        (uint32_t []){n->src_peer_i}, 1, is_utf8, p, size);
-    n->wbuf_i = 0;
+    rs_send(rs, rs->src_worker_thread_i, RS_OUTBOUND_SINGLE,
+        (uint32_t []){rs->src_peer_i}, 1, is_utf8, p, size);
+    rs->wbuf_i = 0;
 }
 
 inline void rs_to_every(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     void const * p,
     size_t size
 ) {
-    for (size_t i = 0; i < n->conf->worker_c; i++) {
-        rs_send(n, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
+        rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
     }
-    n->wbuf_i = 0;
+    rs->wbuf_i = 0;
 }
 
 inline void rs_to_every_except_single(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     uint64_t client_id,
     void const * p,
     size_t size
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
-    for (size_t i = 0; i < n->conf->worker_c; i++) {
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == *u32) {
-            rs_send(n, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, u32 + 1, 1, is_utf8,
+            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, u32 + 1, 1, is_utf8,
                 p, size);
         } else {
-            rs_send(n, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
         }
     }
-    n->wbuf_i = 0;
+    rs->wbuf_i = 0;
 }
 
 inline void rs_to_every_except_multi(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     uint64_t const * client_ids,
     size_t client_c,
     void const * p,
     size_t size
 ) {
-    for (size_t i = 0; i < n->conf->worker_c; i++) {
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
         uint32_t cur_clients[client_c];
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
@@ -310,39 +315,39 @@ inline void rs_to_every_except_multi(
         }
         switch (cur_client_c) {
         case 0:
-            rs_send(n, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
             continue;
         case 1:
-            rs_send(n, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, cur_clients, 1,
+            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, cur_clients, 1,
                 is_utf8, p, size);
             continue;
         default:
-            rs_send(n, i, RS_OUTBOUND_EVERY_EXCEPT_ARRAY, cur_clients,
+            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_ARRAY, cur_clients,
                 cur_client_c, is_utf8, p, size);
             continue;
         }
     }
-    n->wbuf_i = 0;
+    rs->wbuf_i = 0;
 }
 
 inline void rs_to_every_except_cur(
-    struct rs * n,
+    struct rs_app_cb_args * rs,
     bool is_utf8,
     void const * p,
     size_t size
 ) {
-    for (size_t i = 0; i < n->conf->worker_c; i++) {
-        if (i == n->src_worker_thread_i) {
-            rs_send(n, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
-                (uint32_t []){n->src_peer_i}, 1, is_utf8, p, size);
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
+        if (i == rs->src_worker_thread_i) {
+            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
+                (uint32_t []){rs->src_peer_i}, 1, is_utf8, p, size);
         } else {
-            rs_send(n, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
         }
     }
-    n->wbuf_i = 0;
+    rs->wbuf_i = 0;
 }
 
-// Non-API functions
+// Nors-API functions
 
 inline rs_ret rs_init_rings(
     struct rs_conf const * conf,
@@ -387,4 +392,62 @@ inline rs_ret rs_get_time_in_milliseconds(
     }
     *time_ms = 1000 * ts.tv_sec + ts.tv_nsec / 1000000;
     return RS_OK;
+}
+
+inline void rs_close_peer(
+    struct rs_app_cb_args * rs,
+    uint16_t ws_close_code
+) {
+    struct rs_ring * ring = rs->outbound_rings + rs->src_worker_thread_i;
+    RS_GUARD_APP(rs_prepare_ring_write(
+        &rs->io_pairs[rs->src_worker_thread_i].outbound, ring, 5));
+    *ring->writer++ = RS_OUTBOUND_SINGLE;
+    *ring->writer++ = 0x88; /* FIN_CLOSE */
+    *ring->writer++ = 0x02; /* payload size == 2 */
+    *((uint16_t *) ring->writer) = RS_HTON16(ws_close_code);
+    ring->writer += 2;
+    RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
+        rs->worker_sleep_states, rs->worker_eventfds, ring->writer,
+        rs->src_worker_thread_i, true));
+}
+
+inline void rs_guard_app_cb(
+    int ret
+) {
+    switch (ret) {
+    case -1:
+        RS_LOG(LOG_WARNING,
+            "Shutting down: callback returned -1 (fatal error).");
+        break;
+    case 0:
+        return;
+    default:
+        RS_LOG(LOG_ERR, "Shutting down: callback returned an invalid value: "
+            "%d. Valid values are -1 (fatal error) and 0 (success). ", ret);
+    }
+    RS_APP_FATAL;
+}
+
+inline void rs_guard_app_cb_peer(
+    struct rs_app_cb_args * rs,
+    int ret
+) {
+    switch (ret) {
+    case -1:
+        RS_LOG(LOG_WARNING,
+            "Shutting down: read/open callback returned -1 (fatal error).");
+        break;
+    case 0:
+        return;
+    default:
+        if (ret >= 4000 && ret < 4900) {
+            rs_close_peer(rs, ret);
+            return;
+        }
+        RS_LOG(LOG_ERR, "Shutting down: read/open callback returned an invalid "
+            "value: %d. Valid values are -1 (fatal error), 0 (success), and "
+            "any value within the range 4000 through 4899 (private use "
+            "WebSocket close codes).", ret);
+    }
+    RS_APP_FATAL;
 }

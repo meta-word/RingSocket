@@ -49,10 +49,10 @@ enum rs_app_ws_close {
     // A callback expecting UTF-8 data received binary data, or vice versa
     RS_APP_WS_CLOSE_WRONG_DATA_TYPE = 4901,
     // RS_READ_SWITCH received a 1st byte not matching any of its case labels
-    RS_APP_WS_CLOSE_UNKNOWN_READ_CASE = 4902
+    RS_APP_WS_CLOSE_UNKNOWN_CASE = 4902
 };
 
-struct rs {
+struct rs_app_cb_args {
     struct rs_conf const * conf;
     uint8_t * * wbuf;
     struct rs_thread_io_pairs * io_pairs;
@@ -67,6 +67,11 @@ struct rs {
     uint16_t endpoint_id;
     uint16_t src_worker_thread_i;
 };
+
+// todo: This should probably be replaced with something less dumb...
+#define RS_APP_FATAL exit(EXIT_FAILURE)
+
+#define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
 #include <ringsocket_app_helper.h>
 
@@ -155,7 +160,7 @@ rs_ret rs_app( \
                 ((struct rs_inbound_msg_header *) ring_msg->msg); \
             reader = ring_msg->msg + sizeof(struct rs_inbound_msg_header); \
             uint8_t const * const over = ring_msg->msg + ring_msg->size; \
-            struct rs n = { \
+            struct rs_app_cb_args rs = { \
                 .conf = conf, \
                 .wbuf = &wbuf, \
                 .wbuf_size = &wbuf_size, \
@@ -189,19 +194,6 @@ rs_ret rs_app( \
         } \
     } \
 } \
-\
-extern inline rs_ret rs_init_rings( \
-    struct rs_conf const * conf, \
-    struct rs_app const * app, \
-    struct rs_thread_io_pairs * * io_pairs, \
-    struct rs_ring * * outbound_rings, \
-    uint8_t * * inbound_readers, \
-    struct rs_ring_update_queue * ring_update_queue \
-); \
-\
-extern inline rs_ret rs_get_time_in_milliseconds( \
-    uint64_t * time_ms \
-); \
 \
 extern inline rs_ret rs_prepare_ring_write( \
     struct rs_thread_pair * pair, \
@@ -244,96 +236,68 @@ extern inline rs_ret rs_flush_ring_updates( \
     struct rs_thread_sleep_state * sleep_states, \
     int const * eventfds, \
     size_t dest_thread_c \
+); \
+\
+extern inline rs_ret rs_init_rings( \
+    struct rs_conf const * conf, \
+    struct rs_app const * app, \
+    struct rs_thread_io_pairs * * io_pairs, \
+    struct rs_ring * * outbound_rings, \
+    uint8_t * * inbound_readers, \
+    struct rs_ring_update_queue * ring_update_queue \
+); \
+\
+extern inline rs_ret rs_get_time_in_milliseconds( \
+    uint64_t * time_ms \
+); \
+\
+extern inline void rs_close_peer( \
+    struct rs_app_cb_args * rs, \
+    uint16_t ws_close_code \
+); \
+\
+extern inline void rs_guard_app_cb( \
+    int ret \
+); \
+\
+extern inline void rs_guard_app_cb_peer( \
+    struct rs_app_cb_args * rs, \
+    int ret \
 )
-
-// todo: This should probably be replaced with something less dumb...
-#define RS_APP_FATAL exit(EXIT_FAILURE)
-
-#define RS_APP_CLOSE_PEER(ws_close_code) do { \
-    struct rs_ring * ring = outbound_rings + worker_i; \
-    RS_GUARD_APP(rs_prepare_ring_write(&io_pairs[worker_i].outbound, \
-        ring, 5)); \
-    *ring->writer++ = RS_OUTBOUND_SINGLE; \
-    *ring->writer++ = 0x88; /* FIN_CLOSE */ \
-    *ring->writer++ = 0x02; /* payload size == 2 */ \
-    *((uint16_t *) ring->writer) = RS_HTON16(ws_close_code); \
-    ring->writer += 2; \
-    RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
-        *worker_sleep_states, worker_eventfds, ring->writer, worker_i, true)); \
-} while (0)
-
-#define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
-
-#define RS_GUARD_APP_CB(call) do { \
-    int ret = (call); \
-    switch (ret) { \
-    case -1: \
-        RS_LOG(LOG_WARNING, \
-            "Shutting down: callback returned -1 (fatal error)."); \
-        RS_APP_FATAL; \
-    case 0: \
-        break; \
-    default: \
-        RS_LOG(LOG_ERR, "Shutting down: callback returned an invalid " \
-            "value: %d. Valid values are -1 (fatal error) and 0 (success). ", \
-            ret); \
-        RS_APP_FATAL; \
-    } \
-} while (0)
-
-#define RS_GUARD_APP_CB_PEER(call) do { \
-    int ret = (call); \
-    switch (ret) { \
-    case -1: \
-        RS_LOG(LOG_WARNING, \
-            "Shutting down: read/open callback returned -1 (fatal error)."); \
-        RS_APP_FATAL; \
-    case 0: \
-        break; \
-    default: \
-        if (ret < 4000 || ret > 4899) { \
-            RS_LOG(LOG_ERR, "Shutting down: read/open callback returned an " \
-                "invalid value: %d. Valid values are -1 (fatal error), " \
-                "0 (success), and any value within the range 4000 through " \
-                "4899 (private use WebSocket close codes).", ret); \
-            RS_APP_FATAL; \
-        } \
-        RS_APP_CLOSE_PEER(ret); \
-    } \
-} while (0)
 
 // This allows macro invocations such as RS_INIT_CB(RS_NONE) to be used
 #define RS_NONE(_) RS_OK
 
-#define _RS_INIT(init_cb) RS_GUARD_APP_CB(init_cb())
-#define _RS_OPEN(open_cb) RS_GUARD_APP_CB_PEER(open_cb(n))
-#define _RS_CLOSE(close_cb) RS_GUARD_APP_CB_PEER(close_cb(n))
-#define _RS_TIMER(timer_cb) RS_GUARD_APP_CB(timer_cb(n))
+#define _RS_INIT(init_cb) rs_guard_app_cb(init_cb())
+#define _RS_OPEN(open_cb) rs_guard_app_cb_peer(&rs, open_cb(&rs))
+#define _RS_CLOSE(close_cb) rs_guard_app_cb_peer(&rs, close_cb(&rs))
+#define _RS_TIMER(timer_cb) rs_guard_app_cb(timer_cb())
 
 #define _RS_READ_SWITCH(...) do { \
     RS_CHECK_SIZE(1); \
     switch (*reader++) { \
     RS_PREFIX_EACH(_, __VA_ARGS__); \
     default: \
-        RS_APP_CLOSE_PEER(RS_APP_WS_CLOSE_UNKNOWN_READ_CASE); \
+        rs_app_close_peer(&rs, RS_APP_WS_CLOSE_UNKNOWN_CASE); \
     } \
 } while (0)
 
+// todo: implement and test nested READ_SWITCH:
 /*#define _RS_READ_SWITCH2(...) do { \
     RS_CHECK_SIZE(1); \
     switch (*reader++) { \
     RS_PREFIX_EACH(_, __VA_ARGS__); \
     default: \
-        RS_APP_CLOSE_PEER(RS_APP_WS_CLOSE_UNKNOWN_READ_CASE); \
+        rs_app_close_peer(&rs, RS_APP_WS_CLOSE_UNKNOWN_CASE); \
     } \
 } while (0)*/
 
-#define _RS_READ_CASE_BIN(cb_i, ...) case cb_i: { \
+#define _RS_CASE_BIN(cb_i, ...) case cb_i: { \
     _RS_READ_BIN(__VA_ARGS__); \
 } \
 break
 
-#define _RS_READ_CASE_UTF8(cb_i, ...) case cb_i: { \
+#define _RS_CASE_UTF8(cb_i, ...) case cb_i: { \
     _RS_READ_UTF8(__VA_ARGS__); \
 } \
 break
@@ -354,7 +318,7 @@ break
     } \
 } while (0)
 
-#define RS_READ_PROCEED(...) RS_MACRIFY2(RS_256_16( \
+#define RS_READ_PROCEED(...) RS_MACRIFY_ARGC(RS_256_16( \
     RS_A00, RS_A01, RS_A02, RS_A03, RS_A04, RS_A05, RS_A06, \
     RS_A07, RS_A08, RS_A09, RS_A10, RS_A11, RS_A12, RS_A13, \
     RS_A14, RS_A15, __VA_ARGS__), __VA_ARGS__)
@@ -363,77 +327,79 @@ break
     reader = over; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_APP_CLOSE_PEER(ws_close_code); \
+    rs_app_close_peer(&rs, ws_close_code); \
     goto next_inbound_message; \
 } while (0)
 
 #define RS_A00(cb) do { \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs)); \
 } while (0)
 #define RS_A01(cb, a01) do { \
     _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v1 __##a01)); \
 } while (0)
 #define RS_A02(cb, a02, a01) do { \
     _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v2, v1 __##a01)); \
 } while (0)
 #define RS_A03(cb, a03, a02, a01) do { \
     _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A04(cb, a04, a03, a02, a01) do { \
     _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v4, v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A05(cb, a05, a04, a03, a02, a01) do { \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v5, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v5, v4, v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A06(cb, a06, a05, a04, a03, a02, a01) do { \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v6, v5, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v6, v5, v4, v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A07(cb, a07, a06, a05, a04, a03, a02, a01) do { \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v7, v6, v5, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v7, v6, v5, v4, v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A08(cb, a08, a07, a06, a05, a04, a03, a02, a01) do { \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v8, v7, v6, v5, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v8, v7, v6, v5, v4, v3, v2, v1 \
+        __##a01)); \
 } while (0)
 #define RS_A09(cb, a09, a08, a07, a06, a05, a04, a03, a02, a01) do { \
     _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; \
     _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v9, v8, v7, v6, v5, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v9, v8, v7, v6, v5, v4, v3, v2, v1 \
+        __##a01)); \
 } while (0)
 #define RS_A10(cb, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) do { \
     _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; \
     _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v10, v9, v8, v7, v6, v5, v4, v3, v2, v1 \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v10, v9, v8, v7, v6, v5, v4, v3, v2, v1 \
         __##a01)); \
 } while (0)
 #define RS_A11(cb, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, \
@@ -442,8 +408,8 @@ break
     _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v11, v10, v9, v8, v7, v6, v5, v4, v3, v2, v1 \
-        __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v11, v10, v9, v8, v7, v6, v5, v4, v3, \
+        v2, v1 __##a01)); \
 } while (0)
 #define RS_A12(cb, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, \
     a01) do { \
@@ -451,8 +417,8 @@ break
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v12, v11, v10, v9, v8, v7, v6, v5, v4, v3, \
-        v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v12, v11, v10, v9, v8, v7, v6, v5, v4, \
+        v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A13(cb, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, \
     a02, a01) do { \
@@ -460,8 +426,8 @@ break
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v13, v12, v11, v10, v9, v8, v7, v6, v5, v4, \
-        v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v13, v12, v11, v10, v9, v8, v7, v6, v5, \
+        v4, v3, v2, v1 __##a01)); \
 } while (0)
 #define RS_A14(cb, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, \
     a03, a02, a01) do { \
@@ -469,8 +435,8 @@ break
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v14, v13, v12, v11, v10, v9, v8, v7, v6, v5, \
-        v4, v3 v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v14, v13, v12, v11, v10, v9, v8, v7, v6, \
+        v5, v4, v3 v2, v1 __##a01)); \
 } while (0)
 #define RS_A15(cb, a15, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, \
     a04, a03, a02, a01) do { \
@@ -479,8 +445,8 @@ break
     _01##a01; \
     RS_GUARD_APP(rs_enqueue_ring_update(&ring_update_queue, io_pairs, \
         *worker_sleep_states, worker_eventfds, reader, worker_i, false)); \
-    RS_GUARD_APP_CB_PEER(cb(n, v15, v14, v13, v12, v11, v10, v9, v8, v7, v6, \
-        v5, v4, v3, v2, v1 __##a01)); \
+    rs_guard_app_cb_peer(&rs, cb(&rs, v15, v14, v13, v12, v11, v10, v9, v8, \
+        v7, v6, v5, v4, v3, v2, v1 __##a01)); \
 } while (0)
 
 #define _15RS_NET(...) _RS_NET(15, __VA_ARGS__)
@@ -515,10 +481,10 @@ break
 #define _02RS_NTOH(...) _RS_NTOH(2, __VA_ARGS__)
 #define _01RS_NTOH(...) _RS_NTOH(1, __VA_ARGS__)
 
-#define _RS_NET(name_i, ...) RS_MACRIFY3(RS_256_3(RS_NET_SINGLE, \
+#define _RS_NET(name_i, ...) RS_MACRIFY_TYPE(RS_256_3(RS_NET_SINGLE, \
     RS_NET_STA, RS_NET_VLA, __VA_ARGS__), name_i, __VA_ARGS__)
 
-#define _RS_NTOH(name_i, ...) RS_MACRIFY3(RS_256_3(RS_NTOH_SINGLE, \
+#define _RS_NTOH(name_i, ...) RS_MACRIFY_TYPE(RS_256_3(RS_NTOH_SINGLE, \
     RS_NTOH_STA, RS_NTOH_VLA, __VA_ARGS__), name_i, __VA_ARGS__)
 
 #define RS_READ_CHECK(size) do { \
@@ -527,7 +493,10 @@ break
     } \
 } while (0)
 
-// No "do while (0)" wrapping do to elem_c needing to remain in scope
+// Many of the macros below instantiate a variable that needs to remain in scope
+// until the read callback function is called, hence they cannot be wrapped in a
+// "do while (0)"
+
 #define RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c) \
     size_t elem_c = over - reader; \
     if (elem_c % sizeof(type)) { \
@@ -539,8 +508,7 @@ break
     } \
     do { ; } while (0)
 
-// No "do while (0)" wrapping due to v##name_i needing to remain in scope
-#define RS_NTOH_SINGLE(name_i, type) \
+#define RS_NET_SINGLE(name_i, type) \
     RS_READ_CHECK(sizeof(type)); \
     type v##name_i = *((type *) reader); \
     reader += sizeof(type)
@@ -551,20 +519,17 @@ do { \
     reader += (elem_c) * sizeof(type); \
 } while (0)
 
-// No "do while (0)" wrapping due to v##name_i[] needing to remain in scope
 #define RS_NET_STA(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
     thread_local static type v##name_i[elem_c] = {0}; \
     RS_NET_ARR(v##name_i, elem_c, type)
 
-// No "do while (0)" wrapping due to v1[] and elem_c needing to remain in scope
-#define RS_NET_VLA(_, type, min_elem_c, max_elem_c) \
+#define _01RS_NET_VLA(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[elem_c]; /* VLA */ \
     RS_NET_ARR(v1, elem_c, type)
 
-// No "do while (0)" wrapping due to v1[] and elem_c needing to remain in scope
-#define _RS_NET_HEAP(_, type, min_elem_c, max_elem_c) \
+#define _01RS_NET_HEAP(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type * v1 = malloc(elem_c); \
     if (!v1) { \
@@ -584,13 +549,11 @@ do { \
     reader += sizeof(type); \
 } while (0)
 
-// No "do while (0)" wrapping due to v##name_i needing to remain in scope
 #define RS_NTOH_SINGLE(name_i, type) \
     RS_READ_CHECK(sizeof(type)); \
     type v##name_i = 0; \
     RS_NTOH_ASSIGN(v##name_i, type)
 
-// No "do while (0)" wrapping due to v##name_i[] needing to remain in scope
 #define RS_NTOH_STA(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
     thread_local static type v##name_i[elem_c] = {0}; \
@@ -599,8 +562,7 @@ do { \
     } \
     do { ; } while (0)
 
-// No "do while (0)" wrapping due to v1[] and elem_c needing to remain in scope
-#define RS_NTOH_VLA(_, type, min_elem_c, max_elem_c) \
+#define _01RS_NTOH_VLA(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[elem_c]; /* VLA */ \
     for (size_t i = 0; i < elem_c; i++) { \
@@ -608,8 +570,7 @@ do { \
     } \
     do { ; } while (0)
 
-// No "do while (0)" wrapping due to v1[] and elem_c needing to remain in scope
-#define _RS_NTOH_HEAP(_, type, min_elem_c, max_elem_c) \
+#define _01RS_NTOH_HEAP(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type * v1 = malloc(elem_c); \
     if (!v1) { \
@@ -621,38 +582,28 @@ do { \
     } \
     do { ; } while (0)
 
-// No "do while (0)" wrapping due to v1[] and elem_c needing to remain in scope
-#define _RS_STR(_, type, min_elem_c, max_elem_c) \
-    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
-    type v1[elem_c + 1]; /* VLA */ \
-    RS_NET_ARR(v1, elem_c, type); \
+#define _01RS_STR(min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
+    char v1[elem_c + 1]; /* VLA */ \
+    RS_NET_ARR(v1, elem_c, char); \
     v1[elem_c] = '\0'
 
-// No "do while (0)" wrapping due to v1[] and elem_c needing to remain in scope
-#define _RS_STR_HEAP(_, type, min_elem_c, max_elem_c) \
-    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
-    type * v1 = malloc(elem_c + 1); \
+#define _01RS_STR_HEAP(min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
+    char * v1 = malloc(elem_c + 1); \
     if (!v1) { \
         RS_LOG(LOG_ALERT, "Failed to malloc()."); \
         RS_APP_FATAL; \
     } \
-    RS_NET_ARR(v_heap, elem_c, type); \
+    RS_NET_ARR(v1, elem_c, char); \
     v1[elem_c] = '\0'
 
 // Determine whether to include a final "elem_c" parameter in the calback call,
 // depending on whether the corresponding "v1" parameter is a non-static array.
-#define __RS_NET(...) \
-    RS_MACRIFY3(RS_256_3( \
-        RS_NO_ELEM_C_PARAM, RS_NO_ELEM_C_PARAM, RS_ELEM_C_PARAM, \
-    __VA_ARGS__), _)
-#define __RS_NTOH(...) \
-    RS_MACRIFY3(RS_256_3( \
-        RS_NO_ELEM_C_PARAM, RS_NO_ELEM_C_PARAM, RS_ELEM_C_PARAM, \
-    __VA_ARGS__), _)
-#define __RS_STR RS_ELEM_C_PARAM(_)
-#define __RS_NET_HEAP RS_ELEM_C_PARAM(_)
-#define __RS_NTOH_HEAP RS_ELEM_C_PARAM(_)
-#define __RS_STR_HEAP RS_ELEM_C_PARAM(_)
-
-#define RS_NO_ELEM_C_PARAM(_)
-#define RS_ELEM_C_PARAM(_) , elem_c
+#define __RS_NET(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
+#define __RS_NTOH(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
+#define __RS_STR(...) RS_ELEM_C_PARAM
+#define __RS_NET_HEAP(...) RS_ELEM_C_PARAM
+#define __RS_NTOH_HEAP(...) RS_ELEM_C_PARAM
+#define __RS_STR_HEAP(...) RS_ELEM_C_PARAM
+#define RS_ELEM_C_PARAM , elem_c

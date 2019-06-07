@@ -22,11 +22,13 @@
 #include <stdatomic.h> // atomic_uintptr_t, atomic_load/store_explicit()
 #include <threads.h> // thread stuff
 
+// Every RingSocket app callback function receives the same (rs_t * rs) opaque
+// pointer type as its first 1st argument. (Or maybe just pretend it's opaque?)
+typedef struct rs_app_cb_args rs_t;
+
 // The following headers are used internally -- not part of the RS public API
 #include <ringsocket_variadic.h>
 #include <ringsocket_util.h>
-
-typedef struct rs rs_t;
 
 // The following macros are included here instead of rs_util.h because they
 // may be of use to apps -- hence part of the RS public API

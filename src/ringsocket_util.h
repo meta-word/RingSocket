@@ -52,10 +52,10 @@ extern thread_local char _rs_thread_id_str[];
 #define RS_THREAD_ID_MAX_STRLEN (RS_APP_NAME_MAX_STRLEN + \
     RS_CONST_STRLEN(": "))
 
-#define _RS_LOG(...) RS_MACRIFY1(RS_256_3(_RS_LOG_1, _RS_LOG_2, \
+#define _RS_LOG(...) RS_MACRIFY_LOG(RS_256_3(_RS_LOG_1, _RS_LOG_2, \
     _RS_LOG_MORE, __VA_ARGS__), __VA_ARGS__)
 
-#define _RS_LOG_ERRNO(...) RS_MACRIFY1(RS_256_3(_RS_LOG_ERRNO_1, \
+#define _RS_LOG_ERRNO(...) RS_MACRIFY_LOG(RS_256_3(_RS_LOG_ERRNO_1, \
     _RS_LOG_ERRNO_2, _RS_LOG_ERRNO_MORE, __VA_ARGS__), __VA_ARGS__)
 
 #define _RS_LOG_CHBUF(lvl, fmt, chbuf, size, ...) do { \
