@@ -347,7 +347,7 @@ inline void rs_to_every_except_cur(
     rs->wbuf_i = 0;
 }
 
-// Nors-API functions
+// Non-API functions
 
 inline rs_ret rs_init_rings(
     struct rs_conf const * conf,

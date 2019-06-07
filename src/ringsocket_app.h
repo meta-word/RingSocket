@@ -194,76 +194,10 @@ rs_ret rs_app( \
         } \
     } \
 } \
-\
-extern inline rs_ret rs_prepare_ring_write( \
-    struct rs_thread_pair * pair, \
-    struct rs_ring * ring, \
-    uint32_t msg_size \
-); \
-\
-extern inline struct rs_ring_msg * rs_get_ring_msg( \
-    struct rs_thread_pair * pair, \
-    uint8_t const * reader \
-); \
-\
-extern inline rs_ret rs_wake_up_app( \
-    struct rs_thread_sleep_state * app_sleep_state \
-); \
-\
-extern inline rs_ret rs_wake_up_worker( \
-    struct rs_thread_sleep_state * worker_sleep_state, \
-    int worker_eventfd \
-); \
-\
-extern inline rs_ret rs_wait_for_worker( \
-    struct rs_thread_sleep_state * app_sleep_state, \
-    struct timespec const * timeout \
-); \
-\
-extern inline rs_ret rs_enqueue_ring_update( \
-    struct rs_ring_update_queue * updates, \
-    struct rs_thread_io_pairs * io_pairs, \
-    struct rs_thread_sleep_state * worker_sleep_states, \
-    int const * worker_eventfds, \
-    uint8_t const * new_ring_position, \
-    size_t worker_thread_i, \
-    bool is_write \
-); \
-\
-extern inline rs_ret rs_flush_ring_updates( \
-    struct rs_ring_update_queue * updates, \
-    struct rs_thread_io_pairs * io_pairs, \
-    struct rs_thread_sleep_state * sleep_states, \
-    int const * eventfds, \
-    size_t dest_thread_c \
-); \
-\
-extern inline rs_ret rs_init_rings( \
-    struct rs_conf const * conf, \
-    struct rs_app const * app, \
-    struct rs_thread_io_pairs * * io_pairs, \
-    struct rs_ring * * outbound_rings, \
-    uint8_t * * inbound_readers, \
-    struct rs_ring_update_queue * ring_update_queue \
-); \
-\
-extern inline rs_ret rs_get_time_in_milliseconds( \
-    uint64_t * time_ms \
-); \
-\
-extern inline void rs_close_peer( \
-    struct rs_app_cb_args * rs, \
-    uint16_t ws_close_code \
-); \
-\
-extern inline void rs_guard_app_cb( \
-    int ret \
-); \
-\
-extern inline void rs_guard_app_cb_peer( \
-    struct rs_app_cb_args * rs, \
-    int ret \
-)
+/* Top-level macro invocations should allow a trailing semicolon, but */ \
+/* functions cannot be enclosed in a "do { } while (0)", hence the */ \
+/* following dummy typedef will have to suffice instead: */ \
+typedef void _rs_semicolon_enabling_dummy_typedef
 
 // This allows macro invocations such as RS_INIT_CB(RS_NONE) to be used
 #define RS_NONE(_) RS_OK
