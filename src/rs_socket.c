@@ -15,7 +15,7 @@
 thread_local static struct rs_slots peer_slots = {0};
 
 static rs_ret bind_socket(
-    struct rs_port const * port,
+    struct rs_conf_port const * port,
     int fd,
     size_t worker_c,
     struct sockaddr const * addr,
@@ -76,7 +76,7 @@ static rs_ret bind_socket(
 }
 
 static rs_ret bind_ipv4(
-    struct rs_port const * port,
+    struct rs_conf_port const * port,
     int * fd,
     size_t worker_c,
     struct in_addr addr
@@ -96,7 +96,7 @@ static rs_ret bind_ipv4(
 }
 
 static rs_ret bind_ipv6(
-    struct rs_port const * port,
+    struct rs_conf_port const * port,
     int * fd,
     size_t worker_c,
     struct in6_addr addr,
@@ -125,7 +125,7 @@ static rs_ret bind_ipv6(
 rs_ret bind_to_ports(
     struct rs_conf * conf
 ) {
-    for (struct rs_port * port = conf->ports;
+    for (struct rs_conf_port * port = conf->ports;
         port < conf->ports + conf->port_c; port++) {
         switch (port->listen_ip_kind) {
         case RS_LISTEN_IP_SPECIFIC:
@@ -203,7 +203,7 @@ rs_ret listen_to_sockets(
     size_t worker_i,
     int epoll_fd
 ) {
-    for (struct rs_port * p = conf->ports; p < conf->ports + conf->port_c;
+    for (struct rs_conf_port * p = conf->ports; p < conf->ports + conf->port_c;
         p++) {
         for (size_t i = 0; i < p->listen_fd_c; i++) {
             int listen_fd = p->listen_fds[worker_i][i];

@@ -14,8 +14,8 @@ inline uint64_t rs_get_client_id(
     struct rs_app_cb_args * rs
 ) {
     return *((uint64_t *) (uint32_t []){
-        rs->src_worker_thread_i,
-        rs->src_peer_i
+        rs->inbound_worker_i,
+        rs->inbound_peer_i
     });
 }
 
@@ -260,8 +260,8 @@ inline void rs_to_cur(
     void const * p,
     size_t size
 ) {
-    rs_send(rs, rs->src_worker_thread_i, RS_OUTBOUND_SINGLE,
-        (uint32_t []){rs->src_peer_i}, 1, is_utf8, p, size);
+    rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
+        (uint32_t []){rs->inbound_peer_i}, 1, is_utf8, p, size);
     rs->wbuf_i = 0;
 }
 
@@ -337,9 +337,9 @@ inline void rs_to_every_except_cur(
     size_t size
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
-        if (i == rs->src_worker_thread_i) {
+        if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
-                (uint32_t []){rs->src_peer_i}, 1, is_utf8, p, size);
+                (uint32_t []){rs->inbound_peer_i}, 1, is_utf8, p, size);
         } else {
             rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
         }
@@ -349,35 +349,73 @@ inline void rs_to_every_except_cur(
 
 // Non-API functions
 
-inline rs_ret rs_init_rings(
-    struct rs_conf const * conf,
-    struct rs_app const * app,
-    struct rs_thread_io_pairs * * io_pairs,
-    struct rs_ring * * outbound_rings,
-    uint8_t * * inbound_readers,
-    struct rs_ring_update_queue * ring_update_queue
+inline rs_ret rs_init_outbound_rings(
+    struct rs_app_cb_args * rs
 ) {
-    // Initialize the outbound write side and inbound read side of this app
-    // thread's ring buffers. Mirrors init_rings() in ring.c which initializes
-    // the inbound write side and outbound read side of the worker thread
-    // calling it, except that init_rings() doesn't initialize io_pairs.
-    RS_CACHE_ALIGNED_CALLOC(*io_pairs, conf->worker_c);
-    RS_CALLOC(*outbound_rings, conf->worker_c);
-    RS_CALLOC(*inbound_readers, conf->worker_c);
-    for (size_t i = 0; i < conf->worker_c; i++) {
-        struct rs_ring * out_ring = *outbound_rings + i;
-        RS_CACHE_ALIGNED_CALLOC(out_ring->buf, conf->outbound_ring_buf_size);
-        out_ring->writer = out_ring->buf;
-        out_ring->alloc_multiplier = conf->realloc_multiplier;
-        RS_ATOMIC_STORE_RELAXED(&(*io_pairs)[i].outbound.writer,
-            (atomic_uintptr_t) out_ring->buf);
-        RS_ATOMIC_STORE_RELAXED(&(*io_pairs)[i].outbound.reader,
-            (atomic_uintptr_t) out_ring->buf);
-        RS_ATOMIC_LOAD_RELAXED_CASTED(&(*io_pairs)[i].inbound.reader,
-            inbound_readers[i], (uint8_t *));
+    RS_CALLOC(rs->outbound_rings, rs->conf->worker_c);
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
+        struct rs_ring * ring = rs->outbound_rings + i;
+        RS_CACHE_ALIGNED_CALLOC(ring->buf, rs->conf->outbound_ring_buf_size);
+        ring->writer = ring->buf;
+        ring->alloc_multiplier = rs->conf->realloc_multiplier;
+        RS_ATOMIC_STORE_RELAXED(&rs->io_pairs[i].outbound.writer,
+            (atomic_uintptr_t) ring->buf);
+        RS_ATOMIC_STORE_RELAXED(&rs->io_pairs[i].outbound.reader,
+            (atomic_uintptr_t) ring->buf);
     }
-    ring_update_queue->size = app->update_queue_size;
-    RS_CALLOC(ring_update_queue->queue, ring_update_queue->size);
+    return RS_OK;
+}
+
+inline rs_ret rs_init_app_cb_args(
+    struct rs_app_args * app_args,
+    struct rs_app_cb_args * rs
+) {
+    struct rs_conf const * conf = app_args->conf;
+    struct rs_conf_app const * conf_app = conf->apps + app_args->app_i;
+    rs->conf = conf;
+
+    // Allocate all IO pairs between this app and each worker
+    RS_CACHE_ALIGNED_CALLOC(*app_args->app_io_pairs, conf->worker_c);
+    rs->io_pairs = *app_args->app_io_pairs;
+ 
+    RS_GUARD(rs_init_outbound_rings(rs));
+    
+    // The 1st app allocates all worker sleep states (as per the reasons
+    // mentioned in spawn_app_and_worker_threads()).
+    if (!app_args->app_i) {
+        RS_CACHE_ALIGNED_CALLOC(*app_args->worker_sleep_states, conf->worker_c);
+    }
+    rs->worker_sleep_states = *app_args->worker_sleep_states;
+    rs->worker_eventfds = app_args->worker_eventfds;
+
+    // Don't allocate rs->wbuf yet, but do so instead during the 1st rs_w_...()
+    // call, if any. This saves memory for apps that never call rs_w_...()
+    // functions, and instead write/send everything "in one go" with rs_send().
+    rs->wbuf_size = conf_app->wbuf_size;
+    
+    rs->ring_update_queue->size = conf_app->update_queue_size;
+    RS_CALLOC(rs->ring_update_queue->queue, conf_app->update_queue_size);
+    return RS_OK;
+}
+
+inline rs_ret rs_get_readers_upon_inbound_rings_init(
+    struct rs_app_cb_args const * rs,
+    uint8_t * * * inbound_readers
+) {
+    RS_CALLOC(*inbound_readers, rs->conf->worker_c);
+    // Only run once during app initialization, so just do a bit of sleep
+    // polling instead of bothering with something more fancy like a futex.
+    for (size_t i = 0; i < rs->conf->worker_c; i++) {
+        for (uint8_t * reader = NULL;;) {
+            RS_ATOMIC_LOAD_RELAXED_CASTED(&rs->io_pairs[i].inbound.reader,
+                reader, (uint8_t *));
+            if (reader) {
+                (*inbound_readers)[i] = reader;
+                break;
+            }
+            thrd_sleep(&(struct timespec){ .tv_nsec = 1000000 }, NULL); // 1 ms
+        }
+    }
     return RS_OK;
 }
 
@@ -394,24 +432,25 @@ inline rs_ret rs_get_time_in_milliseconds(
     return RS_OK;
 }
 
-inline void rs_close_peer(
+inline rs_ret rs_close_peer(
     struct rs_app_cb_args * rs,
     uint16_t ws_close_code
 ) {
-    struct rs_ring * ring = rs->outbound_rings + rs->src_worker_thread_i;
-    RS_GUARD_APP(rs_prepare_ring_write(
-        &rs->io_pairs[rs->src_worker_thread_i].outbound, ring, 5));
+    struct rs_ring * ring = rs->outbound_rings + rs->inbound_worker_i;
+    RS_GUARD(rs_prepare_ring_write(
+        &rs->io_pairs[rs->inbound_worker_i].outbound, ring, 5));
     *ring->writer++ = RS_OUTBOUND_SINGLE;
     *ring->writer++ = 0x88; /* FIN_CLOSE */
     *ring->writer++ = 0x02; /* payload size == 2 */
     *((uint16_t *) ring->writer) = RS_HTON16(ws_close_code);
     ring->writer += 2;
-    RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
+    RS_GUARD(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
         rs->worker_sleep_states, rs->worker_eventfds, ring->writer,
-        rs->src_worker_thread_i, true));
+        rs->inbound_worker_i, true));
+    return RS_OK;
 }
 
-inline void rs_guard_app_cb(
+inline rs_ret rs_guard_cb(
     int ret
 ) {
     switch (ret) {
@@ -420,15 +459,15 @@ inline void rs_guard_app_cb(
             "Shutting down: callback returned -1 (fatal error).");
         break;
     case 0:
-        return;
+        return RS_OK;
     default:
         RS_LOG(LOG_ERR, "Shutting down: callback returned an invalid value: "
             "%d. Valid values are -1 (fatal error) and 0 (success). ", ret);
     }
-    RS_APP_FATAL;
+    return RS_FATAL;
 }
 
-inline void rs_guard_app_cb_peer(
+inline rs_ret rs_guard_peer_cb(
     struct rs_app_cb_args * rs,
     int ret
 ) {
@@ -436,18 +475,17 @@ inline void rs_guard_app_cb_peer(
     case -1:
         RS_LOG(LOG_WARNING,
             "Shutting down: read/open callback returned -1 (fatal error).");
-        break;
+        return RS_FATAL;
     case 0:
-        return;
+        return RS_OK;
     default:
         if (ret >= 4000 && ret < 4900) {
-            rs_close_peer(rs, ret);
-            return;
+            return rs_close_peer(rs, ret);
         }
-        RS_LOG(LOG_ERR, "Shutting down: read/open callback returned an invalid "
-            "value: %d. Valid values are -1 (fatal error), 0 (success), and "
-            "any value within the range 4000 through 4899 (private use "
-            "WebSocket close codes).", ret);
     }
-    RS_APP_FATAL;
+    RS_LOG(LOG_ERR, "Shutting down: read/open callback returned an invalid "
+        "value: %d. Valid values are -1 (fatal error), 0 (success), and any "
+        "value within the range 4000 through 4899 (private use WebSocket close "
+        "codes).", ret);
+    return RS_FATAL;
 }

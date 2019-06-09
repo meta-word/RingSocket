@@ -8,9 +8,9 @@
 #include <arpa/inet.h> // struct in_addr, struct in6_addr
 
 struct rs_conf {
-    struct rs_port * ports;
-    struct rs_cert * certs;
-    struct rs_app * apps;
+    struct rs_conf_port * ports;
+    struct rs_conf_cert * certs;
+    struct rs_conf_app * apps;
     size_t inbound_ring_buf_size;
     size_t outbound_ring_buf_size;
     double realloc_multiplier;
@@ -31,7 +31,7 @@ struct rs_conf {
     uint8_t shutdown_wait_ws; // in seconds
 };
 
-struct rs_port {
+struct rs_conf_port {
     int * * listen_fds;
     union {
         struct in_addr * ipv4_addrs;
@@ -54,17 +54,17 @@ enum rs_listen_ip_kind {
     RS_LISTEN_IP_SPECIFIC = 4
 };
 
-struct rs_cert {
+struct rs_conf_cert {
     char * * hostnames;
     char * privkey_path;
     char * pubchain_path;
     size_t hostname_c;
 };
 
-struct rs_app {
+struct rs_conf_app {
     char * name;
     char * app_path;
-    struct rs_endpoint * endpoints;
+    struct rs_conf_endpoint * endpoints;
     uint32_t endpoint_c;
     uint32_t wbuf_size;
     uint16_t wants_open_notification; // boolean
@@ -72,7 +72,7 @@ struct rs_app {
     uint8_t update_queue_size;
 };
 
-struct rs_endpoint {
+struct rs_conf_endpoint {
     char * hostname;
     char * url;
     char * * allowed_origins;

@@ -91,7 +91,7 @@ static bool ipv6_address_is_duplicate(
 static rs_ret add_ip_addrs_from_strs(
     char * const * ip_strs,
     size_t ip_str_c,
-    struct rs_port * port
+    struct rs_conf_port * port
 ) {
     for (char * const * ip_str = ip_strs; ip_str < ip_strs + ip_str_c;
         ip_str++) {
@@ -130,7 +130,7 @@ static rs_ret add_ip_addrs_from_strs(
 
 static rs_ret parse_uri(
     char const * uri,
-    struct rs_endpoint * endpoint
+    struct rs_conf_endpoint * endpoint
 ) {
     char const * str = uri;
     if (*str++ == 'w') {
@@ -196,8 +196,8 @@ static rs_ret parse_uri(
 }
 
 static rs_ret check_if_endpoint_is_duplicate(
-    struct rs_endpoint const * old,
-    struct rs_endpoint const * new,
+    struct rs_conf_endpoint const * old,
+    struct rs_conf_endpoint const * new,
     char const * uri
 ) {
     if (strcmp(old->url, new->url) || strcmp(old->hostname, new->hostname)) {
@@ -210,8 +210,8 @@ static rs_ret check_if_endpoint_is_duplicate(
 static rs_ret parse_endpoint(
     ckv_t * ckv,
     struct ckv_map * map,
-    struct rs_endpoint * endpoint,
-    struct rs_app * app,
+    struct rs_conf_endpoint * endpoint,
+    struct rs_conf_app * app,
     struct rs_conf * conf
 ) {
     RS_GUARD_CKV(ckv_get_uint16(ckv, (ckv_arg_uint16){
@@ -249,13 +249,13 @@ static rs_ret parse_endpoint(
         .dst = &uri
     }));
     RS_GUARD(parse_uri(uri, endpoint));
-    for (struct rs_app *a = conf->apps; a < app; a++) {
-        for (struct rs_endpoint *e = a->endpoints;
+    for (struct rs_conf_app *a = conf->apps; a < app; a++) {
+        for (struct rs_conf_endpoint *e = a->endpoints;
              e < a->endpoints + a->endpoint_c; e++) {
             RS_GUARD(check_if_endpoint_is_duplicate(e, endpoint, uri));
         }
     }
-    for (struct rs_endpoint *e = app->endpoints; e < endpoint; e++) {
+    for (struct rs_conf_endpoint *e = app->endpoints; e < endpoint; e++) {
         RS_GUARD(check_if_endpoint_is_duplicate(e, endpoint, uri));
     }
     if (strlen(endpoint->hostname) > conf->hostname_max_strlen) {
@@ -264,7 +264,7 @@ static rs_ret parse_endpoint(
     if (strlen(endpoint->url) > conf->url_max_strlen) {
         conf->url_max_strlen = strlen(endpoint->url);
     }
-    for (struct rs_port *port = conf->ports;
+    for (struct rs_conf_port *port = conf->ports;
          port < conf->ports + conf->port_c; port++) {
         if (port->port_number == endpoint->port_number) {
             if (port->is_encrypted != endpoint->is_encrypted) {
@@ -319,8 +319,8 @@ static rs_ret parse_endpoint(
 static rs_ret parse_port(
     ckv_t * ckv,
     struct ckv_map * map,
-    struct rs_port * port,
-    struct rs_port * ports
+    struct rs_conf_port * port,
+    struct rs_conf_port * ports
 ) {
     RS_GUARD_CKV(ckv_get_uint16(ckv, (ckv_arg_uint16){
         .map = map,
@@ -328,7 +328,7 @@ static rs_ret parse_port(
         .is_required = true,
         .dst = &port->port_number
     }));
-    for (struct rs_port * p = ports; p < port; p++) {
+    for (struct rs_conf_port * p = ports; p < port; p++) {
         if (p->port_number == port->port_number) {
             RS_LOG(LOG_ERR, "Duplicate port number: %u" , port->port_number);
             return RS_FATAL;
@@ -430,8 +430,8 @@ static rs_ret parse_port(
 static rs_ret parse_cert(
     ckv_t * ckv,
     struct ckv_map * map,
-    struct rs_cert * cert,
-    struct rs_cert * certs
+    struct rs_conf_cert * cert,
+    struct rs_conf_cert * certs
 ) {
     RS_GUARD_CKV(ckv_get_strs(ckv, (ckv_arg_strs){
         .map = map,
@@ -445,7 +445,7 @@ static rs_ret parse_cert(
     }));
     for (char * * hostname = cert->hostnames;
          hostname < cert->hostnames + cert->hostname_c; hostname++) {
-        for (struct rs_cert * c = certs; c < cert; c++) {
+        for (struct rs_conf_cert * c = certs; c < cert; c++) {
             for (char * * h = c->hostnames; h < c->hostnames + c->hostname_c;
                 h++) {
                 if (!strcmp(*h, *hostname)) {
@@ -482,7 +482,7 @@ static rs_ret parse_cert(
 static rs_ret parse_app(
     ckv_t * ckv,
     struct ckv_map * map,
-    struct rs_app * app,
+    struct rs_conf_app * app,
     struct rs_conf * conf
 ) {
     RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){

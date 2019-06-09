@@ -18,13 +18,13 @@
 #include <sys/resource.h> // setrlimit()
 #include <sys/stat.h> // umask()
 
-// As a security precaution, RingSocket requires to be run as user "ringsocket".
+// As a security precaution, RingSocket requires to be run as user "ringsock".
 // This function assumes said user has been previously created (e.g., as part
 // of the RingSocket installation procedures), and attempts to:
-// 1) Obtain the passwd struct associated with "ringsocket" through getpwnam().
+// 1) Obtain the passwd struct associated with "ringsock" through getpwnam().
 // 2) Verify that this user does not have access to a login shell.
 // 3) Return the passwd struct's UID and GID to the caller, so that this process
-//    can switch to running as "ringsocket", in case it's currently running as a
+//    can switch to running as "ringsock", in case it's currently running as a
 //    different user such as "root".
 static rs_ret get_ringsocket_credentials(
     uid_t * uid,
@@ -33,11 +33,11 @@ static rs_ret get_ringsocket_credentials(
     // getpwnam() is not thread-safe (unlike its more cumbersome cousin
     // getpwnam_r()), but RingSocket is still single-threaded at this point, so
     // that's OK.
-    struct passwd * pw = getpwnam("ringsocket");
+    struct passwd * pw = getpwnam("ringsock");
     if (!pw) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccesful getpwnam(\"ringsocket\"). "
+        RS_LOG_ERRNO(LOG_CRIT, "Unsuccesful getpwnam(\"ringsock\"). "
             "RingSocket requires the existence of a system user named "
-            "\"ringsocket\". Please make sure that such a user has been "
+            "\"ringsock\". Please make sure that such a user has been "
             "created.");
             return RS_FATAL;
     }
@@ -64,8 +64,8 @@ static rs_ret get_ringsocket_credentials(
             }
         }
     }
-    RS_LOG(LOG_CRIT, "The system user \"ringsocket\" should have no login "
-        "shell: its shell path must be either (/usr)/(s)bin/false or "
+    RS_LOG(LOG_CRIT, "The system user \"ringsock\" should have no login shell: "
+        "its shell path must be either (/usr)/(s)bin/false or "
         "(/usr)/(s)bin/nologin, but \"%s\" was found instead.", pw->pw_shell);
     return RS_FATAL;
 }
@@ -142,14 +142,14 @@ static rs_ret set_credentials_and_capabilities(
     RS_GUARD(get_ringsocket_credentials(&uid, &gid));
     RS_GUARD(remove_supplementary_groups(gid));
     // Until now RingSocket may have been running as a user more privileged than
-    // "ringsocket" such as root. Call setresgid() and setresuid() to switch to
-    // running as "ringsocket" from here on.
+    // "ringsock" such as root. Call setresgid() and setresuid() to switch to
+    // running as "ringsock" from here on.
     if (setresgid(gid, gid, gid) == -1) {
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful setresgid(%u, %u, %u)",
             gid, gid, gid);
         return RS_FATAL;
     }
-    // "Drop down" to user "ringsocket" without losing privileged capabilities
+    // "Drop down" to user "ringsock" without losing privileged capabilities
     // just yet, because we need to whitelist the contents of the caps array
     // below while losing the rest. However, if we do that before calling
     // setresuid(), we lose the privilege needed to call setresuid() itself.
@@ -251,14 +251,16 @@ static rs_ret start_app(
     char const * so_path,
     struct rs_app_args * app_args
 ) {
-    // Load the app DLL
-    dlerror();
+    // First check with RTLD_NOLOAD if the shared object has already been loaded
     void * so = dlopen(so_path, RTLD_NOLOAD | RTLD_NOW);
     if (!so) {
-        RS_LOG(LOG_ERR, "Unsuccessful dlopen(\"%s\", RTLD_NOLOAD | RTLD_NOW). "
-            "Failed to load the app as a dynamic library: %s", so_path,
-            dlerror());
-        return RS_FATAL;
+        // The shared object has not been loaded yet, so call dlopen() for real
+        so = dlopen(so_path, RTLD_NOW);
+        if (!so) {
+            RS_LOG(LOG_ERR, "Unsuccessful dlopen(\"%s\", RTLD_NOW). Failed to "
+                "load the app as a dynamic library: %s", so_path, dlerror());
+            return RS_FATAL;
+        }
     }
     int (*cb)(void *) = NULL;
     *(void * *) (&cb) = dlsym(so, "ringsocket_app");

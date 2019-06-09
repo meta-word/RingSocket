@@ -172,20 +172,27 @@ inline struct rs_ring_msg * rs_get_ring_msg(
     struct rs_thread_pair * pair,
     uint8_t const * reader // 1st msg ? ring->buf : prevref->msg + prevref->size
 ) {
+    RS_LOG(LOG_DEBUG); /* ########################### */
     uint8_t * writer = NULL;
     RS_ATOMIC_LOAD_RELAXED(&pair->writer, writer);
-    if (*reader == writer) {
+    RS_LOG(LOG_DEBUG, "reader: %p, writer: %p", reader, writer);
+    if (reader == writer) {
+        RS_LOG(LOG_DEBUG); /* ########################### */
         // The reader has already caught up with the writer (i.e., the writer
         // hasn't published any new message yet).
         return NULL;
     }
+    RS_LOG(LOG_DEBUG); /* ########################### */
     struct rs_ring_msg * ring_msg = (struct rs_ring_msg *) reader;
+    RS_LOG(LOG_DEBUG); /* ########################### */
     if (!ring_msg->size) {
+        RS_LOG(LOG_DEBUG); /* ########################### */
         // A size of 0 means the message was too large to be appended at the
         // current location. Instead, a pointer to its actual location should
         // be retrieved from the current location.
         ring_msg = *((struct rs_ring_msg * *) reader);
     }
+    RS_LOG(LOG_DEBUG); /* ########################### */
     return ring_msg;
 }
 

@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 # Copyright © 2019 William Budd
 
-NAME = ringsocket
+NAME_BIN = ringsocket
 NAME_PREFIX = rs_
+NAME_USER = ringsock
 SYSTEM_HEADERS = ringsocket*.h
 
 BIN_DIR = /usr/bin
@@ -29,10 +30,10 @@ OBJ_NAMES = $(SRC_NAMES:.c=.o)
 OBJ_PATHS = $(addprefix $(OBJ_DIR)/, $(OBJ_NAMES))
 
 .PHONY: optimized
-optimized: $(NAME)
+optimized: $(NAME_BIN)
 
-$(NAME): $(OBJ_PATHS)
-	$(CC) $(LFLAGS_OPTIM) $(LFLAGS_LIB) $(OBJ_PATHS) -o $(NAME)
+$(NAME_BIN): $(OBJ_PATHS)
+	$(CC) $(LFLAGS_OPTIM) $(LFLAGS_LIB) $(OBJ_PATHS) -o $(NAME_BIN)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	$(CC) $(CFLAGS) $(CFLAGS_OPTIM) -c $< -o $@
@@ -42,10 +43,10 @@ $(OBJ_DIR):
 
 .PHONY: clean
 clean:
-	rm -rf $(NAME) $(OBJ_DIR)
+	rm -rf $(NAME_BIN) $(OBJ_DIR)
 
 .PHONY: install
 install:
-	cp $(NAME) $(BIN_DIR)/ && \
+	cp $(NAME_BIN) $(BIN_DIR)/ && \
 		cp $(SRC_DIR)/$(SYSTEM_HEADERS) $(INCLUDE_DIR)/ && \
-		(useradd --system --shell $(BIN_DIR)/false ringsocket || true)
+		(useradd --system --shell $(BIN_DIR)/false $(NAME_USER) || true)

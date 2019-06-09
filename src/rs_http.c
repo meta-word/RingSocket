@@ -89,9 +89,9 @@ static rs_ret match_hostname(
     // states of url_was_parsed and peer->http.origin_was_parsed, any endpoint
     // other than the current endpoint that matches the hostname must also match
     // the url and/or origin respectively that the current endpoint references.
-    struct rs_app * app = conf->apps + peer->app_i;
+    struct rs_conf_app * app = conf->apps + peer->app_i;
     // The currently referenced endpoint
-    struct rs_endpoint * endpoint = app->endpoints + peer->endpoint_i;
+    struct rs_conf_endpoint * endpoint = app->endpoints + peer->endpoint_i;
     if (!strncmp(endpoint->hostname, hostname, hostname_strlen) &&
         endpoint->is_encrypted == peer->is_encrypted) {
         peer->http.hostname_was_parsed = true;
@@ -142,9 +142,9 @@ static rs_ret match_url(
     // currently referenced by the peer. If peer->http.hostname_was_parsed is
     // true, any endpoint other than the current endpoint that matches the url
     // must also match the hostname the current endpoint references.
-    struct rs_app * app = conf->apps + peer->app_i;
+    struct rs_conf_app * app = conf->apps + peer->app_i;
     // The currently referenced endpoint
-    struct rs_endpoint * endpoint = app->endpoints + peer->endpoint_i;
+    struct rs_conf_endpoint * endpoint = app->endpoints + peer->endpoint_i;
     if (!strncmp(endpoint->url, url, url_strlen) &&
         endpoint->is_encrypted == peer->is_encrypted) {
         return RS_OK;
@@ -181,9 +181,9 @@ static bool match_origin(
     // current endpoint that matches the origin must also match the url the
     // current endpoint references; and if peer->hostname_was_parsed is true,
     // then the hostname as well.
-    struct rs_app * app = conf->apps + peer->app_i;
+    struct rs_conf_app * app = conf->apps + peer->app_i;
     // The currently referenced endpoint
-    struct rs_endpoint * endpoint = app->endpoints + peer->endpoint_i;
+    struct rs_conf_endpoint * endpoint = app->endpoints + peer->endpoint_i;
     if (endpoint->is_encrypted == peer->is_encrypted) {
         for (size_t i = 0; i < endpoint->allowed_origin_c; i++) {
             if (!strncmp(endpoint->allowed_origins[i], origin, origin_strlen)) {
