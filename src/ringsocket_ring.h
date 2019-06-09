@@ -172,27 +172,20 @@ inline struct rs_ring_msg * rs_get_ring_msg(
     struct rs_thread_pair * pair,
     uint8_t const * reader // 1st msg ? ring->buf : prevref->msg + prevref->size
 ) {
-    RS_LOG(LOG_DEBUG); /* ########################### */
     uint8_t * writer = NULL;
     RS_ATOMIC_LOAD_RELAXED(&pair->writer, writer);
-    RS_LOG(LOG_DEBUG, "reader: %p, writer: %p", reader, writer);
     if (reader == writer) {
-        RS_LOG(LOG_DEBUG); /* ########################### */
         // The reader has already caught up with the writer (i.e., the writer
         // hasn't published any new message yet).
         return NULL;
     }
-    RS_LOG(LOG_DEBUG); /* ########################### */
     struct rs_ring_msg * ring_msg = (struct rs_ring_msg *) reader;
-    RS_LOG(LOG_DEBUG); /* ########################### */
     if (!ring_msg->size) {
-        RS_LOG(LOG_DEBUG); /* ########################### */
         // A size of 0 means the message was too large to be appended at the
         // current location. Instead, a pointer to its actual location should
         // be retrieved from the current location.
         ring_msg = *((struct rs_ring_msg * *) reader);
     }
-    RS_LOG(LOG_DEBUG); /* ########################### */
     return ring_msg;
 }
 
@@ -235,8 +228,10 @@ inline rs_ret rs_wait_for_worker(
     struct rs_thread_sleep_state * app_sleep_state,
     struct timespec const * timeout
 ) {
-    if (syscall(SYS_futex, app_sleep_state->is_asleep, FUTEX_WAIT_PRIVATE, true,
-        timeout, NULL, 0) != -1 || errno == EAGAIN) {
+    if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAIT_PRIVATE,
+        true, timeout, NULL, 0) != -1 ||
+        errno == EAGAIN ||
+        errno == ETIMEDOUT) {
         // May return immediately with errno == EAGAIN when a worker thread
         // already tried to wake this app thread up with rs_wake_up_app()
         // (which is possible because app_sleep_state->is_asleep was set to
@@ -244,7 +239,7 @@ inline rs_ret rs_wait_for_worker(
         // just try to do some more work.
         return RS_OK;
     }
-    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, %d, "
+    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, &%d, "
         "FUTEX_WAIT_PRIVATE, 1, %p, NULL, 0)", app_sleep_state->is_asleep,
         timeout);
     return RS_FATAL;

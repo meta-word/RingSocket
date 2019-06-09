@@ -109,13 +109,13 @@ rs_ret ringsocket_app( \
     \
     size_t idle_c = 0; \
     for (;;) { \
-        RS_LOG(LOG_DEBUG, "109"); /* ########################### */ \
         struct rs_thread_pair * inbound_pair = \
             &rs.io_pairs[rs.inbound_worker_i].inbound; \
         uint8_t const * reader = inbound_readers[rs.inbound_worker_i]; \
         struct rs_ring_msg *ring_msg = rs_get_ring_msg(inbound_pair, reader); \
         if (!ring_msg) { \
             if (++idle_c == 3 * RS_MAX(4, rs.conf->worker_c)) { \
+                RS_LOG(LOG_DEBUG, "Going to sleep..."); \
                 RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, NULL)); \
                 idle_c = 0; \
             } else if (idle_c == 2 * RS_MAX(4, rs.conf->worker_c)) { \
