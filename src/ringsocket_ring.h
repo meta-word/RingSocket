@@ -99,7 +99,7 @@ struct rs_ring {
 };
 
 struct rs_ring_msg {
-    size_t size;
+    uint32_t size;
     uint8_t const msg[];
 };
 
@@ -150,6 +150,8 @@ inline rs_ret rs_prepare_ring_write(
                 // Use RS_CACHE_ALIGNED_CALLOC() to eliminate possibility of
                 // false sharing with preceding or trailing heap bytes.
                 RS_CACHE_ALIGNED_CALLOC(ring->buf, ring->buf_size);
+                RS_LOG(LOG_NOTICE, "Allocated a new ring buffer with size %zu",
+                    ring->buf_size);
             }
             *((uint8_t * *) ring->writer) = ring->buf;
             ring->writer = ring->buf;
@@ -160,7 +162,7 @@ inline rs_ret rs_prepare_ring_write(
         // ring->buf yet, even though ring->buf is already completely full.
         RS_LOG(LOG_CRIT, "FATAL CONDITION: Reader thread and writer thread "
             "are further out of sync than the entire ring buffer size %zu "
-            "between them.");
+            "between them.", ring->buf_size);
             return RS_FATAL;
     }
     *((uint32_t *) ring->writer) = msg_size;
@@ -197,7 +199,7 @@ inline rs_ret rs_wake_up_app(
     RS_ATOMIC_LOAD_RELAXED(&app_sleep_state->is_asleep, app_is_asleep);
     if (app_is_asleep) {
         RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false);
-        if (syscall(SYS_futex, app_sleep_state->is_asleep, FUTEX_WAKE_PRIVATE,
+        if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAKE_PRIVATE,
             1, NULL, NULL, 0) == -1) {
             RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, %d, "
                 "FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0)",

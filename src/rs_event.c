@@ -132,7 +132,7 @@ static rs_ret loop_over_events(
 ) {
     // Thread ID used as prefix by RS_LOG -- see conf.c and ringsocket_util.h
     sprintf(_rs_thread_id_str, "Worker#%zu: ", worker_i + 1);
-    RS_GUARD(init_rings(conf, all_io_pairs, app_sleep_states,
+    RS_GUARD(init_worker_ring_state(conf, all_io_pairs, app_sleep_states,
         worker_sleep_state, worker_i));
     RS_GUARD(init_hash_state());
     RS_GUARD(create_tls_contexts(conf));

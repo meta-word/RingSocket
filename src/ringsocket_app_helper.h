@@ -355,7 +355,8 @@ inline rs_ret rs_init_outbound_rings(
     RS_CALLOC(rs->outbound_rings, rs->conf->worker_c);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         struct rs_ring * ring = rs->outbound_rings + i;
-        RS_CACHE_ALIGNED_CALLOC(ring->buf, rs->conf->outbound_ring_buf_size);
+        ring->buf_size = rs->conf->outbound_ring_buf_size;
+        RS_CACHE_ALIGNED_CALLOC(ring->buf, ring->buf_size);
         ring->writer = ring->buf;
         ring->alloc_multiplier = rs->conf->realloc_multiplier;
         RS_ATOMIC_STORE_RELAXED(&rs->io_pairs[i].outbound.writer,
@@ -363,6 +364,8 @@ inline rs_ret rs_init_outbound_rings(
         RS_ATOMIC_STORE_RELAXED(&rs->io_pairs[i].outbound.reader,
             (atomic_uintptr_t) ring->buf);
     }
+    // Inbound rings are initialized by worker threads
+    // through init_inbound_rings() of rs_ring.c
     return RS_OK;
 }
 

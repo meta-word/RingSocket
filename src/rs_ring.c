@@ -20,32 +20,67 @@ thread_local static size_t newest_wref_i = 0;
 thread_local static size_t oldest_wref_i = 0;
 thread_local static size_t * oldest_wref_i_by_app = NULL;
 
-rs_ret init_rings(
+static rs_ret set_worker_io_pairs(
+    struct rs_thread_io_pairs * * all_io_pairs,
+    size_t app_c,
+    size_t worker_i
+) {
+    RS_CALLOC(io_pairs, app_c);
+    // Each element of all_io_pairs is an array of IO pairs allocated by a
+    // separate app. For each such array, the element with an index
+    // corresponding to the worker index of this thread is the pointer to the IO
+    // pair between that app and this worker, so copy only the elements at that
+    // index to io_pairs.
+    for (size_t i = 0; i < app_c; i++) {
+        io_pairs[i] = all_io_pairs[i] + worker_i;
+    }
+    return RS_OK;
+}
+
+static rs_ret init_inbound_rings(
+    struct rs_conf const * conf
+) {
+    RS_CALLOC(inbound_rings, conf->app_c);
+    for (size_t i = 0; i < conf->app_c; i++) {
+        struct rs_ring * ring = inbound_rings + i;
+        ring->buf_size = conf->inbound_ring_buf_size;
+        RS_CACHE_ALIGNED_CALLOC(ring->buf, ring->buf_size);
+        ring->writer = ring->buf;
+        ring->alloc_multiplier = conf->realloc_multiplier;
+        RS_ATOMIC_STORE_RELAXED(&io_pairs[i]->inbound.writer,
+            (atomic_uintptr_t) ring->buf);
+        RS_ATOMIC_STORE_RELAXED(&io_pairs[i]->inbound.reader,
+            (atomic_uintptr_t) ring->buf);
+    }
+    // Outbound rings are initialized by app threads through
+    // rs_init_outbound_rings() of ringsocket_app_helper.h
+    return RS_OK;
+}
+
+static rs_ret get_outbound_readers(
+    size_t app_c
+) {
+    RS_CALLOC(outbound_readers, app_c);
+    // Obtain the outbound rings' reader pointers as atomically stored by the
+    // corresponding apps (and waited for in spawn_app_and_worker_threads()).
+    for (size_t i = 0; i < app_c; i++) {
+        RS_ATOMIC_LOAD_RELAXED_CASTED(&io_pairs[i]->outbound.reader,
+            outbound_readers[i], (uint8_t *));
+    }
+    return RS_OK;
+}
+
+rs_ret init_worker_ring_state(
     struct rs_conf const * conf,
     struct rs_thread_io_pairs * * all_io_pairs,
     struct rs_thread_sleep_state * _app_sleep_states,
     struct rs_thread_sleep_state * _worker_sleep_state,
     size_t worker_i
 ) {
-    // Initialize the inbound write side and outbound read side of this worker
-    // thread's ring buffers. Mirrors rs_init_rings() which initializes the
-    // outbound write side and inbound read side of the app thread calling it.
-    RS_CALLOC(io_pairs, conf->app_c);
-    RS_CALLOC(inbound_rings, conf->app_c);
-    RS_CALLOC(outbound_readers, conf->app_c);
-    for (size_t i = 0; i < conf->app_c; i++) {
-        io_pairs[i] = all_io_pairs[i] + worker_i;
-        struct rs_ring * in_ring = inbound_rings + i;
-        RS_CACHE_ALIGNED_CALLOC(in_ring->buf, conf->inbound_ring_buf_size);
-        in_ring->writer = in_ring->buf;
-        in_ring->alloc_multiplier = conf->realloc_multiplier;
-        RS_ATOMIC_STORE_RELAXED(&io_pairs[i]->inbound.writer,
-            (atomic_uintptr_t) in_ring->buf);
-        RS_ATOMIC_STORE_RELAXED(&io_pairs[i]->inbound.reader,
-            (atomic_uintptr_t) in_ring->buf);
-        RS_ATOMIC_LOAD_RELAXED_CASTED(&io_pairs[i]->outbound.reader,
-            outbound_readers[i], (uint8_t *));
-    }
+    RS_GUARD(set_worker_io_pairs(all_io_pairs, conf->app_c, worker_i));
+    RS_GUARD(init_inbound_rings(conf));
+    RS_GUARD(get_outbound_readers(conf->app_c));
+
     ring_update_queue.size = conf->update_queue_size;
     RS_CALLOC(ring_update_queue.queue, ring_update_queue.size);
     worker_sleep_state = _worker_sleep_state;
@@ -105,7 +140,6 @@ static rs_ret send_msg_to_app(
         ring->writer += msg_size;
     }
     enqueue_ring_update(ring->writer, peer->app_i, true);
-    RS_GUARD(rs_wake_up_app(app_sleep_states + peer->app_i));
     return RS_OK;
 }
 

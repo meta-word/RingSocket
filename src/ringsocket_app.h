@@ -96,7 +96,7 @@ rs_ret ringsocket_app( \
     struct rs_thread_sleep_state * app_sleep_state = \
         app_args->app_sleep_state; \
     RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, true); \
-    uint8_t * * inbound_readers = NULL; \
+    uint8_t const * * inbound_readers = NULL; \
     RS_GUARD_APP( \
         rs_get_readers_upon_inbound_rings_init(&rs, &inbound_readers)); \
     RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false); \
@@ -108,7 +108,7 @@ rs_ret ringsocket_app( \
     RS_LOG(LOG_DEBUG, "Entering app main loop..."); \
     \
     size_t idle_c = 0; \
-    for (;;) { \
+    for (;; rs.inbound_worker_i++, rs.inbound_worker_i %= rs.conf->worker_c) { \
         struct rs_thread_pair * inbound_pair = \
             &rs.io_pairs[rs.inbound_worker_i].inbound; \
         uint8_t const * reader = inbound_readers[rs.inbound_worker_i]; \
@@ -117,6 +117,7 @@ rs_ret ringsocket_app( \
             if (++idle_c == 3 * RS_MAX(4, rs.conf->worker_c)) { \
                 RS_LOG(LOG_DEBUG, "Going to sleep..."); \
                 RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, NULL)); \
+                RS_LOG(LOG_DEBUG, "Awoken by a worker thread!"); \
                 idle_c = 0; \
             } else if (idle_c == 2 * RS_MAX(4, rs.conf->worker_c)) { \
                 RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, true); \
@@ -134,34 +135,33 @@ rs_ret ringsocket_app( \
             idle_c = 0; \
         } \
         do { \
+            reader = ring_msg->msg + ring_msg->size; \
             struct rs_inbound_msg_header *header = \
                 ((struct rs_inbound_msg_header *) ring_msg->msg); \
-            reader = ring_msg->msg + sizeof(struct rs_inbound_msg_header); \
-            uint8_t const * const reader_over = \
-                ring_msg->msg + ring_msg->size; \
             rs.inbound_peer_i = header->peer_i; \
             rs.inbound_socket_fd = header->socket_fd; \
             rs.inbound_endpoint_id = header->endpoint_id; \
+            uint8_t const * payload = ring_msg->msg + \
+                sizeof(struct rs_inbound_msg_header); \
             switch (header->kind) { \
             case RS_INBOUND_OPEN: \
                 _##open_macro; /* Should expand through _RS_OPEN */ \
                 break; \
             case RS_INBOUND_READ: \
-                _##read_macro; /* Should expand through _RS_READ */ \
+                _##read_macro; /* Should expand through _RS_READ_... */ \
                 break; \
             case RS_INBOUND_CLOSE: default: \
                 _##close_macro; /* Should expand through _RS_CLOSE */ \
             } \
             next_inbound_message:; \
         } while ((ring_msg = rs_get_ring_msg(inbound_pair, reader))); \
+        inbound_readers[rs.inbound_worker_i] = reader; \
         \
         uint64_t old_time_ms = time_ms; \
         RS_GUARD_APP(rs_get_time_in_milliseconds(&time_ms)); \
         if (time_ms != old_time_ms) { \
             _##timer_macro; /* Should expand through _RS_TIMER */ \
         } \
-        rs.inbound_worker_i++; \
-        rs.inbound_worker_i %= rs.conf->worker_c; \
     } \
 } \
 \
@@ -249,13 +249,22 @@ extern inline rs_ret rs_guard_peer_cb( \
 #define RS_NONE(_) RS_OK
 
 #define _RS_INIT(init_cb) RS_GUARD_APP(rs_guard_cb(init_cb()))
-#define _RS_OPEN(open_cb) RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs)))
-#define _RS_CLOSE(close_cb) RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs)))
+
 #define _RS_TIMER(timer_cb) RS_GUARD_APP(rs_guard_cb(timer_cb()))
+
+#define _RS_OPEN(open_cb) do { \
+    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs))); \
+} while (0)
+
+#define _RS_CLOSE(close_cb) do { \
+    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
+} while (0)
 
 #define _RS_READ_SWITCH(...) do { \
     RS_READ_CHECK(1); \
-    switch (*reader++) { \
+    switch (*payload++) { \
     RS_PREFIX_EACH(_, __VA_ARGS__); \
     default: \
         RS_READ_ABORT(RS_APP_WS_CLOSE_UNKNOWN_CASE); \
@@ -265,7 +274,7 @@ extern inline rs_ret rs_guard_peer_cb( \
 // todo: implement and test nested READ_SWITCH:
 /*#define _RS_READ_SWITCH2(...) do { \
     RS_READ_CHECK(1); \
-    switch (*reader++) { \
+    switch (*payload++) { \
     RS_PREFIX_EACH(_, __VA_ARGS__); \
     default: \
         TR_READ_ABORT(RS_APP_WS_CLOSE_UNKNOWN_CASE); \
@@ -285,17 +294,15 @@ break
 #define _RS_READ_BIN(...) do { \
     if (header->is_utf8) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_DATA_TYPE); \
-    } else { \
-        RS_READ_PROCEED(__VA_ARGS__); \
     } \
+    RS_READ_PROCEED(__VA_ARGS__); \
 } while (0)
 
 #define _RS_READ_UTF8(...) do { \
-    if (header->is_utf8) { \
-        RS_READ_PROCEED(__VA_ARGS__); \
-    } else { \
+    if (!header->is_utf8) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_DATA_TYPE); \
     } \
+    RS_READ_PROCEED(__VA_ARGS__); \
 } while (0)
 
 #define RS_READ_PROCEED(...) RS_MACRIFY_ARGC(RS_256_16( \
@@ -303,77 +310,77 @@ break
     RS_A07, RS_A08, RS_A09, RS_A10, RS_A11, RS_A12, RS_A13, \
     RS_A14, RS_A15, __VA_ARGS__), __VA_ARGS__)
 
-#define RS_ENQUEUE_APP_READ_UPDATE \
+#define RS_ENQUEUE_APP_READ_UPDATE do { \
     RS_GUARD_APP(rs_enqueue_ring_update(rs.ring_update_queue, rs.io_pairs, \
         rs.worker_sleep_states, rs.worker_eventfds, reader, \
-        rs.inbound_worker_i, false)) \
+        rs.inbound_worker_i, false)); \
+} while (0)
 
 #define RS_READ_ABORT(ws_close_code) do { \
-    reader = reader_over; \
     RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_close_peer(&rs, (ws_close_code))); \
     goto next_inbound_message; \
 } while (0)
 
 #define RS_A00(cb) do { \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs))); \
 } while (0)
 #define RS_A01(cb, a01) do { \
     _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v1 __##a01))); \
 } while (0)
 #define RS_A02(cb, a02, a01) do { \
     _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v2, v1 __##a01))); \
 } while (0)
 #define RS_A03(cb, a03, a02, a01) do { \
     _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v3, v2, v1 __##a01))); \
 } while (0)
 #define RS_A04(cb, a04, a03, a02, a01) do { \
     _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v4, v3, v2, v1 __##a01))); \
 } while (0)
 #define RS_A05(cb, a05, a04, a03, a02, a01) do { \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
 #define RS_A06(cb, a06, a05, a04, a03, a02, a01) do { \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
 #define RS_A07(cb, a07, a06, a05, a04, a03, a02, a01) do { \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v7, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
 #define RS_A08(cb, a08, a07, a06, a05, a04, a03, a02, a01) do { \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v8, v7, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
 #define RS_A09(cb, a09, a08, a07, a06, a05, a04, a03, a02, a01) do { \
     _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; \
     _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v9, v8, v7, v6, v5, v4, v3, v2, \
         v1 __##a01))); \
 } while (0)
 #define RS_A10(cb, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) do { \
     _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; \
     _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v10, v9, v8, v7, v6, v5, v4, \
         v3, v2, v1 __##a01))); \
 } while (0)
@@ -381,7 +388,7 @@ break
     a01) do { \
     _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; \
     _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v11, v10, v9, v8, v7, v6, v5, \
         v4, v3, v2, v1 __##a01))); \
 } while (0)
@@ -389,7 +396,7 @@ break
     a01) do { \
     _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v12, v11, v10, v9, v8, v7, v6, \
         v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
@@ -397,7 +404,7 @@ break
     a02, a01) do { \
     _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v13, v12, v11, v10, v9, v8, v7, \
         v6, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
@@ -405,7 +412,7 @@ break
     a03, a02, a01) do { \
     _14##a14, _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v14, v13, v12, v11, v10, v9, \
         v8, v7, v6, v5, v4, v3 v2, v1 __##a01))); \
 } while (0)
@@ -414,7 +421,7 @@ break
     _15##a15, _14##a14, _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \
-    RS_ENQUEUE_APP_READ_UPDATE; \
+    RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v15, v14, v13, v12, v11, v10, \
         v9, v8, v7, v6, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
@@ -458,7 +465,13 @@ break
     RS_NTOH_STA, RS_NTOH_VLA, __VA_ARGS__), name_i, __VA_ARGS__)
 
 #define RS_READ_CHECK(size) do { \
-    if (reader + (size) > reader_over) { \
+    if (payload + (size) > reader) { \
+        RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_SIZE); \
+    } \
+} while (0)
+
+#define RS_READ_CHECK_EXACT do { \
+    if (payload != reader) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_SIZE); \
     } \
 } while (0)
@@ -468,7 +481,7 @@ break
 // "do while (0)"
 
 #define RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c) \
-    size_t elem_c = reader_over - reader; \
+    size_t elem_c = reader - payload; \
     if (elem_c % sizeof(type)) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_SIZE); \
     } \
@@ -480,13 +493,13 @@ break
 
 #define RS_NET_SINGLE(name_i, type) \
     RS_READ_CHECK(sizeof(type)); \
-    type v##name_i = *((type *) reader); \
-    reader += sizeof(type)
+    type v##name_i = *((type *) payload); \
+    payload += sizeof(type)
 
 #define RS_NET_ARR(var, elem_c, type) \
 do { \
-    memcpy(var, reader, (elem_c) * sizeof(type)); \
-    reader += (elem_c) * sizeof(type); \
+    memcpy(var, payload, (elem_c) * sizeof(type)); \
+    payload += (elem_c) * sizeof(type); \
 } while (0)
 
 #define RS_NET_STA(name_i, type, elem_c) \
@@ -511,12 +524,12 @@ do { \
 #define RS_NTOH_ASSIGN(var, type) \
 do { \
     switch (sizeof(type)) { \
-    case 1: default: (var) = *((type *) reader); break; \
-    case 2: (var) = *((type *) RS_R_NTOH16(reader)); break; \
-    case 4: (var) = *((type *) RS_R_NTOH32(reader)); break; \
-    case 8: (var) = *((type *) RS_R_NTOH64(reader)); break; \
+    case 1: default: (var) = *((type *) payload); break; \
+    case 2: (var) = *((type *) RS_R_NTOH16(payload)); break; \
+    case 4: (var) = *((type *) RS_R_NTOH32(payload)); break; \
+    case 8: (var) = *((type *) RS_R_NTOH64(payload)); break; \
     } \
-    reader += sizeof(type); \
+    payload += sizeof(type); \
 } while (0)
 
 #define RS_NTOH_SINGLE(name_i, type) \

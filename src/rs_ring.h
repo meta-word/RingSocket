@@ -5,7 +5,7 @@
 
 #include <ringsocket.h>
 
-rs_ret init_rings(
+rs_ret init_worker_ring_state(
     struct rs_conf const * conf,
     struct rs_thread_io_pairs * * all_io_pairs,
     struct rs_thread_sleep_state * app_sleep_states,
