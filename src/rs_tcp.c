@@ -91,12 +91,12 @@ static rs_ret read_bidirectional_tcp_shutdown(
     // RS_LAYER_TCP, any bytes read() at this stage are not considered usable,
     // so they are ignored by repeatedly reading them into the start of rbuf,
     // to be readily overwritten during any next read().
-    ssize_t rsize = 0;
-    do {
-        rsize = read(peer->socket_fd, rbuf, rbuf_size);
-        RS_LOG(LOG_DEBUG, "Read(%d, ...) %ld bytes of ignored TCP data from "
+    ssize_t rsize = read(peer->socket_fd, rbuf, rbuf_size);
+    while (rsize > 0) {
+        RS_LOG(LOG_INFO, "Read(%d, ...) %ld bytes of ignored TCP data from "
             "%s", peer->socket_fd, rsize, get_peer_str(peer));
-    } while (rsize > 0);
+        rsize = read(peer->socket_fd, rbuf, rbuf_size);
+    }
     if (!rsize) {
         peer->mortality = RS_MORTALITY_DEAD;
         return RS_CLOSE_PEER;

@@ -80,7 +80,6 @@ static rs_ret read_ws(
         rs_ret ret = peer->is_encrypted ?
             read_tls(peer, rbuf + old_rsize, rbuf_size - old_rsize, &new_rsize):
             read_tcp(peer, rbuf + old_rsize, rbuf_size - old_rsize, &new_rsize);
-        RS_LOG(LOG_DEBUG, "Read() %zu bytes", new_rsize);
         *unparsed_rsize += new_rsize;
         old_rsize += new_rsize;
         switch (ret) {
@@ -190,7 +189,6 @@ static rs_ret parse_ws_msg(
 } while (0)
 
     for (;;) { // Each loop iteration corresponds to parsing of one whole frame.
-        RS_LOG(LOG_DEBUG, "NEW FRAME: %s", get_peer_str(peer));
         // The start of the current frame
         uint8_t * frame = rbuf + *msg_size;
         enum ws_opc opcode = *frame;
