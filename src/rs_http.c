@@ -123,8 +123,8 @@ static rs_ret match_hostname(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            //RS_LOG_DEBUF("Rejected unrecognized hostname \"%s\"",
-            //    hostname, hostname_strlen);
+            RS_LOG_CHBUF(LOG_DEBUG, "Rejected unrecognized hostname",
+                hostname, hostname_strlen);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -163,6 +163,8 @@ static rs_ret match_url(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
+            RS_LOG_CHBUF(LOG_DEBUG, "Rejected unrecognized url",
+                url, url_strlen);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -214,6 +216,8 @@ static bool match_origin(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
+            RS_LOG_CHBUF(LOG_DEBUG, "Rejected unrecognized origin",
+                origin, origin_strlen);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -388,6 +392,8 @@ static rs_ret parse_http_upgrade_request(
         }
         RS_H_GETCH(16);
         if (ch > unsaved_str + conf->url_max_strlen) {
+            RS_LOG_CHBUF(LOG_DEBUG, "Rejected url due to max length",
+                unsaved_str, ch - unsaved_str);
             RS_H_ERR(RS_HTTP_NOT_FOUND);
         }
     }
@@ -464,6 +470,8 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + conf->hostname_max_strlen) {
+                RS_LOG_CHBUF(LOG_DEBUG, "Rejected hostname due to max length",
+                    unsaved_str, ch - unsaved_str);
                 RS_H_ERR(RS_HTTP_BAD_REQUEST);
             }
             RS_H_GETCH(53);
@@ -486,6 +494,8 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + conf->allowed_origin_max_strlen) {
+                RS_LOG_CHBUF(LOG_DEBUG, "Rejected origin due to max length",
+                    unsaved_str, ch - unsaved_str);
                 RS_H_ERR(RS_HTTP_FORBIDDEN);
             }
             RS_H_GETCH(62);
@@ -646,7 +656,6 @@ rs_ret handle_http_io(
                 memset(peer->layer_specific_data, 0,
                     sizeof(peer->layer_specific_data));
                 // todo: flush read buffer
-                // todo: signal new peer availability to app_thread
                 peer->continuation = RS_CONT_NONE;
                 peer->layer = RS_LAYER_WEBSOCKET;
                 return RS_OK;

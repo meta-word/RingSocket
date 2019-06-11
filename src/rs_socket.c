@@ -87,6 +87,8 @@ static rs_ret bind_ipv4(
             "SOCK_NONBLOCK, 0)");
         return RS_FATAL;
     }
+    RS_LOG(LOG_DEBUG, "Bind()ing an IPv4 address on port %" PRIu16
+        " to a socket_fd: fd=%d", port->port_number, *fd);
     return bind_socket(port, *fd, worker_c,
         (struct sockaddr *) &(struct sockaddr_in){
             .sin_family = AF_INET,
@@ -114,6 +116,8 @@ static rs_ret bind_ipv6(
             "IPV6_V6ONLY, (int []){%d}, sizeof(int))", *fd, ipv6_is_v6only);
         return RS_FATAL;
     }
+    RS_LOG(LOG_DEBUG, "Bind()ing an IPv6 address on port %" PRIu16
+        " to a socket_fd: fd=%d", port->port_number, *fd);
     return bind_socket(port, *fd, worker_c,
         (struct sockaddr *) &(struct sockaddr_in6){
             .sin6_family = AF_INET6,
@@ -139,13 +143,14 @@ rs_ret bind_to_ports(
         }
         RS_CALLOC(port->listen_fds, conf->worker_c);
         for (size_t i = 0; i < conf->worker_c; i++) {
+            RS_LOG(LOG_DEBUG, "Obtaining listen_fds for worker#%d...", i + 1);
             RS_CALLOC(port->listen_fds[i], port->listen_fd_c);
             int * fd = port->listen_fds[i];
             // See bind_socket() for the significance of a worker_c of 0
             size_t worker_c = i ? 0 : conf->worker_c;
             // It would arguably be cleaner to use INADDR_ANY and
             // IN6ADDR_ANY_INIT instead of just initializing the in(6)_addr
-            // structs to zero, but    they're de facto equivalent.
+            // structs to zero, but they're de facto equivalent.
             switch (port->listen_ip_kind) {
             case RS_LISTEN_IP_ANY:
                 RS_GUARD(bind_ipv4(port, fd++, worker_c,
@@ -207,11 +212,21 @@ rs_ret listen_to_sockets(
         p++) {
         for (size_t i = 0; i < p->listen_fd_c; i++) {
             int listen_fd = p->listen_fds[worker_i][i];
+            // todo: for some bizarre reason listen() _sometimes_ returns
+            // EADDRINUSE even though each listen_fd (as obtained through bind()
+            // after setting both SO_REUSEADDR and SO_REUSEPORT) is never used
+            // anywhere but here, and is unique (i.e., mutually exclusive)
+            // between threads.
+            //
+            // A possible cause could be an unclean kernel state caused after a
+            // previous execution of RingSocket segfaulted. Currently
+            // investigating...
             if (listen(listen_fd, SOMAXCONN) == -1) {
                 RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful listen(%d, SOMAXCONN)",
                     listen_fd);
                 return RS_FATAL;
             }
+            RS_LOG(LOG_DEBUG, "Successful listen(%d, SOMAXCONN)", listen_fd);
             struct epoll_event event = {
                 .data = {.u64 = *((uint64_t *) (uint32_t []){
                     p->is_encrypted ? RS_EVENT_ENCRYPTED_LISTENFD :
@@ -281,7 +296,8 @@ rs_ret accept_sockets(
             }
             continue;
         }
-        RS_LOG(LOG_DEBUG, "Accept()ed new peer %d", socket_fd);
+        RS_LOG(LOG_DEBUG, "Assigning accept()ed new peer with fd=%d to peer_i "
+            "%zu", socket_fd, peer_i);
         peers[peer_i].socket_fd = socket_fd;
         peers[peer_i].is_encrypted = is_encrypted;
         struct epoll_event event = {

@@ -49,21 +49,43 @@ extern int _rs_log_mask;
 // Its value is an empty "" during the early single-threaded startup phase.
 extern thread_local char _rs_thread_id_str[];
 #define RS_APP_NAME_MAX_STRLEN 32
-#define RS_THREAD_ID_MAX_STRLEN (RS_APP_NAME_MAX_STRLEN + \
-    RS_CONST_STRLEN(": "))
+#define RS_THREAD_ID_MAX_STRLEN \
+    (RS_APP_NAME_MAX_STRLEN + RS_CONST_STRLEN(": "))
 
-#define _RS_LOG(...) RS_MACRIFY_LOG(RS_256_3(_RS_LOG_1, _RS_LOG_2, \
-    _RS_LOG_MORE, __VA_ARGS__), __VA_ARGS__)
+#define _RS_LOG(...) \
+    RS_MACRIFY_LOG( \
+        RS_256_3( \
+            _RS_LOG_1, \
+            _RS_LOG_2, \
+            _RS_LOG_MORE, \
+            __VA_ARGS__ \
+        ), \
+        __VA_ARGS__ \
+    )
 
-#define _RS_LOG_ERRNO(...) RS_MACRIFY_LOG(RS_256_3(_RS_LOG_ERRNO_1, \
-    _RS_LOG_ERRNO_2, _RS_LOG_ERRNO_MORE, __VA_ARGS__), __VA_ARGS__)
+#define _RS_LOG_ERRNO(...) \
+    RS_MACRIFY_LOG( \
+        RS_256_3( \
+            _RS_LOG_ERRNO_1, \
+            _RS_LOG_ERRNO_2, \
+            _RS_LOG_ERRNO_MORE, \
+            __VA_ARGS__ \
+        ), \
+        __VA_ARGS__ \
+    )
 
-#define _RS_LOG_CHBUF(lvl, fmt, chbuf, size, ...) do { \
-    char str[(size) + 1]; \
-    memcpy(str, (chbuf), (size)); \
-    str[(size)] = '\0'; \
-    _RS_LOG_MORE((lvl), fmt ": %s", __VA_ARGS__, (str)); \
-} while (0)
+#define _RS_LOG_CHBUF(lvl, fmt, chbuf, ...) \
+    RS_MACRIFY_LOG( \
+        RS_256_2( \
+            _RS_LOG_CHBUF_1, \
+            _RS_LOG_CHBUF_MORE, \
+            __VA_ARGS__ \
+        ), \
+        lvl, \
+        fmt, \
+        chbuf, \
+        __VA_ARGS__ \
+    )
 
 #define _RS_SYSLOG(lvl, ...) do { \
     if ((lvl) & _rs_log_mask) { \
@@ -72,20 +94,36 @@ extern thread_local char _rs_thread_id_str[];
     } \
 } while (0)
 
-#define _RS_LOG_1(lvl) _RS_SYSLOG( \
-    (lvl), , _rs_thread_id_str, __func__)
-#define _RS_LOG_2(lvl, fmt) _RS_SYSLOG( \
-    (lvl), ": " fmt, _rs_thread_id_str, __func__)
-#define _RS_LOG_MORE(lvl, fmt, ...) _RS_SYSLOG( \
-    (lvl), ": " fmt, _rs_thread_id_str, __func__, __VA_ARGS__)
+#define _RS_LOG_1(lvl) \
+    _RS_SYSLOG((lvl), , _rs_thread_id_str, __func__)
+#define _RS_LOG_2(lvl, fmt) \
+    _RS_SYSLOG((lvl), ": " fmt, _rs_thread_id_str, __func__)
+#define _RS_LOG_MORE(lvl, fmt, ...) \
+    _RS_SYSLOG((lvl), ": " fmt, _rs_thread_id_str, __func__, __VA_ARGS__)
 
-#define _RS_LOG_ERRNO_1(lvl) _RS_SYSLOG( \
-    (lvl), ": %s", _rs_thread_id_str, __func__, strerror(errno))
-#define _RS_LOG_ERRNO_2(lvl, fmt) _RS_SYSLOG( \
-    (lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, strerror(errno))
-#define _RS_LOG_ERRNO_MORE(lvl, fmt, ...) _RS_SYSLOG( \
-    (lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, __VA_ARGS__, \
-    strerror(errno))
+#define _RS_LOG_ERRNO_1(lvl) \
+    _RS_SYSLOG((lvl), ": %s", _rs_thread_id_str, __func__, strerror(errno))
+#define _RS_LOG_ERRNO_2(lvl, fmt) \
+    _RS_SYSLOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
+        strerror(errno))
+#define _RS_LOG_ERRNO_MORE(lvl, fmt, ...) \
+    _RS_SYSLOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
+        __VA_ARGS__, strerror(errno))
+
+#define _RS_LOG_CHBUF_VLA(chbuf, size) \
+    char str[(size) + 1]; \
+    memcpy(str, chbuf, size); \
+    str[size] = '\0' \
+
+#define _RS_LOG_CHBUF_1(lvl, fmt, chbuf, size) do { \
+    _RS_LOG_CHBUF_VLA(chbuf, size); \
+    _RS_LOG_MORE((lvl), fmt ": %s", (str)); \
+} while (0)
+
+#define _RS_LOG_CHBUF_MORE(lvl, fmt, chbuf, size, ...) do { \
+    _RS_LOG_CHBUF_VLA(chbuf, size); \
+    _RS_LOG_MORE((lvl), fmt ": %s", __VA_ARGS__, (str)); \
+} while (0)
 
 // #################################
 // # Heap allocation helper macros #

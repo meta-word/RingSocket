@@ -59,7 +59,7 @@ union rs_peer {
         uint16_t shutdown_deadline; // 0 means never (i.e., "not yet")
         uint16_t layer_specific_data[7];
     };
-    union {
+    struct {
         // 1st-3rd 64-bit blocks
         uint64_t:64; uint64_t:64; uint64_t:64;
         // 4th 64-bit block

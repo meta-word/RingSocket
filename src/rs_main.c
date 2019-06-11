@@ -320,6 +320,7 @@ static rs_ret spawn_app_and_worker_threads(
         if (*e == -1) {
             RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful eventfd(0, EFD_NONBLOCK)");
         }
+        RS_LOG(LOG_DEBUG, "Created an event_fd: fd=%d", *e);
     }
     
     struct rs_app_args app_args[conf->app_c];

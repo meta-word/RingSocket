@@ -80,6 +80,7 @@ rs_ret handle_peer_events(
         case RS_LAYER_HTTP:
             RS_GUARD(handle_http_io(conf, peer, (char *) rbuf));
             if (peer->layer == RS_LAYER_WEBSOCKET) {
+                RS_LOG(LOG_DEBUG, "Sending peer_i %zu open to app...", peer_i);
                 RS_GUARD(send_open_to_app(conf, peer, peer_i));
                 // The WebSocket Upgrade response was only just sent, so it is
                 // not possible to have already received a WebSocket message:
@@ -149,6 +150,7 @@ static rs_ret loop_over_events(
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful epoll_create1(0)");
         return RS_FATAL;
     }
+    RS_LOG(LOG_DEBUG, "Created an epoll_fd: fd=%d", epoll_fd);
     RS_GUARD(listen_to_sockets(conf, worker_i, epoll_fd));
     {
         struct epoll_event event = {
