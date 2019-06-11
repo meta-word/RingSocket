@@ -256,8 +256,18 @@ static rs_ret loop_over_events(
 int work(
     struct rs_worker_args *worker_args
 ) {
-    return loop_over_events(worker_args->conf, worker_args->all_io_pairs,
-        worker_args->app_sleep_states, worker_args->worker_sleep_state,
-        worker_args->worker_eventfd, worker_args->worker_i) == RS_OK ?
-        thrd_success : thrd_error;
+    if (loop_over_events(
+        worker_args->conf,
+        worker_args->all_io_pairs,
+        worker_args->app_sleep_states,
+        worker_args->worker_sleep_state,
+        worker_args->worker_eventfd,
+        worker_args->worker_i
+        ) == RS_OK) {
+        // todo: catch signal(s) such that this becomes actually possible?
+        return thrd_success;
+    }
+    // exit() instead of return thrd_error to make sure any other threads go
+    // down too.
+    exit(EXIT_FAILURE);
 }
