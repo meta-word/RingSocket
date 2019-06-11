@@ -203,12 +203,12 @@ static rs_ret loop_over_events(
             }
         }
         for (struct epoll_event * e = epoll_buf; e < epoll_buf + event_c; e++) {
-            uint32_t e_data = 0;
             uint32_t e_kind = 0;
+            uint32_t e_data = 0;
             {
                 uint32_t * p = (uint32_t *) &e->data.u64;
-                e_data = *p++;
-                e_kind = *p;
+                e_kind = *p++;
+                e_data = *p;
             }
             if (e_kind == RS_EVENT_PEER) {
                 RS_GUARD(handle_peer_events(conf, rbuf, peers + e_data, e_data,

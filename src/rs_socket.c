@@ -281,6 +281,7 @@ rs_ret accept_sockets(
             }
             continue;
         }
+        RS_LOG(LOG_DEBUG, "Accept()ed new peer %d", socket_fd);
         peers[peer_i].socket_fd = socket_fd;
         peers[peer_i].is_encrypted = is_encrypted;
         struct epoll_event event = {
