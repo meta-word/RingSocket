@@ -160,12 +160,15 @@ inline void rs_send(
 ) {
     size_t payload_size = rs->wbuf_i + size;
     if (payload_size > rs->conf->max_ws_msg_size) {
-        return RS_FATAL;
+        RS_LOG(LOG_ERR, "Payload of size %zu exceeds the configured "
+            "max_ws_msg_size %zu. Shutting down to avert further trouble...",
+            payload_size, rs->conf->max_ws_msg_size);
+        RS_APP_FATAL;
     }
     size_t msg_size =
         1 + // uint8_t outbound_kind
         4 * (recipient_c > 1) + // if (recipient_c > 1): uint32_t recipient_c
-        4 * recipient_c + // uint32_t array of recipients
+        4 * recipient_c + // uint32_t array of recipients (peer_i elements)
         2; // uint8_t WebSocket opcode + uint8_t WebSocket size indicator byte
     if (payload_size > UINT16_MAX) {
         msg_size += 8; // uint64_t WebSocket payload size (after '127' byte)
