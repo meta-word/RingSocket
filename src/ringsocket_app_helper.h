@@ -403,7 +403,7 @@ inline rs_ret rs_init_app_cb_args(
 
 inline rs_ret rs_get_readers_upon_inbound_rings_init(
     struct rs_app_cb_args const * rs,
-    uint8_t * * * inbound_readers
+    uint8_t const * * * inbound_readers
 ) {
     RS_CALLOC(*inbound_readers, rs->conf->worker_c);
     // Only run once during app initialization, so just do a bit of sleep

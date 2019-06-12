@@ -219,7 +219,7 @@ extern inline rs_ret rs_init_app_cb_args( \
 \
 extern inline rs_ret rs_get_readers_upon_inbound_rings_init( \
     struct rs_app_cb_args const * rs, \
-    uint8_t * * * inbound_readers \
+    uint8_t const * * * inbound_readers \
 ); \
 \
 extern inline rs_ret rs_get_time_in_milliseconds( \
