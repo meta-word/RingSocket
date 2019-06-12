@@ -162,15 +162,16 @@ inline void rs_send(
     if (payload_size > rs->conf->max_ws_msg_size) {
         return RS_FATAL;
     }
-    size_t msg_size = payload_size;
-    if (msg_size > UINT16_MAX) {
-        msg_size += 10;
-    } else if (msg_size > 125) {
-        msg_size += 4;
-    } else {
-        msg_size += 2;
+    size_t msg_size =
+        1 + // uint8_t outbound_kind
+        4 * (recipient_c > 1) + // if (recipient_c > 1): uint32_t recipient_c
+        4 * recipient_c + // uint32_t array of recipients
+        2; // uint8_t WebSocket opcode + uint8_t WebSocket size indicator byte
+    if (payload_size > UINT16_MAX) {
+        msg_size += 8; // uint64_t WebSocket payload size (after '127' byte)
+    } else if (payload_size > 125) {
+        msg_size += 2; // uint16_t payload size (after '126' byte)
     }
-    msg_size++;
     struct rs_ring * ring = rs->outbound_rings + worker_i;
     RS_GUARD_APP(rs_prepare_ring_write(&rs->io_pairs[worker_i].outbound,
         ring, msg_size));
