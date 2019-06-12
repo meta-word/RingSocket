@@ -241,6 +241,7 @@ static rs_ret loop_over_events(
                     RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful read(eventfd, ...)");
                     return RS_FATAL;
                 }
+                RS_LOG(LOG_DEBUG, "Received eventfd notification from app.");
                 // Do nothing for now, because after all events are processed,
                 // receive_from_app() is called anyway.
             }

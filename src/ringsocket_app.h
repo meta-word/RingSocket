@@ -54,19 +54,24 @@ enum rs_app_ws_close {
 
 struct rs_app_cb_args {
     struct rs_conf const * conf;
-    uint8_t * * wbuf;
     struct rs_thread_io_pairs * io_pairs;
     struct rs_ring * outbound_rings;
     struct rs_ring_update_queue * ring_update_queue;
     struct rs_thread_sleep_state * worker_sleep_states;
     int const * worker_eventfds;
-    size_t * wbuf_size;
+    uint8_t * wbuf;
+    size_t wbuf_size;
     size_t wbuf_i;
     uint32_t inbound_peer_i;
     int inbound_socket_fd;
     uint16_t inbound_endpoint_id;
     uint16_t inbound_worker_i;
 };
+
+// todo: This should probably be replaced with something less dumb...
+#define RS_APP_FATAL exit(EXIT_FAILURE)
+
+#define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
 #include <ringsocket_app_helper.h>
 
@@ -84,8 +89,9 @@ rs_ret ringsocket_app( \
     sprintf(_rs_thread_id_str, "%s: ", \
         app_args->conf->apps[app_args->app_i].name); \
     \
-    struct rs_ring_update_queue ring_update_queue = {0}; \
-    struct rs_app_cb_args rs = {.ring_update_queue = &ring_update_queue}; \
+    struct rs_app_cb_args rs = { \
+        .ring_update_queue = &(struct rs_ring_update_queue){0} \
+    }; \
     RS_GUARD_APP(rs_init_app_cb_args(app_args, &rs)); \
     \
     /* Prepend-pasting prevents (paramaterized) macro arguments from */ \
@@ -239,11 +245,6 @@ extern inline rs_ret rs_guard_peer_cb( \
     struct rs_app_cb_args * rs, \
     int ret \
 )
-
-// todo: This should probably be replaced with something less dumb...
-#define RS_APP_FATAL exit(EXIT_FAILURE)
-
-#define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
 // This allows macro invocations such as RS_INIT_CB(RS_NONE) to be used
 #define RS_NONE(_) RS_OK

@@ -380,8 +380,16 @@ rs_ret handle_tls_io(
         // read_bidirectional_tls_shutdown() to ensure that a bi-directional
         // shutdown at the TCP layer will already be underway once the
         // bi-directional shutdown on the TLS layer has been completed.
-        RS_GUARD(write_bidirectional_tcp_shutdown(peer));
-        peer->mortality = RS_MORTALITY_SHUTDOWN_READ;
+        switch (write_bidirectional_tcp_shutdown(peer)) {
+        case RS_OK:
+            peer->mortality = RS_MORTALITY_SHUTDOWN_READ;
+            break;
+        case RS_CLOSE_PEER:
+            peer->mortality = RS_MORTALITY_DEAD;
+            goto terminate_tls;
+        default:
+            return RS_FATAL;
+        }
         // fall through
     case RS_MORTALITY_SHUTDOWN_READ:
         switch (read_bidirectional_tls_shutdown(peer, rbuf, rbuf_size)) {

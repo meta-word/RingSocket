@@ -23,13 +23,12 @@ inline rs_ret rs_check_app_wsize(
     struct rs_app_cb_args * rs,
     size_t incr_size
 ) {
-    if (!*rs->wbuf) {
-        RS_CALLOC(*rs->wbuf, *rs->wbuf_size);
+    if (!rs->wbuf) {
+        RS_CALLOC(rs->wbuf, rs->wbuf_size);
     }
-    if (rs->wbuf_i + incr_size >= *rs->wbuf_size) {
-        *rs->wbuf_size =
-            rs->conf->realloc_multiplier * (rs->wbuf_i + incr_size);
-        RS_REALLOC(*rs->wbuf, *rs->wbuf_size);
+    if (rs->wbuf_i + incr_size >= rs->wbuf_size) {
+        rs->wbuf_size = rs->conf->realloc_multiplier * (rs->wbuf_i + incr_size);
+        RS_REALLOC(rs->wbuf, rs->wbuf_size);
     }
     return RS_OK;
 }
@@ -40,7 +39,7 @@ inline void rs_w_p(
     size_t size
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, size));
-    memcpy(*rs->wbuf + rs->wbuf_i, src, size);
+    memcpy(rs->wbuf + rs->wbuf_i, src, size);
     rs->wbuf_i += size;
 }
 
@@ -49,7 +48,7 @@ inline void rs_w_uint8(
     uint8_t u8
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 1));
-    (*rs->wbuf)[rs->wbuf_i++] = u8;
+    rs->wbuf[rs->wbuf_i++] = u8;
 }
 
 inline void rs_w_uint16(
@@ -57,7 +56,7 @@ inline void rs_w_uint16(
     uint16_t u16
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 2));
-    *((uint16_t *) (*rs->wbuf + rs->wbuf_i)) = u16;
+    *((uint16_t *) (rs->wbuf + rs->wbuf_i)) = u16;
     rs->wbuf_i += 2;
 }
 
@@ -66,7 +65,7 @@ inline void rs_w_uint32(
     uint32_t u32
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 4));
-    *((uint32_t *) (*rs->wbuf + rs->wbuf_i)) = u32;
+    *((uint32_t *) (rs->wbuf + rs->wbuf_i)) = u32;
     rs->wbuf_i += 4;
 }
 
@@ -75,7 +74,7 @@ inline void rs_w_uint64(
     uint32_t u64
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 8));
-    *((uint64_t *) (*rs->wbuf + rs->wbuf_i)) = u64;
+    *((uint64_t *) (rs->wbuf + rs->wbuf_i)) = u64;
     rs->wbuf_i += 8;
 }
 
@@ -197,7 +196,7 @@ inline void rs_send(
         ring->writer += 2;
     }
     if (rs->wbuf_i) {
-        memcpy(ring->writer, *rs->wbuf, rs->wbuf_i);
+        memcpy(ring->writer, rs->wbuf, rs->wbuf_i);
         ring->writer += rs->wbuf_i;
     }
     if (size) {

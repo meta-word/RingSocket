@@ -188,6 +188,8 @@ static rs_ret send_newest_wmsg(
         }
         return RS_OK;
     }
+    RS_LOG(LOG_DEBUG, "Sending %zu bytes outbound", msg_size);
+    RS_LOG_CHBUF(LOG_DEBUG, "Sending outbound", msg, msg_size);
     switch (peer->is_encrypted ?
         write_tls(peer, msg, msg_size) :
         write_tcp(peer, msg, msg_size)
@@ -230,6 +232,7 @@ rs_ret receive_from_app(
             uint32_t * peer_i = (uint32_t *) (ring_msg->msg + 1);
             switch (*ring_msg->msg) {
             case RS_OUTBOUND_SINGLE:
+                RS_LOG(LOG_DEBUG, "Sending outbound single...");
                 head_size += 4;
                 RS_GUARD(send_newest_wmsg(peers + *peer_i,
                     ring_msg->msg + head_size, ring_msg->size - head_size));

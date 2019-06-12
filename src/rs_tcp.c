@@ -72,11 +72,16 @@ rs_ret write_bidirectional_tcp_shutdown(
     // writes from this side. read_bidirectional_tcp_shutdown() should be called
     // at some point later than this function.
     if (shutdown(peer->socket_fd, SHUT_WR) == -1) {
+        if (errno == ENOTCONN) {
+            RS_LOG(LOG_INFO, "Unsuccessful shutdown(%d, SHUT_WR): ENOTCONN "
+                "(the peer is no longer connected): aborting attempted "
+                "bidirectional shutdown procedures", peer->socket_fd);
+            return RS_CLOSE_PEER;
+        }
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful shutdown(%d, SHUT_WR) of %s",
             peer->socket_fd, get_peer_str(peer));
         return RS_FATAL;
     }
-    peer->mortality = RS_MORTALITY_SHUTDOWN_READ;
     return RS_OK;
 }
 
@@ -98,7 +103,6 @@ static rs_ret read_bidirectional_tcp_shutdown(
         rsize = read(peer->socket_fd, rbuf, rbuf_size);
     }
     if (!rsize) {
-        peer->mortality = RS_MORTALITY_DEAD;
         return RS_CLOSE_PEER;
     }
     if (errno == EAGAIN) {
@@ -108,7 +112,6 @@ static rs_ret read_bidirectional_tcp_shutdown(
     RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful read(%d, rbuf, %zu) from %s in "
         "RS_IO_STATE_CLOSING_READ_ONLY while at the TCP layer",
         peer->socket_fd, rbuf_size, get_peer_str(peer));
-    peer->mortality = RS_MORTALITY_DEAD;
     return RS_CLOSE_PEER;
 }
 
@@ -130,7 +133,16 @@ rs_ret handle_tcp_io(
         // handle_http_events(), depending on the value of peer->layer
         return RS_OK;
     case RS_MORTALITY_SHUTDOWN_WRITE:
-        RS_GUARD(write_bidirectional_tcp_shutdown(peer));
+        switch (write_bidirectional_tcp_shutdown(peer)) {
+        case RS_OK:
+            peer->mortality = RS_MORTALITY_SHUTDOWN_READ;
+            break;
+        case RS_CLOSE_PEER:
+            peer->mortality = RS_MORTALITY_DEAD;
+            goto terminate_tcp; // "doublebreak;"
+        default:
+            return RS_FATAL;
+        }
         // fall through
     case RS_MORTALITY_SHUTDOWN_READ:
         switch (read_bidirectional_tcp_shutdown(peer, rbuf, rbuf_size)) {
@@ -139,11 +151,13 @@ rs_ret handle_tcp_io(
         case RS_FATAL:
             return RS_FATAL;
         default:
+            peer->mortality = RS_MORTALITY_DEAD;
             break;
         } // fall through
     case RS_MORTALITY_DEAD: default:
         break;
     }
+    terminate_tcp:
     if (close(peer->socket_fd) == -1) {
         RS_LOG_ERRNO(LOG_ERR, "Unsuccessful socket close(%d)",
             peer->socket_fd);
