@@ -172,6 +172,7 @@ inline void rs_send(
     } else if (payload_size > 125) {
         msg_size += 2; // uint16_t payload size (after '126' byte)
     }
+    msg_size += payload_size;
     struct rs_ring * ring = rs->outbound_rings + worker_i;
     RS_GUARD_APP(rs_prepare_ring_write(&rs->io_pairs[worker_i].outbound,
         ring, msg_size));
@@ -187,11 +188,11 @@ inline void rs_send(
         } while (--recipient_c);
     }
     *ring->writer++ = is_utf8 ? 0x81 : 0x82;
-    if (msg_size > UINT16_MAX) {
+    if (payload_size > UINT16_MAX) {
         *ring->writer++ = 127;
         RS_W_HTON64(ring->writer, payload_size);
         ring->writer += 8;
-    } else if (msg_size > 125) {
+    } else if (payload_size > 125) {
         *ring->writer++ = 126;
         RS_W_HTON16(ring->writer, payload_size);
         ring->writer += 2;
