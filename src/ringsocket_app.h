@@ -75,6 +75,9 @@ struct rs_app_cb_args {
 
 #include <ringsocket_app_helper.h>
 
+// ##########
+// # RS_APP #
+
 #define _RS_APP(init_macro, open_macro, read_macro, close_macro, \
     timer_macro) \
 \
@@ -96,8 +99,8 @@ rs_ret ringsocket_app( \
     \
     /* Prepend-pasting prevents (paramaterized) macro arguments from */ \
     /* getting expanded before this _RS_APP macro is expanded (i.e., */ \
-    /* because RS_INIT isn't defined, whereas _RS_INIT is). */ \
-    _##init_macro; /* Should expand through _RS_INIT */ \
+    /* because RS_INIT(_NONE) isn't defined, whereas _RS_INIT(_NONE) is). */ \
+    _##init_macro; /* Should expand _RS_INIT(_NONE) */ \
     \
     struct rs_thread_sleep_state * app_sleep_state = \
         app_args->app_sleep_state; \
@@ -107,9 +110,7 @@ rs_ret ringsocket_app( \
         rs_get_readers_upon_inbound_rings_init(&rs, &inbound_readers)); \
     RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false); \
     \
-    /* todo: make this optional */ \
-    uint64_t time_ms = {0}; /* overflows every 585 million years */ \
-    RS_GUARD_APP(rs_get_time_in_milliseconds(&time_ms)); \
+    _INIT_##timer_macro; /* Should expand _INIT_RS_TIMER_(NONE/SLEEP/WAKE) */ \
     \
     RS_LOG(LOG_DEBUG, "Entering app main loop..."); \
     \
@@ -120,18 +121,40 @@ rs_ret ringsocket_app( \
         uint8_t const * reader = inbound_readers[rs.inbound_worker_i]; \
         struct rs_ring_msg *ring_msg = rs_get_ring_msg(inbound_pair, reader); \
         if (!ring_msg) { \
-            if (++idle_c == 3 * RS_MAX(4, rs.conf->worker_c)) { \
-                RS_LOG(LOG_DEBUG, "Going to sleep..."); \
-                RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, NULL)); \
-                RS_LOG(LOG_DEBUG, "Awoken by a worker thread!"); \
-                idle_c = 0; \
-            } else if (idle_c == 2 * RS_MAX(4, rs.conf->worker_c)) { \
+            if (++idle_c == 2 * RS_MAX(4, rs.conf->worker_c)) { \
+                /* Announce sleep prematurely in order to err on the side */ \
+                /* of caution against deadlocking: in the likely event that */ \
+                /* this thread actually goes to sleep soon, worker threads */ \
+                /* should become aware of that fact no later than the */ \
+                /* moment sleep begins; and to guarantee that in the face */ \
+                /* of memory reordering this leeway of advance notice is */ \
+                /* necessary. The worst case scenario then merely consists */ \
+                /* of workers potentially wasting a few clock cycles */ \
+                /* calling FUTEX_WAKE on a still/already awake app during */ \
+                /* this short window of time. */ \
                 RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, true); \
+                \
+                /* The 1st FUTEX_WAIT should timeout immediately to obtain */ \
+                /* an opportunity to flush ring updates safely. I.e., the */ \
+                /* main purpose of this call is to announce the remainder */ \
+                /* of ring buffer IO, because doing so is made safe against */ \
+                /* CPU memory reordering thanks to the presence of this */ \
+                /* syscall acting as a memory fence. (And the purpose of */ \
+                /* said flushing is to not have unshared pending IO left */ \
+                /* in the event that this thread does actually sleep soon.) */ \
                 RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, \
                     &(struct timespec){0})); \
                 RS_GUARD_APP(rs_flush_ring_updates(rs.ring_update_queue, \
                     rs.io_pairs, rs.worker_sleep_states, rs.worker_eventfds, \
                     rs.conf->worker_c)); \
+            } else if (idle_c == 3 * RS_MAX(4, rs.conf->worker_c)) { \
+                /* Actually go to sleep this time; the procedural details */ \
+                /* of which differ somewhat between RS_TIMER_NONE, */ \
+                /* RS_TIMER_SLEEP, and RS_TIMER_WAKE. */ \
+                RS_LOG(LOG_DEBUG, "Going to sleep..."); \
+                _WAIT_##timer_macro; /* _WAIT_RS_TIMER_(NONE/SLEEP/WAKE) */ \
+                RS_LOG(LOG_DEBUG, "Awoken by a worker thread!"); \
+                idle_c = 0; \
             } \
             continue; \
         } \
@@ -151,23 +174,19 @@ rs_ret ringsocket_app( \
                 sizeof(struct rs_inbound_msg_header); \
             switch (header->kind) { \
             case RS_INBOUND_OPEN: \
-                _##open_macro; /* Should expand through _RS_OPEN */ \
+                _##open_macro; /* Should expand _RS_OPEN(_NONE) */ \
                 break; \
             case RS_INBOUND_READ: \
-                _##read_macro; /* Should expand through _RS_READ_... */ \
+                _##read_macro; /* Should expand _RS_READ_... */ \
                 break; \
             case RS_INBOUND_CLOSE: default: \
-                _##close_macro; /* Should expand through _RS_CLOSE */ \
+                _##close_macro; /* Should expand _RS_CLOSE(_NONE) */ \
             } \
             next_inbound_message:; \
         } while ((ring_msg = rs_get_ring_msg(inbound_pair, reader))); \
         inbound_readers[rs.inbound_worker_i] = reader; \
         \
-        uint64_t old_time_ms = time_ms; \
-        RS_GUARD_APP(rs_get_time_in_milliseconds(&time_ms)); \
-        if (time_ms != old_time_ms) { \
-            _##timer_macro; /* Should expand through _RS_TIMER */ \
-        } \
+        _CHECK_##timer_macro; /* _CHECK_RS_TIMER_(NONE/SLEEP/WAKE) */ \
     } \
 } \
 \
@@ -228,8 +247,8 @@ extern inline rs_ret rs_get_readers_upon_inbound_rings_init( \
     uint8_t const * * * inbound_readers \
 ); \
 \
-extern inline rs_ret rs_get_time_in_milliseconds( \
-    uint64_t * time_ms \
+extern inline rs_ret rs_get_time_in_microseconds( \
+    uint64_t * time_micro \
 ); \
 \
 extern inline rs_ret rs_close_peer( \
@@ -246,22 +265,122 @@ extern inline rs_ret rs_guard_peer_cb( \
     int ret \
 )
 
-// This allows macro invocations such as RS_INIT_CB(RS_NONE) to be used
-#define RS_NONE(_) RS_OK
+// ###########
+// # RS_INIT #
 
+// Call init_cb...
 #define _RS_INIT(init_cb) RS_GUARD_APP(rs_guard_cb(init_cb()))
 
-#define _RS_TIMER(timer_cb) RS_GUARD_APP(rs_guard_cb(timer_cb()))
+// ...or don't
+#define _RS_INIT_NONE
+
+// ############
+// # RS_TIMER #
+
+// _INIT_RS_TIMER_NONE / _INIT_RS_TIMER_SLEEP / _INIT_RS_TIMER_WAKE
+
+// Instantiate a timestamp variable...
+#define _INIT_RS_TIMER_SLEEP(timer_cb, i_m) _INIT_RS_TIMER_WAKE(timer_cb, i_m)
+#define _INIT_RS_TIMER_WAKE(timer_cb, i_m) \
+    uint64_t timestamp_micro = 0; /* overflows every 585 thousand years */ \
+    RS_GUARD_APP(rs_get_time_in_microseconds(&timestamp_micro)) \
+
+// ...or don't
+#define _INIT_RS_TIMER_NONE
+
+// _CHECK_RS_TIMER_NONE / _CHECK_RS_TIMER_SLEEP / _CHECK_RS_TIMER_WAKE
+
+// Check if the timer interval has elapsed; and if so, call timer_cb...
+#define _CHECK_RS_TIMER_SLEEP(timer_cb, i_m) _CHECK_RS_TIMER_WAKE(timer_cb, i_m)
+#define _CHECK_RS_TIMER_WAKE(timer_cb, interval_micro) do { \
+    uint64_t new_timestamp_micro = 0; \
+    RS_GUARD_APP(rs_get_time_in_microseconds(&new_timestamp_micro)); \
+    if (new_timestamp_micro >= timestamp_micro + (interval_micro)) { \
+        timestamp_micro = new_timestamp_micro; \
+        RS_GUARD_APP(rs_guard_cb((timer_cb)())); \
+    } \
+} while (0)
+
+// ...or don't
+#define _CHECK_RS_TIMER_NONE
+
+// _WAIT_RS_TIMER_NONE / _WAIT_RS_TIMER_SLEEP / _WAIT_RS_TIMER_WAKE
+
+#define _WAIT_RS_TIMER_SLEEP(timer_cb, interval_micro) \
+    RS_TIMER_WAIT(timer_cb, interval_micro, RS_FUTEX_WAIT_WITHOUT_TIMEOUT)
+
+#define _WAIT_RS_TIMER_WAKE(timer_cb, i_m) \
+    RS_TIMER_WAIT(timer_cb, i_m, RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, i_m))
+
+#define _WAIT_RS_TIMER_NONE _RS_FUTEX_WAIT_WITHOUT_TIMEOUT
+
+#define RS_TIMER_WAIT(timer_cb, interval_micro, futex_macro) do { \
+    /* First try to honor the remainder of the current timer_cb interval */ \
+    uint64_t new_timestamp_micro = 0; \
+    RS_GUARD_APP(rs_get_time_in_microseconds(&new_timestamp_micro)); \
+    if (new_timestamp_micro < timestamp_micro + (interval_micro)) { \
+        uint64_t timeout_interval = \
+            timestamp_micro + (interval_micro) - new_timestamp_micro; \
+        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, &(struct timespec){ \
+            .tv_sec = timeout_interval / 1000000, \
+            .tv_nsec = 1000 * (timeout_interval % 1000000) \
+        })); \
+        if (errno == ETIMEDOUT) { \
+            errno = 0; /* Avoid false positives on re-evaluation. */ \
+            /* Assume the futex timing out was timed somewhat accurately. */ \
+            timestamp_micro += interval_micro; \
+            goto timer_cb_and_futex_wait; \
+        } \
+    } else { \
+        timestamp_micro = new_timestamp_micro; \
+        timer_cb_and_futex_wait: \
+        RS_GUARD_APP(rs_guard_cb((timer_cb)())); \
+        _##futex_macro; /* _RS_FUTEX_WAIT_WITH(OUT)_TIMEOUT */ \
+    } \
+} while (0)
+
+#define _RS_FUTEX_WAIT_WITHOUT_TIMEOUT \
+    RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, NULL))
+
+#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, interval_micro) do { \
+    struct timespec ts = { \
+        .tv_sec = (interval_micro) / 1000000, \
+        .tv_nsec = 1000 * ((interval_micro) % 1000000) \
+    }; \
+    for (;;) { \
+        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, &ts)); \
+        if (errno != ETIMEDOUT) { \
+            break; \
+        } \
+        errno = 0; /* Avoid false positives on re-evaluation. */ \
+        /* Assume the futex timing out was timed somewhat accurately. */ \
+        timestamp_micro += interval_micro; \
+        RS_GUARD_APP(rs_guard_cb((timer_cb)())); \
+    } \
+} while (0)
+
+// ###########
+// # RS_OPEN #
 
 #define _RS_OPEN(open_cb) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs))); \
 } while (0)
 
+#define _RS_OPEN_NONE
+
+// ############
+// # RS_CLOSE #
+
 #define _RS_CLOSE(close_cb) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
 } while (0)
+
+#define _RS_CLOSE_NONE
+
+// ###########
+// # RS_READ #
 
 #define _RS_READ_SWITCH(...) do { \
     RS_READ_CHECK(1); \
@@ -282,15 +401,19 @@ extern inline rs_ret rs_guard_peer_cb( \
     } \
 } while (0)*/
 
-#define _RS_CASE_BIN(cb_i, ...) case cb_i: { \
-    _RS_READ_BIN(__VA_ARGS__); \
-} \
-break
+#define _RS_CASE_BIN(cb_i, ...) \
+    case cb_i: \
+        { \
+            _RS_READ_BIN(__VA_ARGS__); \
+        } \
+        break
 
-#define _RS_CASE_UTF8(cb_i, ...) case cb_i: { \
-    _RS_READ_UTF8(__VA_ARGS__); \
-} \
-break
+#define _RS_CASE_UTF8(cb_i, ...) \
+    case cb_i: \
+        { \
+            _RS_READ_UTF8(__VA_ARGS__); \
+        } \
+        break
 
 #define _RS_READ_BIN(...) do { \
     if (header->is_utf8) { \
@@ -306,16 +429,22 @@ break
     RS_READ_PROCEED(__VA_ARGS__); \
 } while (0)
 
-#define RS_READ_PROCEED(...) RS_MACRIFY_ARGC(RS_256_16( \
-    RS_A00, RS_A01, RS_A02, RS_A03, RS_A04, RS_A05, RS_A06, \
-    RS_A07, RS_A08, RS_A09, RS_A10, RS_A11, RS_A12, RS_A13, \
-    RS_A14, RS_A15, __VA_ARGS__), __VA_ARGS__)
+#define RS_READ_PROCEED(...) \
+    RS_MACRIFY_ARGC( \
+        RS_256_16( \
+            RS_A00, RS_A01, RS_A02, RS_A03, \
+            RS_A04, RS_A05, RS_A06, RS_A07, \
+            RS_A08, RS_A09, RS_A10, RS_A11, \
+            RS_A12, RS_A13, RS_A14, RS_A15, \
+            __VA_ARGS__ \
+        ), \
+        __VA_ARGS__ \
+    )
 
-#define RS_ENQUEUE_APP_READ_UPDATE do { \
+#define RS_ENQUEUE_APP_READ_UPDATE \
     RS_GUARD_APP(rs_enqueue_ring_update(rs.ring_update_queue, rs.io_pairs, \
         rs.worker_sleep_states, rs.worker_eventfds, reader, \
-        rs.inbound_worker_i, false)); \
-} while (0)
+        rs.inbound_worker_i, false)) \
 
 #define RS_READ_ABORT(ws_close_code) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
@@ -459,11 +588,29 @@ break
 #define _02RS_NTOH(...) _RS_NTOH(2, __VA_ARGS__)
 #define _01RS_NTOH(...) _RS_NTOH(1, __VA_ARGS__)
 
-#define _RS_NET(name_i, ...) RS_MACRIFY_TYPE(RS_256_3(RS_NET_SINGLE, \
-    RS_NET_STA, RS_NET_VLA, __VA_ARGS__), name_i, __VA_ARGS__)
+#define _RS_NET(name_i, ...) \
+    RS_MACRIFY_TYPE( \
+        RS_256_3( \
+            RS_NET_SINGLE, \
+            RS_NET_STA, \
+            RS_NET_VLA, \
+            __VA_ARGS__ \
+        ), \
+        name_i, \
+        __VA_ARGS__ \
+    )
 
-#define _RS_NTOH(name_i, ...) RS_MACRIFY_TYPE(RS_256_3(RS_NTOH_SINGLE, \
-    RS_NTOH_STA, RS_NTOH_VLA, __VA_ARGS__), name_i, __VA_ARGS__)
+#define _RS_NTOH(name_i, ...) \
+    RS_MACRIFY_TYPE( \
+        RS_256_3( \
+            RS_NTOH_SINGLE, \
+            RS_NTOH_STA, \
+            RS_NTOH_VLA, \
+            __VA_ARGS__ \
+        ), \
+        name_i, \
+        __VA_ARGS__ \
+    )
 
 #define RS_READ_CHECK(size) do { \
     if (payload + (size) > reader) { \

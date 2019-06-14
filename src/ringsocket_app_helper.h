@@ -426,8 +426,8 @@ inline rs_ret rs_get_readers_upon_inbound_rings_init(
     return RS_OK;
 }
 
-inline rs_ret rs_get_time_in_milliseconds(
-    uint64_t * time_ms
+inline rs_ret rs_get_time_in_microseconds(
+    uint64_t * timestamp_micro
 ) {
     struct timespec ts = {0};
     if (clock_gettime(CLOCK_MONOTONIC_COARSE, &ts) == -1) {
@@ -435,7 +435,7 @@ inline rs_ret rs_get_time_in_milliseconds(
             "Unsuccessful clock_gettime(CLOCK_MONOTONIC_COARSE, &ts)");
         return RS_FATAL;
     }
-    *time_ms = 1000 * ts.tv_sec + ts.tv_nsec / 1000000;
+    *timestamp_micro = 1000000 * ts.tv_sec + ts.tv_nsec / 1000;
     return RS_OK;
 }
 
