@@ -426,8 +426,8 @@ inline rs_ret rs_get_readers_upon_inbound_rings_init(
     return RS_OK;
 }
 
-inline rs_ret rs_get_time_in_microseconds(
-    uint64_t * timestamp_micro
+inline rs_ret rs_get_cur_time_microsec(
+    uint64_t * time_microsec
 ) {
     struct timespec ts = {0};
     if (clock_gettime(CLOCK_MONOTONIC_COARSE, &ts) == -1) {
@@ -435,7 +435,7 @@ inline rs_ret rs_get_time_in_microseconds(
             "Unsuccessful clock_gettime(CLOCK_MONOTONIC_COARSE, &ts)");
         return RS_FATAL;
     }
-    *timestamp_micro = 1000000 * ts.tv_sec + ts.tv_nsec / 1000;
+    *time_microsec = 1000000 * ts.tv_sec + ts.tv_nsec / 1000;
     return RS_OK;
 }
 
@@ -494,5 +494,33 @@ inline rs_ret rs_guard_peer_cb(
         "value: %d. Valid values are -1 (fatal error), 0 (success), and any "
         "value within the range 4000 through 4899 (private use WebSocket close "
         "codes).", ret);
+    return RS_FATAL;
+}
+
+inline rs_ret rs_guard_timer_cb(
+    int64_t ret,
+    uint64_t *interval_microsec
+) {
+    switch (ret) {
+    case -1:
+        RS_LOG(LOG_WARNING,
+            "Shutting down: timer callback returned -1 (fatal error).");
+        return RS_FATAL;
+    case 0:
+        RS_LOG(LOG_NOTICE, "Timer callback returned 0, which means it will not "
+            "be called again.");
+        *interval_microsec = RS_TIME_INF;
+        return RS_OK;
+    default:
+        if (ret > 0) {
+            *interval_microsec = ret;
+            return RS_OK;
+        }
+    }
+    RS_LOG(LOG_ERR, "Shutting down: timer callback returned an invalid "
+        "value: %" PRIu64 ". Valid values are -1 (fatal error), 0 (don't call "
+        "the timer callback again), and any value greater than 0 (the number "
+        "of microseconds after which the timer callback wishes to be called "
+        "again).", ret);
     return RS_FATAL;
 }

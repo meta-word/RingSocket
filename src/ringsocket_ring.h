@@ -226,14 +226,20 @@ inline rs_ret rs_wake_up_worker(
     return RS_OK;
 }
 
+#define RS_TIME_INF UINT64_MAX
+
 inline rs_ret rs_wait_for_worker(
     struct rs_thread_sleep_state * app_sleep_state,
-    struct timespec const * timeout
+    uint64_t timeout_microsec
 ) {
+    struct timespec const * timeout = timeout_microsec == RS_TIME_INF ?
+        NULL :
+        &(struct timespec){
+            .tv_sec = timeout_microsec / 1000000,
+            .tv_nsec = 1000 * (timeout_microsec % 1000000)
+        };
     if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAIT_PRIVATE,
-        true, timeout, NULL, 0) != -1 ||
-        errno == EAGAIN ||
-        errno == ETIMEDOUT) {
+        true, timeout, NULL, 0) != -1 || errno == EAGAIN) {
         // May return immediately with errno == EAGAIN when a worker thread
         // already tried to wake this app thread up with rs_wake_up_app()
         // (which is possible because app_sleep_state->is_asleep was set to
@@ -241,9 +247,12 @@ inline rs_ret rs_wait_for_worker(
         // just try to do some more work.
         return RS_OK;
     }
+    if (errno == ETIMEDOUT) {
+        return RS_AGAIN; // Indicate that this function should be called again
+        // to go back to sleep, because there was no worker thread activity.
+    }
     RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, &%d, "
-        "FUTEX_WAIT_PRIVATE, 1, %p, NULL, 0)", app_sleep_state->is_asleep,
-        timeout);
+        "FUTEX_WAIT_PRIVATE, 1, timeout, NULL, 0)", app_sleep_state->is_asleep);
     return RS_FATAL;
 }
 

@@ -142,8 +142,7 @@ rs_ret ringsocket_app( \
                 /* syscall acting as a memory fence. (And the purpose of */ \
                 /* said flushing is to not have unshared pending IO left */ \
                 /* in the event that this thread does actually sleep soon.) */ \
-                RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, \
-                    &(struct timespec){0})); \
+                RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, 0)); \
                 RS_GUARD_APP(rs_flush_ring_updates(rs.ring_update_queue, \
                     rs.io_pairs, rs.worker_sleep_states, rs.worker_eventfds, \
                     rs.conf->worker_c)); \
@@ -212,7 +211,7 @@ extern inline rs_ret rs_wake_up_worker( \
 \
 extern inline rs_ret rs_wait_for_worker( \
     struct rs_thread_sleep_state * app_sleep_state, \
-    struct timespec const * timeout \
+    uint64_t timeout_microsec \
 ); \
 \
 extern inline rs_ret rs_enqueue_ring_update( \
@@ -247,8 +246,8 @@ extern inline rs_ret rs_get_readers_upon_inbound_rings_init( \
     uint8_t const * * * inbound_readers \
 ); \
 \
-extern inline rs_ret rs_get_time_in_microseconds( \
-    uint64_t * time_micro \
+extern inline rs_ret rs_get_cur_time_microsec( \
+    uint64_t * time_microsec \
 ); \
 \
 extern inline rs_ret rs_close_peer( \
@@ -263,6 +262,11 @@ extern inline rs_ret rs_guard_cb( \
 extern inline rs_ret rs_guard_peer_cb( \
     struct rs_app_cb_args * rs, \
     int ret \
+); \
+\
+extern inline rs_ret rs_guard_timer_cb( \
+    int64_t ret, \
+    uint64_t * interval_microsec \
 )
 
 // ###########
@@ -280,10 +284,11 @@ extern inline rs_ret rs_guard_peer_cb( \
 // _INIT_RS_TIMER_NONE / _INIT_RS_TIMER_SLEEP / _INIT_RS_TIMER_WAKE
 
 // Instantiate a timestamp variable...
-#define _INIT_RS_TIMER_SLEEP(timer_cb, i_m) _INIT_RS_TIMER_WAKE(timer_cb, i_m)
-#define _INIT_RS_TIMER_WAKE(timer_cb, i_m) \
-    uint64_t timestamp_micro = 0; /* overflows every 585 thousand years */ \
-    RS_GUARD_APP(rs_get_time_in_microseconds(&timestamp_micro)) \
+#define _INIT_RS_TIMER_SLEEP(timer_cb) _INIT_RS_TIMER_WAKE(timer_cb)
+#define _INIT_RS_TIMER_WAKE(timer_cb) \
+    uint64_t interval_microsec = 0; \
+    uint64_t timestamp_microsec = 0; /* overflows every 585 thousand years */ \
+    RS_GUARD_APP(rs_get_cur_time_microsec(&timestamp_microsec))
 
 // ...or don't
 #define _INIT_RS_TIMER_NONE
@@ -291,13 +296,13 @@ extern inline rs_ret rs_guard_peer_cb( \
 // _CHECK_RS_TIMER_NONE / _CHECK_RS_TIMER_SLEEP / _CHECK_RS_TIMER_WAKE
 
 // Check if the timer interval has elapsed; and if so, call timer_cb...
-#define _CHECK_RS_TIMER_SLEEP(timer_cb, i_m) _CHECK_RS_TIMER_WAKE(timer_cb, i_m)
-#define _CHECK_RS_TIMER_WAKE(timer_cb, interval_micro) do { \
-    uint64_t new_timestamp_micro = 0; \
-    RS_GUARD_APP(rs_get_time_in_microseconds(&new_timestamp_micro)); \
-    if (new_timestamp_micro >= timestamp_micro + (interval_micro)) { \
-        timestamp_micro = new_timestamp_micro; \
-        RS_GUARD_APP(rs_guard_cb((timer_cb)())); \
+#define _CHECK_RS_TIMER_SLEEP(timer_cb) _CHECK_RS_TIMER_WAKE(timer_cb)
+#define _CHECK_RS_TIMER_WAKE(timer_cb) do { \
+    uint64_t new_timestamp_microsec = 0; \
+    RS_GUARD_APP(rs_get_cur_time_microsec(&new_timestamp_microsec)); \
+    if (new_timestamp_microsec >= timestamp_microsec + interval_microsec) { \
+        timestamp_microsec = new_timestamp_microsec; \
+        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
     } \
 } while (0)
 
@@ -306,56 +311,48 @@ extern inline rs_ret rs_guard_peer_cb( \
 
 // _WAIT_RS_TIMER_NONE / _WAIT_RS_TIMER_SLEEP / _WAIT_RS_TIMER_WAKE
 
-#define _WAIT_RS_TIMER_SLEEP(timer_cb, interval_micro) \
-    RS_TIMER_WAIT(timer_cb, interval_micro, RS_FUTEX_WAIT_WITHOUT_TIMEOUT)
+#define _WAIT_RS_TIMER_SLEEP(timer_cb) \
+    RS_TIMER_WAIT(timer_cb, RS_FUTEX_WAIT_WITHOUT_TIMEOUT)
 
-#define _WAIT_RS_TIMER_WAKE(timer_cb, i_m) \
-    RS_TIMER_WAIT(timer_cb, i_m, RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, i_m))
+#define _WAIT_RS_TIMER_WAKE(timer_cb) \
+    RS_TIMER_WAIT(timer_cb, RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb))
 
 #define _WAIT_RS_TIMER_NONE _RS_FUTEX_WAIT_WITHOUT_TIMEOUT
 
-#define RS_TIMER_WAIT(timer_cb, interval_micro, futex_macro) do { \
+#define RS_TIMER_WAIT(timer_cb, futex_macro) do { \
     /* First try to honor the remainder of the current timer_cb interval */ \
-    uint64_t new_timestamp_micro = 0; \
-    RS_GUARD_APP(rs_get_time_in_microseconds(&new_timestamp_micro)); \
-    if (new_timestamp_micro < timestamp_micro + (interval_micro)) { \
-        uint64_t timeout_interval = \
-            timestamp_micro + (interval_micro) - new_timestamp_micro; \
-        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, &(struct timespec){ \
-            .tv_sec = timeout_interval / 1000000, \
-            .tv_nsec = 1000 * (timeout_interval % 1000000) \
-        })); \
+    uint64_t new_timestamp_microsec = 0; \
+    RS_GUARD_APP(rs_get_time_microseco(&new_timestamp_microsec)); \
+    if (new_timestamp_microsec < timestamp_microsec + interval_microsec) { \
+        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, \
+            timestamp_microsec + interval_microsec - new_timestamp_microsec)); \
         if (errno == ETIMEDOUT) { \
             errno = 0; /* Avoid false positives on re-evaluation. */ \
             /* Assume the futex timing out was timed somewhat accurately. */ \
-            timestamp_micro += interval_micro; \
+            timestamp_microsec += interval_microsec; \
             goto timer_cb_and_futex_wait; \
         } \
     } else { \
-        timestamp_micro = new_timestamp_micro; \
+        timestamp_microsec = new_timestamp_microsec; \
         timer_cb_and_futex_wait: \
-        RS_GUARD_APP(rs_guard_cb((timer_cb)())); \
+        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
         _##futex_macro; /* _RS_FUTEX_WAIT_WITH(OUT)_TIMEOUT */ \
     } \
 } while (0)
 
 #define _RS_FUTEX_WAIT_WITHOUT_TIMEOUT \
-    RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, NULL))
+    RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, RS_TIME_INF))
 
-#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, interval_micro) do { \
-    struct timespec ts = { \
-        .tv_sec = (interval_micro) / 1000000, \
-        .tv_nsec = 1000 * ((interval_micro) % 1000000) \
-    }; \
+#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, interval_microsec) do { \
     for (;;) { \
-        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, &ts)); \
+        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, interval_microsec)); \
         if (errno != ETIMEDOUT) { \
             break; \
         } \
         errno = 0; /* Avoid false positives on re-evaluation. */ \
         /* Assume the futex timing out was timed somewhat accurately. */ \
-        timestamp_micro += interval_micro; \
-        RS_GUARD_APP(rs_guard_cb((timer_cb)())); \
+        timestamp_microsec += interval_microsec; \
+        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
     } \
 } while (0)
 
