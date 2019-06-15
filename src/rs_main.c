@@ -27,8 +27,8 @@
 //    can switch to running as "ringsock", in case it's currently running as a
 //    different user such as "root".
 static rs_ret get_ringsocket_credentials(
-    uid_t * uid,
-    gid_t * gid
+    uid_t * ringsock_uid,
+    gid_t * ringsock_gid
 ) {
     // getpwnam() is not thread-safe (unlike its more cumbersome cousin
     // getpwnam_r()), but RingSocket is still single-threaded at this point, so
@@ -41,8 +41,8 @@ static rs_ret get_ringsocket_credentials(
             "created.");
             return RS_FATAL;
     }
-    *uid = pw->pw_uid;
-    *gid = pw->pw_gid;
+    *ringsock_uid = pw->pw_uid;
+    *ringsock_gid = pw->pw_gid;
     // Verify that pw->pw_shell equals "/(usr/)(s)bin/['false'|'nologin']"
     char * ch = pw->pw_shell;
     if (*ch++ == '/' && (*ch != 'u' || (ch++, *ch++ == 's' && *ch++ == 'r' &&
@@ -71,30 +71,35 @@ static rs_ret get_ringsocket_credentials(
 }
 
 static rs_ret remove_supplementary_groups(
-    gid_t effective_gid
+    gid_t ringsock_gid
 ) {
-    switch (getgroups(0, NULL)) {
+    int group_c = getgroups(0, NULL);
+    switch (group_c) {
     case -1:
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getgroups(0, NULL)");
         return RS_FATAL;
     case 0:
         return RS_OK;
     case 1:
-        {
-            gid_t gid = -1;
-            if (getgroups(1, &gid) == -1) {
-                RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getgroups(1, &gid)");
-                return RS_FATAL;
-            }
-            if (gid == effective_gid) {
-                return RS_OK;
-            }
+        // If the only group the current user belongs to is "ringsock",
+        // it doesn't need to be removed. In other words, that is the
+        // requirement for executing the ringsocket binary without the
+        // CAP_SETGID capability otherwise needed to remove groups with
+        // setgroups() -- see below.
+        gid_t gid = -1;
+        if (getgroups(1, &gid) == -1) {
+            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getgroups(1, &gid)");
+            return RS_FATAL;
+        }
+        if (gid == ringsock_gid) {
+            return RS_OK;
         }
         break;
     default:
-        if (!setgroups(0, NULL)) {
-            return RS_OK;
-        }
+        break;
+    }
+    if (!setgroups(0, NULL)) { // Remove all supplementary groups.
+        return RS_OK;
     }
     RS_LOG_ERRNO(LOG_CRIT, "Failed to remove supplementary groups: the "
         "RingSocket executable must be executed by either a user with the "
@@ -137,10 +142,10 @@ static rs_ret remove_all_capabilities_except(
 static rs_ret set_credentials_and_capabilities(
     void
 ) {
-    uid_t uid = -1;
-    gid_t gid = -1;
-    RS_GUARD(get_ringsocket_credentials(&uid, &gid));
-    RS_GUARD(remove_supplementary_groups(gid));
+    uid_t ringsock_uid = -1;
+    gid_t ringsock_gid = -1;
+    RS_GUARD(get_ringsocket_credentials(&ringsock_uid, &ringsock_gid));
+    RS_GUARD(remove_supplementary_groups(ringsock_gid));
     // Until now RingSocket may have been running as a user more privileged than
     // "ringsock" such as root. Call setresgid() and setresuid() to switch to
     // running as "ringsock" from here on.
