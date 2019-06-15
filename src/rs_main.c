@@ -86,13 +86,15 @@ static rs_ret remove_supplementary_groups(
         // requirement for executing the ringsocket binary without the
         // CAP_SETGID capability otherwise needed to remove groups with
         // setgroups() -- see below.
-        gid_t gid = -1;
-        if (getgroups(1, &gid) == -1) {
-            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getgroups(1, &gid)");
-            return RS_FATAL;
-        }
-        if (gid == ringsock_gid) {
-            return RS_OK;
+        {
+            gid_t gid = -1;
+            if (getgroups(1, &gid) == -1) {
+                RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getgroups(1, &gid)");
+                return RS_FATAL;
+            }
+            if (gid == ringsock_gid) {
+                return RS_OK;
+            }
         }
         break;
     default:
@@ -149,9 +151,9 @@ static rs_ret set_credentials_and_capabilities(
     // Until now RingSocket may have been running as a user more privileged than
     // "ringsock" such as root. Call setresgid() and setresuid() to switch to
     // running as "ringsock" from here on.
-    if (setresgid(gid, gid, gid) == -1) {
+    if (setresgid(ringsock_gid, ringsock_gid, ringsock_gid) == -1) {
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful setresgid(%u, %u, %u)",
-            gid, gid, gid);
+            ringsock_gid, ringsock_gid, ringsock_gid);
         return RS_FATAL;
     }
     // "Drop down" to user "ringsock" without losing privileged capabilities
@@ -162,9 +164,9 @@ static rs_ret set_credentials_and_capabilities(
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful prctl(PR_SET_KEEPCAPS, 1)");
         return RS_FATAL;
     }
-    if (setresuid(uid, uid, uid) == -1) {
+    if (setresuid(ringsock_uid, ringsock_uid, ringsock_uid) == -1) {
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful setresuid(%u, %u, %u)",
-            uid, uid, uid);
+            ringsock_uid, ringsock_uid, ringsock_uid);
         return RS_FATAL;
     }
     cap_value_t caps[] = {
