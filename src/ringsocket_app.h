@@ -143,10 +143,10 @@ rs_ret ringsocket_app( \
                 /* said flushing is to not have unshared pending IO left */ \
                 /* in the event that this thread does actually sleep soon.) */ \
                 switch (rs_wait_for_worker(app_sleep_state, 0)) { \
-                case RS_OK: \
+                case RS_OK: /* immediately awoken by a worker thread */ \
                     idle_c = 0; \
                     break; \
-                case RS_AGAIN: \
+                case RS_AGAIN: /* futex timed out as expected */ \
                     break; \
                 default: \
                     RS_APP_FATAL; \
@@ -330,7 +330,7 @@ extern inline rs_ret rs_guard_timer_cb( \
 #define RS_TIMER_WAIT(timer_cb, futex_macro) do { \
     /* First try to honor the remainder of the current timer_cb interval */ \
     uint64_t new_timestamp_microsec = 0; \
-    RS_GUARD_APP(rs_get_time_microsec(&new_timestamp_microsec)); \
+    RS_GUARD_APP(rs_get_cur_time_microsec(&new_timestamp_microsec)); \
     if (new_timestamp_microsec < timestamp_microsec + interval_microsec) { \
         switch (rs_wait_for_worker(app_sleep_state, timestamp_microsec + \
             interval_microsec - new_timestamp_microsec)) { \
