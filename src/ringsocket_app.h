@@ -142,7 +142,15 @@ rs_ret ringsocket_app( \
                 /* syscall acting as a memory fence. (And the purpose of */ \
                 /* said flushing is to not have unshared pending IO left */ \
                 /* in the event that this thread does actually sleep soon.) */ \
-                RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, 0)); \
+                switch (rs_wait_for_worker(app_sleep_state, 0)) { \
+                case RS_OK: \
+                    idle_c = 0; \
+                    break; \
+                case RS_AGAIN: \
+                    break; \
+                default: \
+                    RS_APP_FATAL; \
+                } \
                 RS_GUARD_APP(rs_flush_ring_updates(rs.ring_update_queue, \
                     rs.io_pairs, rs.worker_sleep_states, rs.worker_eventfds, \
                     rs.conf->worker_c)); \
@@ -322,15 +330,17 @@ extern inline rs_ret rs_guard_timer_cb( \
 #define RS_TIMER_WAIT(timer_cb, futex_macro) do { \
     /* First try to honor the remainder of the current timer_cb interval */ \
     uint64_t new_timestamp_microsec = 0; \
-    RS_GUARD_APP(rs_get_time_microseco(&new_timestamp_microsec)); \
+    RS_GUARD_APP(rs_get_time_microsec(&new_timestamp_microsec)); \
     if (new_timestamp_microsec < timestamp_microsec + interval_microsec) { \
-        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, \
-            timestamp_microsec + interval_microsec - new_timestamp_microsec)); \
-        if (errno == ETIMEDOUT) { \
-            errno = 0; /* Avoid false positives on re-evaluation. */ \
-            /* Assume the futex timing out was timed somewhat accurately. */ \
+        switch (rs_wait_for_worker(app_sleep_state, timestamp_microsec + \
+            interval_microsec - new_timestamp_microsec)) { \
+        case RS_OK: /* a worker thread already woke this thread up */ \
+            break; \
+        case RS_AGAIN: /* futex timed out: assume timing was accurate-ish */ \
             timestamp_microsec += interval_microsec; \
             goto timer_cb_and_futex_wait; \
+        default: \
+            RS_APP_FATAL; \
         } \
     } else { \
         timestamp_microsec = new_timestamp_microsec; \
@@ -345,14 +355,17 @@ extern inline rs_ret rs_guard_timer_cb( \
 
 #define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, interval_microsec) do { \
     for (;;) { \
-        RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, interval_microsec)); \
-        if (errno != ETIMEDOUT) { \
+        switch (rs_wait_for_worker(app_sleep_state, interval_microsec)) { \
+        case RS_OK: /* a worker thread woke this thread up */ \
             break; \
+        case RS_AGAIN: /* futex timed out: assume timing was accurate-ish */ \
+            timestamp_microsec += interval_microsec; \
+            RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
+            continue; \
+        default: \
+            RS_APP_FATAL; \
         } \
-        errno = 0; /* Avoid false positives on re-evaluation. */ \
-        /* Assume the futex timing out was timed somewhat accurately. */ \
-        timestamp_microsec += interval_microsec; \
-        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
+        break; \
     } \
 } while (0)
 

@@ -75,7 +75,7 @@ static rs_ret remove_supplementary_groups(
 ) {
     switch (getgroups(0, NULL)) {
     case -1:
-        RS_LOG(LOG_CRIT, "Unsuccessful getgroups(0, NULL)");
+        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getgroups(0, NULL)");
         return RS_FATAL;
     case 0:
         return RS_OK;
@@ -96,11 +96,11 @@ static rs_ret remove_supplementary_groups(
             return RS_OK;
         }
     }
-    RS_LOG(LOG_CRIT, "Failed to remove supplementary groups: the RingSocket "
-        "executable must be executed by either a user with the CAP_SETGID "
-        "capability set (e.g., user \"root\"), such that it can remove such "
-        "groups; or by a user that does not belong to any such groups in the "
-        "first place.");
+    RS_LOG_ERRNO(LOG_CRIT, "Failed to remove supplementary groups: the "
+        "RingSocket executable must be executed by either a user with the "
+        "CAP_SETGID capability set (e.g., user \"root\"), such that it can "
+        "remove such groups; or by a user that does not belong to any such "
+        "groups in the first place.");
     return RS_FATAL;
 }
 
