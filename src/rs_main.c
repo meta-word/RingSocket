@@ -120,15 +120,17 @@ static rs_ret remove_all_capabilities_except(
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful cap_init()");
         return RS_FATAL;
     }
-    if (cap_set_flag(cap, CAP_PERMITTED, cap_c, caps, CAP_SET) == -1) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful cap_set_flag(cap, CAP_PERMITTED, "
-            "%d, caps, CAP_SET)", cap_c);
-        return RS_FATAL;
-    }
-    if (cap_set_flag(cap, CAP_EFFECTIVE, cap_c, caps, CAP_SET) == -1) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful cap_set_flag(cap, CAP_EFFECTIVE, "
-            "%d, caps, CAP_SET)", cap_c);
-        return RS_FATAL;
+    if (cap_c) {
+        if (cap_set_flag(cap, CAP_PERMITTED, cap_c, caps, CAP_SET) == -1) {
+            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful cap_set_flag(cap, "
+                "CAP_PERMITTED, %d, caps, CAP_SET)", cap_c);
+            return RS_FATAL;
+        }
+        if (cap_set_flag(cap, CAP_EFFECTIVE, cap_c, caps, CAP_SET) == -1) {
+            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful cap_set_flag(cap, "
+                "CAP_EFFECTIVE, %d, caps, CAP_SET)", cap_c);
+            return RS_FATAL;
+        }
     }
     if (cap_set_proc(cap) == -1) {
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful cap_set_proc(cap)");
@@ -254,40 +256,33 @@ static rs_ret set_limits(
     return RS_OK;
 }
 
-static rs_ret start_app(
-    char const * so_path,
-    struct rs_app_args * app_args
+static rs_ret get_app_callbacks(
+    struct rs_conf const * conf,
+    int (* * app_cbs)(void *)
 ) {
-    // First check with RTLD_NOLOAD if the shared object has already been loaded
-    void * so = dlopen(so_path, RTLD_NOLOAD | RTLD_NOW);
-    if (!so) {
-        // The shared object has not been loaded yet, so call dlopen() for real
-        so = dlopen(so_path, RTLD_NOW);
+    for (size_t i = 0; i < conf->app_c; i++) {
+        void * so = dlopen(conf->apps[i].app_path, RTLD_NOW);
         if (!so) {
             RS_LOG(LOG_ERR, "Unsuccessful dlopen(\"%s\", RTLD_NOW). Failed to "
-                "load the app as a dynamic library: %s", so_path, dlerror());
+                "load the app as a dynamic library: %s", conf->apps[i].app_path,
+                dlerror());
             return RS_FATAL;
         }
-    }
-    int (*cb)(void *) = NULL;
-    *(void * *) (&cb) = dlsym(so, "ringsocket_app");
-    if (!cb) {
-        RS_LOG(LOG_ERR, "Unsuccessful dlsym(so, \"ringsocket_app\"). \"%s\" "
-            "does not seem to expose the required \"ringsocket_app\" callback "
-            "function (as defined by RS_APP()): %s", so_path, dlerror());
-        return RS_FATAL;
-    }
-    // Run the app callback in a dedicated (long-lived) C11 thread
-    if (thrd_create((thrd_t []){0}, cb, app_args) != thrd_success) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful thrd_create((thrd_t []){0}, "
-            "cb, app_args)");
-        return RS_FATAL;
+        *(void * *) (app_cbs + i) = dlsym(so, "ringsocket_app");
+        if (!app_cbs[i]) {
+            RS_LOG(LOG_ERR, "Unsuccessful dlsym(so, \"ringsocket_app\"). "
+                "\"%s\" does not seem to expose the required "
+                "\"ringsocket_app\" callback function (as defined by "
+                "RS_APP()): %s", conf->apps[i].app_path, dlerror());
+            return RS_FATAL;
+        }
     }
     return RS_OK;
 }
 
 static rs_ret spawn_app_and_worker_threads(
-    struct rs_conf const * conf
+    struct rs_conf const * conf,
+    int (* * app_cbs)(void *)
 ) {
     // Each (app thread <-> worker_thread) pair needs access to one allocated
     // rs_shared_io struct.
@@ -339,7 +334,13 @@ static rs_ret spawn_app_and_worker_threads(
         app_args[i].worker_eventfds = worker_eventfds;
         app_args[i].app_i = i;
         app_args[i].log_mask = _rs_log_mask;
-        RS_GUARD(start_app(conf->apps[i].app_path, app_args + i));
+        // Run the app callback as a dedicated (long-lived) C11 thread
+        if (thrd_create((thrd_t []){0}, app_cbs[i], app_args + i) !=
+            thrd_success) {
+            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful thrd_create((thrd_t []){0}, "
+                "cb, app_args)");
+            return RS_FATAL;
+        }
     }
 
     // Wait for all apps to sleep on futex_wait(), to ensure that all io_pairs
@@ -389,12 +390,21 @@ static rs_ret start(
     }
     RS_GUARD(set_credentials_and_capabilities());
     RS_GUARD(daemonize());
+    // All capabilities have now been removed, except for those still needed by
+    // the next few functions.
     struct rs_conf conf = {0};
     RS_GUARD(get_configuration(&conf, arg_c > 1 ? args[1] : NULL));
     RS_GUARD(set_limits(&conf));
     RS_GUARD(bind_to_ports(&conf));
-    // todo: remove_capabilities_no_longer_needed()
-    return spawn_app_and_worker_threads(&conf);
+    int (*app_cbs[conf.app_c])(void *); // VLA of function pointers to each app
+    memset(app_cbs, 0, sizeof(app_cbs));
+    RS_GUARD(get_app_callbacks(&conf, app_cbs));
+    // All operations requiring the capabilities that were retained in
+    // set_credentials_and_capabilities() have now been completed; so remove
+    // remove those too now, to ensure that app and worker threads will be
+    // created without any privileges at all (with a UID and GID of "ringsock").
+    RS_GUARD(remove_all_capabilities_except(NULL, 0));
+    return spawn_app_and_worker_threads(&conf, app_cbs);
 }
     
 int main(
