@@ -4,15 +4,14 @@
 #include "rs_conf.h"
 #include "rs_tls.h" // derive_cert_index_from_hostname()
 
-// Configuration file parsing is done with libckv: https://github/wbudd/libckv
-#include <ckv.h> // ckv_*()
 #include <ifaddrs.h> // getifaddrs()
+#include <jgrandson.h> // JSON conf file parsing: https://github/wbudd/jgrandson
 #include <net/if.h> // IF_NAMESIZE
 
-#define RS_GUARD_CKV(ckv_ret) do { \
-    if ((ckv_ret) != CKV_OK) { \
+#define RS_GUARD_JG(_jg_ret) do { \
+    if ((_jg_ret) != JG_OK) { \
         RS_LOG(LOG_ERR, "Error parsing configuration file: %s", \
-            ckv_get_err_str(ckv)); \
+            jg_get_err_str(jg, NULL, NULL)); \
         return RS_FATAL; \
     } \
 } while (0)
@@ -49,7 +48,7 @@
 #define RS_DEFAULT_SHUTDOWN_WAIT_HTTP 15 // in seconds
 #define RS_DEFAULT_SHUTDOWN_WAIT_WS 30
 
-static char const default_conf_path[] = "/etc/ringsocket.ckv";
+static char const default_conf_path[] = "/etc/ringsocket.json";
 
 // The only 2 vars with external linkage in RingSocket -- see ringsocket_util.h
 
@@ -89,7 +88,7 @@ static bool ipv6_address_is_duplicate(
 }
 
 static rs_ret add_ip_addrs_from_strs(
-    char * const * ip_strs,
+    char * * ip_strs,
     size_t ip_str_c,
     struct rs_conf_port * port
 ) {
@@ -124,7 +123,9 @@ static rs_ret add_ip_addrs_from_strs(
             memcpy(port->ipv6_addrs + port->ipv6_addr_c++, &ipv6_addr,
                 sizeof(struct in6_addr));
         }
+        free(*ip_str);
     }
+    free(ip_strs);
     return RS_OK;
 }
 
@@ -208,46 +209,43 @@ static rs_ret check_if_endpoint_is_duplicate(
 }
 
 static rs_ret parse_endpoint(
-    ckv_t * ckv,
-    struct ckv_map * map,
+    jg_t * jg,
+    jg_obj_get_t * obj,
     struct rs_conf_endpoint * endpoint,
     struct rs_conf_app * app,
     struct rs_conf * conf
 ) {
-    RS_GUARD_CKV(ckv_get_uint16(ckv, (ckv_arg_uint16){
-        .map = map,
-        .key = "endpoint_id",
-        .is_required = true,
-        .dst = &endpoint->endpoint_id
-    }));
+    RS_GUARD_JG(jg_obj_get_uint16(jg, obj, "endpoint_id", NULL,
+        &endpoint->endpoint_id));
     {
-        size_t allowed_origin_c = 0;
-        RS_GUARD_CKV(ckv_get_strs(ckv, (ckv_arg_strs){
-            .map = map,
-            .key = "allowed_origins",
-            .is_required = true,
-            .min_c = 1,
-            .max_c = RS_MAX_ALLOWED_ORIGIN_C,
-            .max_strlen = RS_ALLOWED_ORIGIN_MAX_STRLEN,
-            .elem_c = &allowed_origin_c,
-            .dst = &endpoint->allowed_origins
-        }));
-        endpoint->allowed_origin_c = allowed_origin_c;
-    }
-    for (char * * ao = endpoint->allowed_origins;
-         ao < endpoint->allowed_origins + endpoint->allowed_origin_c; ao++) {
-        if (strlen(*ao) > conf->allowed_origin_max_strlen) {
-            conf->allowed_origin_max_strlen = strlen(*ao);
+        jg_arr_get_t * arr = NULL;
+        size_t elem_c = 0;
+        RS_GUARD_JG(jg_obj_get_arr(jg, obj, "allowed_origins",
+            &(jg_obj_arr){
+                .min_c = 1,
+                .max_c = RS_MAX_ALLOWED_ORIGIN_C,
+                .min_c_reason = "At least one origin must be allowed."
+            }, &arr, &elem_c));
+        RS_CALLOC(endpoint->allowed_origins, elem_c);
+        endpoint->allowed_origin_c = elem_c;
+        for (size_t i = 0; i < elem_c; i++) {
+            size_t byte_c = 0;
+            RS_GUARD_JG(jg_arr_get_str(jg, arr, i,
+                &(jg_arr_str){
+                    .byte_c = &byte_c,
+                    .max_byte_c = RS_ALLOWED_ORIGIN_MAX_STRLEN
+                }, endpoint->allowed_origins + i));
+            if (byte_c > conf->allowed_origin_max_strlen) {
+                conf->allowed_origin_max_strlen = byte_c;
+            }
         }
     }
+
     char * uri = NULL;
-    RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-        .map = map,
-        .key = "uri",
-        .is_required = true,
-        .max_strlen = RS_URI_MAX_STRLEN,
-        .dst = &uri
-    }));
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "uri",
+        &(jg_obj_str){
+            .max_byte_c = RS_URI_MAX_STRLEN
+        }, &uri));
     RS_GUARD(parse_uri(uri, endpoint));
     for (struct rs_conf_app *a = conf->apps; a < app; a++) {
         for (struct rs_conf_endpoint *e = a->endpoints;
@@ -317,17 +315,13 @@ static rs_ret parse_endpoint(
 }
 
 static rs_ret parse_port(
-    ckv_t * ckv,
-    struct ckv_map * map,
+    jg_t * jg,
+    jg_obj_get_t * obj,
     struct rs_conf_port * port,
     struct rs_conf_port * ports
 ) {
-    RS_GUARD_CKV(ckv_get_uint16(ckv, (ckv_arg_uint16){
-        .map = map,
-        .key = "port_number",
-        .is_required = true,
-        .dst = &port->port_number
-    }));
+    RS_GUARD_JG(jg_obj_get_uint16(jg, obj, "port_number", NULL,
+        &port->port_number));
     for (struct rs_conf_port * p = ports; p < port; p++) {
         if (p->port_number == port->port_number) {
             RS_LOG(LOG_ERR, "Duplicate port number: %u" , port->port_number);
@@ -336,36 +330,34 @@ static rs_ret parse_port(
     }
     {
         bool is_unencrypted = false;
-        RS_GUARD_CKV(ckv_get_bool(ckv, (ckv_arg_bool){
-            .map = map,
-            .key = "is_unencrypted",
-            .dst = &is_unencrypted
-        }));
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "is_unencrypted", (bool []){false},
+            &is_unencrypted));
         port->is_encrypted = !is_unencrypted;
     }
     {
-        char * * ip_strs = NULL;
-        size_t ip_str_c = 0;
-        RS_GUARD_CKV(ckv_get_strs(ckv, (ckv_arg_strs){
-            .map = map,
-            .key = "ip_addrs",
-            .min_c = 1,
-            .max_c = UINT16_MAX,
-            .max_strlen = RS_IP_ADDR_MAX_STRLEN,
-            .elem_c = &ip_str_c,
-            .dst = &ip_strs
-        }));
-        if (ip_str_c) {
-            RS_GUARD(add_ip_addrs_from_strs(ip_strs, ip_str_c, port));
+        jg_arr_get_t * arr = NULL;
+        size_t elem_c = 0;
+        RS_GUARD_JG(jg_obj_get_arr_defa(jg, obj, "ip_addrs",
+            &(jg_obj_arr_defa){
+                .max_c = UINT16_MAX,
+            }, &arr, &elem_c));
+        if (elem_c) {
+            char * * ip_strs = NULL;
+            RS_CALLOC(ip_strs, elem_c);
             port->listen_ip_kind = RS_LISTEN_IP_SPECIFIC;
+            for (size_t i = 0; i < elem_c; i++) {
+                RS_GUARD_JG(jg_arr_get_str(jg, arr, i,
+                    &(jg_arr_str){
+                        .max_byte_c = RS_IP_ADDR_MAX_STRLEN
+                    }, ip_strs + i));
+            }
+            RS_GUARD(add_ip_addrs_from_strs(ip_strs, elem_c, port));
         }
     }
-    RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-        .map = map,
-        .key = "interface",
-        .max_strlen = IF_NAMESIZE,
-        .dst = &port->interface
-    }));
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "interface",
+        &(jg_obj_str){
+            .max_byte_c = IF_NAMESIZE
+        }, &port->interface));
     if (port->interface && port->listen_ip_kind != RS_LISTEN_IP_ANY) {
         RS_LOG(LOG_ERR, "\"ipv4only\" cannot be set in combination with any "
             "of the following keys on the same port (%u): \"ipv4_addrs\", "
@@ -374,11 +366,8 @@ static rs_ret parse_port(
     }
     {
         bool ipv4only = false;
-        RS_GUARD_CKV(ckv_get_bool(ckv, (ckv_arg_bool){
-            .map = map,
-            .key = "ipv4only",
-            .dst = &ipv4only
-        }));
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv4only", (bool []){false},
+            &ipv4only));
         if (ipv4only) {
             if (port->listen_ip_kind != RS_LISTEN_IP_ANY) {
                 RS_LOG(LOG_ERR, "\"ipv4only\" cannot be set in combination "
@@ -389,13 +378,11 @@ static rs_ret parse_port(
             }
             port->listen_ip_kind = RS_LISTEN_IP_ANY_V4;
         }
-    } {
+    }
+    {
         bool ipv6only = false;
-        RS_GUARD_CKV(ckv_get_bool(ckv, (ckv_arg_bool){
-            .map = map,
-            .key = "ipv6only",
-            .dst = &ipv6only
-        }));
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv6only", (bool []){false},
+            &ipv6only));
         if (ipv6only) {
             if (port->listen_ip_kind != RS_LISTEN_IP_ANY) {
                 RS_LOG(LOG_ERR, "\"ipv6only\" cannot be set in combination "
@@ -406,13 +393,11 @@ static rs_ret parse_port(
             }
             port->listen_ip_kind = RS_LISTEN_IP_ANY_V6;
         }
-    } {
+    }
+    {
         bool ipv4_is_embedded_in_ipv6 = false;
-        RS_GUARD_CKV(ckv_get_bool(ckv, (ckv_arg_bool){
-            .map = map,
-            .key = "ipv4_is_embedded_in_ipv6",
-            .dst = &ipv4_is_embedded_in_ipv6
-        }));
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv4_is_embedded_in_ipv6",
+            (bool []){false}, &ipv4_is_embedded_in_ipv6));
         if (ipv4_is_embedded_in_ipv6) {
             if (port->listen_ip_kind != RS_LISTEN_IP_ANY) {
                 RS_LOG(LOG_ERR, "\"ipv4_is_embedded_in_ipv6\" cannot be set in "
@@ -428,227 +413,191 @@ static rs_ret parse_port(
 }
 
 static rs_ret parse_cert(
-    ckv_t * ckv,
-    struct ckv_map * map,
+    jg_t * jg,
+    jg_obj_get_t * obj,
     struct rs_conf_cert * cert,
     struct rs_conf_cert * certs
 ) {
-    RS_GUARD_CKV(ckv_get_strs(ckv, (ckv_arg_strs){
-        .map = map,
-        .key = "hostnames",
-        .is_required = true,
-        .min_c = 1,
-        .max_c = UINT16_MAX,
-        .max_strlen = RS_HOSTNAME_MAX_STRLEN,
-        .elem_c = &cert->hostname_c,
-        .dst = &cert->hostnames
-    }));
-    for (char * * hostname = cert->hostnames;
-         hostname < cert->hostnames + cert->hostname_c; hostname++) {
-        for (struct rs_conf_cert * c = certs; c < cert; c++) {
-            for (char * * h = c->hostnames; h < c->hostnames + c->hostname_c;
-                h++) {
+    {
+        jg_arr_get_t * arr = NULL;
+        size_t elem_c = 0;
+        RS_GUARD_JG(jg_obj_get_arr(jg, obj, "hostnames",
+            &(jg_obj_arr){
+                .min_c = 1,
+                .max_c = UINT16_MAX,
+                .min_c_reason = "Certificate should have at least one hostname."
+            }, &arr, &elem_c));
+        RS_CALLOC(cert->hostnames, elem_c);
+        cert->hostname_c = elem_c;
+        for (size_t i = 0; i < elem_c; i++) {
+            char * * hostname = cert->hostnames + i;
+            RS_GUARD_JG(jg_arr_get_str(jg, arr, i,
+                &(jg_arr_str){
+                    .max_byte_c = RS_HOSTNAME_MAX_STRLEN
+                }, hostname));
+            for (struct rs_conf_cert * c = certs; c < cert; c++) {
+                for (char * * h = c->hostnames;
+                    h < c->hostnames + c->hostname_c; h++) {
+                    if (!strcmp(*h, *hostname)) {
+                        RS_LOG(LOG_ERR,
+                            "Duplicate certificate hostname: \"%s\"", *h);
+                        return RS_FATAL;
+                    }
+                }
+            }
+            for (char * * h = cert->hostnames; h < hostname; h++) {
                 if (!strcmp(*h, *hostname)) {
-                    RS_LOG(LOG_ERR, "Duplicate certificate hostname: \"%s\"",
-                        *h);
+                    RS_LOG(LOG_ERR,
+                        "Duplicate certificate hostname: \"%s\"", *h);
                     return RS_FATAL;
                 }
             }
         }
-        for (char * * h = cert->hostnames; h < hostname; h++) {
-            if (!strcmp(*h, *hostname)) {
-                RS_LOG(LOG_ERR, "Duplicate certificate hostname: \"%s\"", *h);
-                return RS_FATAL;
-            }
-        }
     }
-    RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-        .map = map,
-        .key = "privkey_path",
-        .is_required = true,
-        .max_strlen = RS_PATH_MAX_STRLEN,
-        .dst = &cert->privkey_path
-    }));
-    RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-        .map = map,
-        .key = "pubchain_path",
-        .is_required = true,
-        .max_strlen = RS_PATH_MAX_STRLEN,
-        .dst = &cert->pubchain_path
-    }));
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "privkey_path",
+        &(jg_obj_str){
+            .max_byte_c = RS_PATH_MAX_STRLEN
+        }, &cert->privkey_path));
+
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "pubchain_path",
+        &(jg_obj_str){
+            .max_byte_c = RS_PATH_MAX_STRLEN
+        }, &cert->pubchain_path));
     return RS_OK;
 }
 
 static rs_ret parse_app(
-    ckv_t * ckv,
-    struct ckv_map * map,
+    jg_t * jg,
+    jg_obj_get_t * obj,
     struct rs_conf_app * app,
     struct rs_conf * conf
 ) {
-    RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-        .map = map,
-        .key = "name",
-        .is_required = true,
-        .max_strlen = RS_APP_NAME_MAX_STRLEN,
-        .dst = &app->name
-    }));
-    RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-        .map = map,
-        .key = "app_path",
-        .is_required = true,
-        .max_strlen = RS_PATH_MAX_STRLEN,
-        .dst = &app->app_path
-    }));
-    RS_GUARD_CKV(ckv_get_uint8(ckv, (ckv_arg_uint8){
-        .map = map,
-        .key = "update_queue_size",
-        .defaul = conf->update_queue_size,
-        .dst = &app->update_queue_size
-    }));
-    if (!app->update_queue_size) {
-        RS_LOG(LOG_ERR, "Update queue sizes must not be set to zero.");
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_uint32(ckv, (ckv_arg_uint32){
-        .map = map,
-        .key = "wbuf_size",
-        .defaul = RS_DEFAULT_APP_WBUF_SIZE,
-        .dst = &app->wbuf_size
-    }));
-    if (app->wbuf_size < RS_MIN_APP_WBUF_SIZE) {
-        RS_LOG(LOG_ERR, "Setting an app's wbuf_size to anything less than %d "
-            "is a bad idea.", RS_MIN_APP_WBUF_SIZE);
-        return RS_FATAL;
-    }
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "name",
+        &(jg_obj_str){
+            .max_byte_c = RS_APP_NAME_MAX_STRLEN
+        }, &app->name));
+
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "app_path",
+        &(jg_obj_str){
+            .max_byte_c = RS_PATH_MAX_STRLEN
+        }, &app->app_path));
+
+    RS_GUARD_JG(jg_obj_get_uint8(jg, obj, "update_queue_size",
+        &(jg_obj_uint8){
+            .defa = (uint8_t []){conf->update_queue_size},
+            .min = (uint8_t []){1},
+            .min_reason = "Update queue sizes must not be set to zero."
+        }, &app->update_queue_size));
+
+    RS_GUARD_JG(jg_obj_get_uint32(jg, obj, "wbuf_size",
+        &(jg_obj_uint32){
+            .defa = (uint32_t []){RS_DEFAULT_APP_WBUF_SIZE},
+            .min = (uint32_t []){RS_MIN_APP_WBUF_SIZE},
+            .min_reason = "Setting an app's wbuf_size any lower is a bad idea"
+        }, &app->wbuf_size));
+
     {
         bool no_open_cb = false;
-        RS_GUARD_CKV(ckv_get_bool(ckv, (ckv_arg_bool){
-            .map = map,
-            .key = "no_open_cb",
-            .dst = &no_open_cb
-        }));
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "no_open_cb", (bool []){false},
+            &no_open_cb));
         app->wants_open_notification = !no_open_cb;
     }
     {
         bool no_close_cb = false;
-        RS_GUARD_CKV(ckv_get_bool(ckv, (ckv_arg_bool){
-            .map = map,
-            .key = "no_close_cb",
-            .dst = &no_close_cb
-        }));
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "no_close_cb", (bool []){false},
+            &no_close_cb));
         app->wants_close_notification = !no_close_cb;
     }
-    struct ckv_map * endpoint_maps = NULL;
-    size_t endpoint_map_c = 0;
-    RS_GUARD_CKV(ckv_get_maps(ckv, (ckv_arg_maps){
-        .map = map,
-        .key = "endpoints",
-        .is_required = true,
-        .min_c = 1,
-        .max_c = UINT32_MAX,
-        .elem_c = &endpoint_map_c,
-        .dst = &endpoint_maps
-    }));
-    RS_CALLOC(app->endpoints, endpoint_map_c);
-    app->endpoint_c = endpoint_map_c;
-    for (size_t i = 0; i < endpoint_map_c; i++) {
-        RS_GUARD(parse_endpoint(ckv, endpoint_maps + i, app->endpoints + i, app,
-            conf));
+    jg_arr_get_t * arr = NULL;
+    size_t elem_c = 0;
+    RS_GUARD_JG(jg_obj_get_arr(jg, obj, "endpoints",
+        &(jg_obj_arr){
+            .min_c = 1,
+            .max_c = UINT32_MAX,
+            .min_c_reason = "At least one endpoint object must be defined."
+        }, &arr, &elem_c));
+    RS_CALLOC(app->endpoints, elem_c);
+    app->endpoint_c = elem_c;
+    for (size_t i = 0; i < elem_c; i++) {
+        jg_obj_get_t * endp_obj = NULL;
+        RS_GUARD_JG(jg_arr_get_obj(jg, arr, i, NULL, &endp_obj));
+        RS_GUARD(parse_endpoint(jg, endp_obj, app->endpoints + i, app, conf));
     }
     return RS_OK;
 }
 
 static rs_ret parse_configuration(
-    ckv_t * ckv,
+    jg_t * jg,
     struct rs_conf * conf
 ) {
+    jg_obj_get_t * root_obj = NULL;
+    RS_GUARD_JG(jg_root_get_obj(jg, NULL, &root_obj));
     {
-        char * log_level = NULL;
-        RS_GUARD_CKV(ckv_get_str(ckv, (ckv_arg_str){
-            .key = "log_level",
-            .max_strlen = RS_CONST_STRLEN("warning"),
-            .dst = &log_level
-        }));
-        // default is "warning" -- see _rs_log_mask definition above
-        if (log_level) {
-            if (!strcmp(log_level, "error")) {
-                _rs_log_mask = LOG_UPTO(LOG_ERR);
-            } else if (!strcmp(log_level, "notice")) {
-                _rs_log_mask = LOG_UPTO(LOG_NOTICE);
-            } else if (!strcmp(log_level, "info")) {
-                _rs_log_mask = LOG_UPTO(LOG_INFO);
-            } else if (!strcmp(log_level, "debug")) {
-                _rs_log_mask = LOG_UPTO(LOG_DEBUG);
-            } else if (strcmp(log_level, "warning")) {
-                RS_LOG(LOG_ERR, "Unrecognized configuration value for "
-                    "\"log_level\": \"%s\". The value must be one of: "
-                    "\"error\", \"warning\", \"notice\", \"info\", "
-                    "or \"debug\".", log_level);
-                return RS_FATAL;
-            }
-            RS_FREE(log_level);
+        char log_level[] = "warning";
+        RS_GUARD_JG(jg_obj_get_callerstr(jg, root_obj, "log_level",
+            &(jg_obj_callerstr){
+                .defa = "warning",
+                .max_byte_c = RS_CONST_STRLEN("warning"),
+            }, log_level));
+        if (!strcmp(log_level, "error")) {
+            _rs_log_mask = LOG_UPTO(LOG_ERR);
+        } else if (!strcmp(log_level, "notice")) {
+            _rs_log_mask = LOG_UPTO(LOG_NOTICE);
+        } else if (!strcmp(log_level, "info")) {
+            _rs_log_mask = LOG_UPTO(LOG_INFO);
+        } else if (!strcmp(log_level, "debug")) {
+            _rs_log_mask = LOG_UPTO(LOG_DEBUG);
+        } else if (strcmp(log_level, "warning")) {
+            RS_LOG(LOG_ERR, "Unrecognized configuration value for "
+                "\"log_level\": \"%s\". The value must be one of: \"error\", "
+                "\"warning\", \"notice\", \"info\", or \"debug\".", log_level);
+            return RS_FATAL;
         }
     }
-    RS_GUARD_CKV(ckv_get_uint32(ckv, (ckv_arg_uint32){
-        .key = "fd_alloc_c",
-        .defaul = RS_DEFAULT_FD_ALLOC_C,
-        .dst = &conf->fd_alloc_c
-    }));
-    if (conf->fd_alloc_c < RS_MIN_FD_ALLOC_C) {
-        RS_LOG(LOG_ERR, "Setting the maximum number of open file descriptors "
-            "to anything less than %d is a bad idea.", RS_MIN_FD_ALLOC_C);
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_uint32(ckv, (ckv_arg_uint32){
-        .key = "max_ws_msg_size",
-        .defaul = RS_DEFAULT_MAX_WS_MSG_SIZE,
-        .dst = &conf->max_ws_msg_size
-    }));
-    if (conf->max_ws_msg_size < RS_MIN_MAX_WS_MSG_SIZE) {
-        RS_LOG(LOG_ERR, "Setting the maximum WebSocket message size to "
-            "anything less than %d is a bad idea.", RS_MIN_MAX_WS_MSG_SIZE);
-        return RS_FATAL;
-    }
-    if (conf->max_ws_msg_size > RS_MAX_MAX_WS_MSG_SIZE) {
-        RS_LOG(LOG_ERR, "RS does not support WebSocket messages larger than "
-            "%d bytes.", RS_MAX_MAX_WS_MSG_SIZE);
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_uint32(ckv, (ckv_arg_uint32){
-        .key = "worker_rbuf_size",
-        .defaul = RS_DEFAULT_WORKER_RBUF_SIZE,
-        .dst = &conf->worker_rbuf_size
-    }));
-    if (conf->worker_rbuf_size < RS_MIN_WORKER_RBUF_SIZE) {
-        RS_LOG(LOG_ERR, "Setting worker_rbuf_size to anything less than %d is "
-            "a bad idea.", RS_MIN_WORKER_RBUF_SIZE);
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_sizet(ckv, (ckv_arg_sizet){
-        .key = "inbound_ring_buf_size",
-        .defaul = RS_DEFAULT_INBOUND_RING_BUF_SIZE,
-        .dst = &conf->inbound_ring_buf_size
-    }));
-    if (conf->inbound_ring_buf_size < RS_MIN_INBOUND_RING_BUF_SIZE) {
-        RS_LOG(LOG_ERR, "Setting inbound_ring_buf_size to anything less than "
-            "%d is a bad idea.", RS_MIN_INBOUND_RING_BUF_SIZE);
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_sizet(ckv, (ckv_arg_sizet){
-        .key = "outbound_ring_buf_size",
-        .defaul = RS_DEFAULT_OUTBOUND_RING_BUF_SIZE,
-        .dst = &conf->outbound_ring_buf_size
-    }));
-    if (conf->outbound_ring_buf_size < RS_MIN_OUTBOUND_RING_BUF_SIZE) {
-        RS_LOG(LOG_ERR, "Setting outbound_ring_buf_size to anything less than "
-            "%d is a bad idea.", RS_MIN_OUTBOUND_RING_BUF_SIZE);
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_double(ckv, (ckv_arg_double){
-        .key = "realloc_multiplier",
-        .defaul = RS_DEFAULT_REALLOC_MULTIPLIER,
-        .dst = &conf->realloc_multiplier
-    }));
+    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "fd_alloc_c",
+        &(jg_obj_uint32){
+            .defa = (uint32_t []){RS_DEFAULT_FD_ALLOC_C},
+            .min = (uint32_t []){RS_MIN_FD_ALLOC_C},
+            .min_reason = "Setting the maximum number of open file descriptors "
+                "any lower is a bad idea."
+        }, &conf->fd_alloc_c));
+
+    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "max_ws_msg_size",
+        &(jg_obj_uint32){
+            .defa = (uint32_t []){RS_DEFAULT_MAX_WS_MSG_SIZE},
+            .min = (uint32_t []){RS_MIN_MAX_WS_MSG_SIZE},
+            .max = (uint32_t []){RS_MAX_MAX_WS_MSG_SIZE},
+            .min_reason = "Setting the maximum WebSocket message size any "
+                "lower is a bad idea.",
+            .max_reason = "RingSocket does not support WebSocket messages any "
+                "larger."
+        }, &conf->max_ws_msg_size));
+
+    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "worker_rbuf_size",
+        &(jg_obj_uint32){
+            .defa = (uint32_t []){RS_DEFAULT_WORKER_RBUF_SIZE},
+            .min = (uint32_t []){RS_MIN_WORKER_RBUF_SIZE},
+            .min_reason = "Setting worker_rbuf_size any lower is a bad idea."
+        }, &conf->worker_rbuf_size));
+
+    RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "inbound_ring_buf_size",
+        &(jg_obj_sizet){
+            .defa = (size_t []){RS_DEFAULT_INBOUND_RING_BUF_SIZE},
+            .min = (size_t []){RS_MIN_INBOUND_RING_BUF_SIZE},
+            .min_reason = "Setting inbound_ring_buf_size any lower is a bad "
+                "idea."
+        }, &conf->inbound_ring_buf_size));
+
+    RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "outbound_ring_buf_size",
+        &(jg_obj_sizet){
+            .defa = (size_t []){RS_DEFAULT_OUTBOUND_RING_BUF_SIZE},
+            .min = (size_t []){RS_MIN_OUTBOUND_RING_BUF_SIZE},
+            .min_reason = "Setting outbound_ring_buf_size any lower is a bad "
+                "idea."
+        }, &conf->outbound_ring_buf_size));
+
+    RS_GUARD_JG(jg_obj_get_double(jg, root_obj, "realloc_multiplier",
+        (double []){RS_DEFAULT_REALLOC_MULTIPLIER}, &conf->realloc_multiplier));
     if (conf->realloc_multiplier < RS_MIN_REALLOC_MULTIPLIER) {
         RS_LOG(LOG_ERR, "Setting realloc_multiplier to anything less than %f "
             "is a bad idea.", RS_MIN_REALLOC_MULTIPLIER);
@@ -659,91 +608,89 @@ static rs_ret parse_configuration(
             "%f is a bad idea.", RS_MAX_REALLOC_MULTIPLIER);
         return RS_FATAL;
     }
-    RS_GUARD_CKV(ckv_get_uint32(ckv, (ckv_arg_uint32){
-        .key = "wrefs_elem_c",
-        .defaul = RS_DEFAULT_WREFS_ELEM_C,
-        .dst = &conf->wrefs_elem_c
-    }));
-    if (conf->wrefs_elem_c < RS_MIN_WREFS_ELEM_C) {
-        RS_LOG(LOG_ERR, "Setting the initial number of elements of the wrefs "
-            "array to less than %d is a bad idea.", RS_MIN_WREFS_ELEM_C);
-        return RS_FATAL;
+
+    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "wrefs_elem_c",
+        &(jg_obj_uint32){
+            .defa = (uint32_t []){RS_DEFAULT_WREFS_ELEM_C},
+            .min = (uint32_t []){RS_MIN_WREFS_ELEM_C},
+            .min_reason = "Setting the initial number of elements of the wrefs "
+                "array any lower is a bad idea."
+        }, &conf->wrefs_elem_c));
+
+    RS_GUARD_JG(jg_obj_get_uint16(jg, root_obj, "epoll_buf_elem_c",
+        &(jg_obj_uint16){
+            .defa = (uint16_t []){RS_DEFAULT_EPOLL_BUF_ELEM_C},
+            .min = (uint16_t []){RS_MIN_EPOLL_BUF_ELEM_C},
+            .min_reason = "Setting the maximum number of events receivable per "
+                "call to epoll_wait() any lower is a bad idea."
+        }, &conf->epoll_buf_elem_c));
+
+    RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "update_queue_size",
+        &(jg_obj_uint8){
+            .defa = (uint8_t []){RS_DEFAULT_UPDATE_QUEUE_SIZE},
+            .min = (uint8_t []){1},
+            .min_reason = "Update queue sizes must not be set to zero."
+    }, &conf->update_queue_size));
+
+    RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "shutdown_wait_http",
+        &(jg_obj_uint8){
+            .defa = (uint8_t []){RS_DEFAULT_SHUTDOWN_WAIT_HTTP}
+        }, &conf->shutdown_wait_http));
+
+    RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "shutdown_wait_ws",
+        &(jg_obj_uint8){
+            .defa = (uint8_t []){RS_DEFAULT_SHUTDOWN_WAIT_WS}
+        }, &conf->shutdown_wait_http));
+
+    jg_arr_get_t * arr = NULL;
+    size_t elem_c = 0;
+
+    RS_GUARD_JG(jg_obj_get_arr(jg, root_obj, "ports",
+        &(jg_obj_arr){
+            .min_c = 1,
+            .max_c = UINT16_MAX,
+            .min_c_reason = "At least one port object must be defined."
+        }, &arr, &elem_c));
+    RS_CALLOC(conf->ports, elem_c);
+    conf->port_c = elem_c;
+    for (size_t i = 0; i < elem_c; i++) {
+        jg_obj_get_t * port_obj = NULL;
+        RS_GUARD_JG(jg_arr_get_obj(jg, arr, i, NULL, &port_obj));
+        RS_GUARD(parse_port(jg, port_obj, conf->ports + i, conf->ports));
     }
-    RS_GUARD_CKV(ckv_get_uint16(ckv, (ckv_arg_uint16){
-        .key = "epoll_buf_elem_c",
-        .defaul = RS_DEFAULT_EPOLL_BUF_ELEM_C,
-        .dst = &conf->epoll_buf_elem_c
-    }));
-    if (conf->epoll_buf_elem_c < RS_MIN_EPOLL_BUF_ELEM_C) {
-        RS_LOG(LOG_ERR, "Setting the maximum number of events receivable per "
-            "call to epoll_wait() to less than %d is a bad idea.",
-            RS_MIN_EPOLL_BUF_ELEM_C);
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_uint8(ckv, (ckv_arg_uint8){
-        .key = "update_queue_size",
-        .defaul = RS_DEFAULT_UPDATE_QUEUE_SIZE,
-        .dst = &conf->update_queue_size
-    }));
-    if (!conf->update_queue_size) {
-        RS_LOG(LOG_ERR, "Update queue sizes must not be set to zero.");
-        return RS_FATAL;
-    }
-    RS_GUARD_CKV(ckv_get_uint8(ckv, (ckv_arg_uint8){
-        .key = "shutdown_wait_http",
-        .defaul = RS_DEFAULT_SHUTDOWN_WAIT_HTTP,
-        .dst = &conf->shutdown_wait_http
-    }));
-    RS_GUARD_CKV(ckv_get_uint8(ckv, (ckv_arg_uint8){
-        .key = "shutdown_wait_ws",
-        .defaul = RS_DEFAULT_SHUTDOWN_WAIT_WS,
-        .dst = &conf->shutdown_wait_http
-    }));
-    struct ckv_map * maps = NULL;
-    size_t map_c = 0;
-    RS_GUARD_CKV(ckv_get_maps(ckv, (ckv_arg_maps){
-        .key = "ports",
-        .is_required = true,
-        .min_c = 1,
-        .max_c = UINT16_MAX,
-        .elem_c = &map_c,
-        .dst = &maps
-    }));
-    RS_CALLOC(conf->ports, map_c);
-    conf->port_c = map_c;
-    for (size_t i = 0; i < map_c; i++) {
-        RS_GUARD(parse_port(ckv, maps + i, conf->ports + i, conf->ports));
-    }
-    RS_GUARD_CKV(ckv_get_maps(ckv, (ckv_arg_maps){
-        .key = "certs",
-        .max_c = RS_MAX_CERT_C,
-        .elem_c = &map_c,
-        .dst = &maps
-    }));
-    if (map_c) {
-        RS_CALLOC(conf->certs, map_c);
-        conf->cert_c = map_c;
-        for (size_t i = 0; i < map_c; i++) {
-            RS_GUARD(parse_cert(ckv, maps + i, conf->certs + i, conf->certs));
+
+    RS_GUARD_JG(jg_obj_get_arr_defa(jg, root_obj, "certs",
+        &(jg_obj_arr_defa) { 
+            .max_c = RS_MAX_CERT_C
+        }, &arr, &elem_c));
+    if (elem_c) {
+        RS_CALLOC(conf->certs, elem_c);
+        conf->cert_c = elem_c;
+        for (size_t i = 0; i < elem_c; i++) {
+            jg_obj_get_t * cert_obj = NULL;
+            RS_GUARD_JG(jg_arr_get_obj(jg, arr, i, NULL, &cert_obj));
+            RS_GUARD(parse_cert(jg, cert_obj, conf->certs + i, conf->certs));
         }
     }
-    RS_GUARD_CKV(ckv_get_maps(ckv, (ckv_arg_maps){
-        .key = "apps",
-        .is_required = true,
-        .min_c = 1,
-        .max_c = UINT16_MAX,
-        .elem_c = &map_c,
-        .dst = &maps
-    }));
-    RS_CALLOC(conf->apps, map_c);
-    conf->app_c = map_c;
-    for (size_t i = 0; i < map_c; i++) {
-        RS_GUARD(parse_app(ckv, maps + i, conf->apps + i, conf));
+
+    RS_GUARD_JG(jg_obj_get_arr(jg, root_obj, "apps",
+        &(jg_obj_arr){
+            .min_c = 1,
+            .max_c = UINT16_MAX,
+            .min_c_reason = "At least one app object must be defined."
+        }, &arr, &elem_c));
+    RS_CALLOC(conf->apps, elem_c);
+    conf->app_c = elem_c;
+    for (size_t i = 0; i < elem_c; i++) {
+        jg_obj_get_t * app_obj = NULL;
+        RS_GUARD_JG(jg_arr_get_obj(jg, arr, i, NULL, &app_obj));
+        RS_GUARD(parse_app(jg, app_obj, conf->apps + i, conf));
     }
-    RS_GUARD_CKV(ckv_get_uint16(ckv, (ckv_arg_uint16){
-        .key = "worker_c",
-        .dst = &conf->worker_c
-    }));
+
+    RS_GUARD_JG(jg_obj_get_uint16(jg, root_obj, "worker_c",
+        &(jg_obj_uint16){
+            .defa = (uint16_t []){0}
+        }, &conf->worker_c));
     if (!conf->worker_c) {
         long ret = sysconf(_SC_NPROCESSORS_ONLN);
         if (ret == -1) {
@@ -760,22 +707,9 @@ rs_ret get_configuration(
     struct rs_conf * conf,
     char const * conf_path
 ) {
-    if (!conf_path) {
-        conf_path = default_conf_path;
-    }
-    FILE * f = fopen(conf_path, "r");
-    if (!f) {
-        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful fopen(\"%s\", \"r\")", conf_path);
-        return RS_FATAL;
-    }
-    ckv_t * ckv = ckv_init();
-    RS_GUARD_CKV(ckv_parse_file(ckv, f, conf_path));
-    if (fclose(f) == EOF) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful fclose(f) on opened file: %s",
-            conf_path);
-        return RS_FATAL;
-    }
-    RS_GUARD(parse_configuration(ckv, conf));
-    ckv_free(ckv);
+    jg_t * jg = jg_init();
+    RS_GUARD_JG(jg_parse_file(jg, conf_path ? conf_path : default_conf_path));
+    RS_GUARD(parse_configuration(jg, conf));
+    jg_free(jg);
     return RS_OK;
 }

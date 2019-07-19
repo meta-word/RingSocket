@@ -48,6 +48,9 @@ static char * get_addr_str(
 char * get_peer_str(
     union rs_peer * peer
 ) {
+    // Upside of using thread_local static like this: no worrying about free().
+    // Downside of this approach: 40 lines of cruft to get an appropriate size,
+    // instead of just calling asprintf().
     thread_local static char peer_str[
         RS_CONST_STRLEN("[") + NI_MAXHOST + RS_CONST_STRLEN("]:") + NI_MAXSERV +
         RS_CONST_STRLEN(" (") + RS_CONST_STRLEN(
