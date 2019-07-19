@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2019 William Budd
 
-// There's an annoying long-standing bug in GCC where it mistakenly emits a
-// -Wmissing-field-initializers warning when fields are initialized with
-// designated initializers: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84685
-// This pragma directive suppresses such spurious warnings for this file:
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-
 #include "rs_conf.h"
 #include "rs_tls.h" // derive_cert_index_from_hostname()
 
