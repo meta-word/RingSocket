@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2019 William Budd
 
+// There's an annoying long-standing bug in GCC where it mistakenly emits a
+// -Wmissing-field-initializers warning when fields are initialized with
+// designated initializers: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84685
+// This pragma directive suppresses such spurious warnings for this file:
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+
 #include "rs_conf.h"
 #include "rs_tls.h" // derive_cert_index_from_hostname()
 
@@ -634,7 +640,7 @@ static rs_ret parse_configuration(
 
     RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "shutdown_wait_http",
         &(jg_obj_uint8){
-            .defa = (uint8_t []){RS_DEFAULT_SHUTDOWN_WAIT_HTTP}
+            .defa = &(uint8_t){RS_DEFAULT_SHUTDOWN_WAIT_HTTP}
         }, &conf->shutdown_wait_http));
 
     RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "shutdown_wait_ws",
