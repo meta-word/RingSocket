@@ -19,7 +19,7 @@ CFLAGS = -Wall -Wextra -Wpedantic -Wshadow -std=c11 -isystem src \
 	-DRS_CACHELINE_SIZE=$(RS_CACHELINE_SIZE)
 CFLAGS_OPTIM = -O3 -flto -fuse-linker-plugin
 LFLAGS_OPTIM = -flto -fuse-linker-plugin -fuse-ld=gold
-LFLAGS_LIB = -lcap -lckv -lcrypto -ldl -lssl -pthread
+LFLAGS_LIB = -lcap -lcrypto -ldl -ljgrandson -lssl -pthread
 
 SRC_DIR = src
 SRC_PATHS := $(wildcard $(SRC_DIR)/$(NAME_PREFIX)*.c)
