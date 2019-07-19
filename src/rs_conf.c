@@ -336,7 +336,7 @@ static rs_ret parse_port(
     }
     {
         bool is_unencrypted = false;
-        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "is_unencrypted", (bool []){false},
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "is_unencrypted", &(bool){false},
             &is_unencrypted));
         port->is_encrypted = !is_unencrypted;
     }
@@ -372,7 +372,7 @@ static rs_ret parse_port(
     }
     {
         bool ipv4only = false;
-        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv4only", (bool []){false},
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv4only", &(bool){false},
             &ipv4only));
         if (ipv4only) {
             if (port->listen_ip_kind != RS_LISTEN_IP_ANY) {
@@ -387,7 +387,7 @@ static rs_ret parse_port(
     }
     {
         bool ipv6only = false;
-        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv6only", (bool []){false},
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv6only", &(bool){false},
             &ipv6only));
         if (ipv6only) {
             if (port->listen_ip_kind != RS_LISTEN_IP_ANY) {
@@ -403,7 +403,7 @@ static rs_ret parse_port(
     {
         bool ipv4_is_embedded_in_ipv6 = false;
         RS_GUARD_JG(jg_obj_get_bool(jg, obj, "ipv4_is_embedded_in_ipv6",
-            (bool []){false}, &ipv4_is_embedded_in_ipv6));
+            &(bool){false}, &ipv4_is_embedded_in_ipv6));
         if (ipv4_is_embedded_in_ipv6) {
             if (port->listen_ip_kind != RS_LISTEN_IP_ANY) {
                 RS_LOG(LOG_ERR, "\"ipv4_is_embedded_in_ipv6\" cannot be set in "
@@ -490,27 +490,27 @@ static rs_ret parse_app(
 
     RS_GUARD_JG(jg_obj_get_uint8(jg, obj, "update_queue_size",
         &(jg_obj_uint8){
-            .defa = (uint8_t []){conf->update_queue_size},
-            .min = (uint8_t []){1},
+            .defa = &(uint8_t){conf->update_queue_size},
+            .min = &(uint8_t){1},
             .min_reason = "Update queue sizes must not be set to zero."
         }, &app->update_queue_size));
 
     RS_GUARD_JG(jg_obj_get_uint32(jg, obj, "wbuf_size",
         &(jg_obj_uint32){
-            .defa = (uint32_t []){RS_DEFAULT_APP_WBUF_SIZE},
-            .min = (uint32_t []){RS_MIN_APP_WBUF_SIZE},
+            .defa = &(uint32_t){RS_DEFAULT_APP_WBUF_SIZE},
+            .min = &(uint32_t){RS_MIN_APP_WBUF_SIZE},
             .min_reason = "Setting an app's wbuf_size any lower is a bad idea"
         }, &app->wbuf_size));
 
     {
         bool no_open_cb = false;
-        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "no_open_cb", (bool []){false},
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "no_open_cb", &(bool){false},
             &no_open_cb));
         app->wants_open_notification = !no_open_cb;
     }
     {
         bool no_close_cb = false;
-        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "no_close_cb", (bool []){false},
+        RS_GUARD_JG(jg_obj_get_bool(jg, obj, "no_close_cb", &(bool){false},
             &no_close_cb));
         app->wants_close_notification = !no_close_cb;
     }
@@ -562,17 +562,17 @@ static rs_ret parse_configuration(
     }
     RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "fd_alloc_c",
         &(jg_obj_uint32){
-            .defa = (uint32_t []){RS_DEFAULT_FD_ALLOC_C},
-            .min = (uint32_t []){RS_MIN_FD_ALLOC_C},
+            .defa = &(uint32_t){RS_DEFAULT_FD_ALLOC_C},
+            .min = &(uint32_t){RS_MIN_FD_ALLOC_C},
             .min_reason = "Setting the maximum number of open file descriptors "
                 "any lower is a bad idea."
         }, &conf->fd_alloc_c));
 
     RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "max_ws_msg_size",
         &(jg_obj_uint32){
-            .defa = (uint32_t []){RS_DEFAULT_MAX_WS_MSG_SIZE},
-            .min = (uint32_t []){RS_MIN_MAX_WS_MSG_SIZE},
-            .max = (uint32_t []){RS_MAX_MAX_WS_MSG_SIZE},
+            .defa = &(uint32_t){RS_DEFAULT_MAX_WS_MSG_SIZE},
+            .min = &(uint32_t){RS_MIN_MAX_WS_MSG_SIZE},
+            .max = &(uint32_t){RS_MAX_MAX_WS_MSG_SIZE},
             .min_reason = "Setting the maximum WebSocket message size any "
                 "lower is a bad idea.",
             .max_reason = "RingSocket does not support WebSocket messages any "
@@ -581,29 +581,29 @@ static rs_ret parse_configuration(
 
     RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "worker_rbuf_size",
         &(jg_obj_uint32){
-            .defa = (uint32_t []){RS_DEFAULT_WORKER_RBUF_SIZE},
-            .min = (uint32_t []){RS_MIN_WORKER_RBUF_SIZE},
+            .defa = &(uint32_t){RS_DEFAULT_WORKER_RBUF_SIZE},
+            .min = &(uint32_t){RS_MIN_WORKER_RBUF_SIZE},
             .min_reason = "Setting worker_rbuf_size any lower is a bad idea."
         }, &conf->worker_rbuf_size));
 
     RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "inbound_ring_buf_size",
         &(jg_obj_sizet){
-            .defa = (size_t []){RS_DEFAULT_INBOUND_RING_BUF_SIZE},
-            .min = (size_t []){RS_MIN_INBOUND_RING_BUF_SIZE},
+            .defa = &(size_t){RS_DEFAULT_INBOUND_RING_BUF_SIZE},
+            .min = &(size_t){RS_MIN_INBOUND_RING_BUF_SIZE},
             .min_reason = "Setting inbound_ring_buf_size any lower is a bad "
                 "idea."
         }, &conf->inbound_ring_buf_size));
 
     RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "outbound_ring_buf_size",
         &(jg_obj_sizet){
-            .defa = (size_t []){RS_DEFAULT_OUTBOUND_RING_BUF_SIZE},
-            .min = (size_t []){RS_MIN_OUTBOUND_RING_BUF_SIZE},
+            .defa = &(size_t){RS_DEFAULT_OUTBOUND_RING_BUF_SIZE},
+            .min = &(size_t){RS_MIN_OUTBOUND_RING_BUF_SIZE},
             .min_reason = "Setting outbound_ring_buf_size any lower is a bad "
                 "idea."
         }, &conf->outbound_ring_buf_size));
 
     RS_GUARD_JG(jg_obj_get_double(jg, root_obj, "realloc_multiplier",
-        (double []){RS_DEFAULT_REALLOC_MULTIPLIER}, &conf->realloc_multiplier));
+        &(double){RS_DEFAULT_REALLOC_MULTIPLIER}, &conf->realloc_multiplier));
     if (conf->realloc_multiplier < RS_MIN_REALLOC_MULTIPLIER) {
         RS_LOG(LOG_ERR, "Setting realloc_multiplier to anything less than %f "
             "is a bad idea.", RS_MIN_REALLOC_MULTIPLIER);
@@ -617,24 +617,24 @@ static rs_ret parse_configuration(
 
     RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "wrefs_elem_c",
         &(jg_obj_uint32){
-            .defa = (uint32_t []){RS_DEFAULT_WREFS_ELEM_C},
-            .min = (uint32_t []){RS_MIN_WREFS_ELEM_C},
+            .defa = &(uint32_t){RS_DEFAULT_WREFS_ELEM_C},
+            .min = &(uint32_t){RS_MIN_WREFS_ELEM_C},
             .min_reason = "Setting the initial number of elements of the wrefs "
                 "array any lower is a bad idea."
         }, &conf->wrefs_elem_c));
 
     RS_GUARD_JG(jg_obj_get_uint16(jg, root_obj, "epoll_buf_elem_c",
         &(jg_obj_uint16){
-            .defa = (uint16_t []){RS_DEFAULT_EPOLL_BUF_ELEM_C},
-            .min = (uint16_t []){RS_MIN_EPOLL_BUF_ELEM_C},
+            .defa = &(uint16_t){RS_DEFAULT_EPOLL_BUF_ELEM_C},
+            .min = &(uint16_t){RS_MIN_EPOLL_BUF_ELEM_C},
             .min_reason = "Setting the maximum number of events receivable per "
                 "call to epoll_wait() any lower is a bad idea."
         }, &conf->epoll_buf_elem_c));
 
     RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "update_queue_size",
         &(jg_obj_uint8){
-            .defa = (uint8_t []){RS_DEFAULT_UPDATE_QUEUE_SIZE},
-            .min = (uint8_t []){1},
+            .defa = &(uint8_t){RS_DEFAULT_UPDATE_QUEUE_SIZE},
+            .min = &(uint8_t){1},
             .min_reason = "Update queue sizes must not be set to zero."
     }, &conf->update_queue_size));
 
@@ -645,7 +645,7 @@ static rs_ret parse_configuration(
 
     RS_GUARD_JG(jg_obj_get_uint8(jg, root_obj, "shutdown_wait_ws",
         &(jg_obj_uint8){
-            .defa = (uint8_t []){RS_DEFAULT_SHUTDOWN_WAIT_WS}
+            .defa = &(uint8_t){RS_DEFAULT_SHUTDOWN_WAIT_WS}
         }, &conf->shutdown_wait_http));
 
     jg_arr_get_t * arr = NULL;
@@ -695,7 +695,7 @@ static rs_ret parse_configuration(
 
     RS_GUARD_JG(jg_obj_get_uint16(jg, root_obj, "worker_c",
         &(jg_obj_uint16){
-            .defa = (uint16_t []){0}
+            .defa = &(uint16_t){0}
         }, &conf->worker_c));
     if (!conf->worker_c) {
         long ret = sysconf(_SC_NPROCESSORS_ONLN);
