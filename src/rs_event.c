@@ -208,7 +208,8 @@ static rs_ret loop_over_events(
             uint32_t e_kind = 0;
             uint32_t e_data = 0;
             {
-                uint32_t * p = (uint32_t *) &e->data.u64;
+                uint64_t u64 = e->data.u64;
+                uint32_t * p = (uint32_t *) &u64;
                 e_kind = *p++;
                 e_data = *p;
             }
