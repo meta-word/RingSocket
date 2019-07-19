@@ -209,6 +209,8 @@ static rs_ret loop_over_events(
             uint32_t e_data = 0;
             {
                 uint64_t u64 = e->data.u64;
+                // If p were to be assigned directly from &e->data.u64,
+                // GCC 9+ would complain about -Waddress-of-packed-member.
                 uint32_t * p = (uint32_t *) &u64;
                 e_kind = *p++;
                 e_data = *p;
