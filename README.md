@@ -22,7 +22,7 @@ Aside from needing a fairly recent Linux kernel and C compiler, RingSocket has o
 Note that if not already present, `make install` will (attempt to) create an unprivileged system user named `ringsock` for exclusive use by the RingSocket daemon.
 
 ## Configuration
-All configuration options are expected to be specified in a `ringsocket.json` JSON file, by default expected to be located at `\etc\ringsocket.json`.
+All configuration options are expected to be specified in a `ringsocket.json` JSON file, at `\etc\ringsocket.json` by default.
 
 [todo]
 
@@ -30,7 +30,11 @@ All configuration options are expected to be specified in a `ringsocket.json` JS
 [todo]
 
 ## Todo
-Even the todo itself is a [todo]...
+* Fill in the [todo] parts of this README.md
+* Move wref stuff out of `rs_ring.c` into a separate `rs_wref.c`
+* Replace randomizing BPF with cpu affinity-based EBPF
+* Reduce thread_local usage in favor of stack variables to optimize performance
+* Add/improve comments for the lesser documented parts of the codebase
 
 ## Contributing
 Pull requests and other contributions are always welcome! License: [MIT](https://github.com/wbudd/jgrandson/blob/master/LICENSE).
