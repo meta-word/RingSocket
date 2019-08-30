@@ -208,8 +208,8 @@ static rs_ret daemonize(
     default:
         _exit(EXIT_SUCCESS);
     }
-    if (chdir("/") == -1) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful chdir(\"/\")");
+    if (chdir("/srv/ws") == -1) {
+        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful chdir(\"/srv/ws\")");
         return RS_FATAL;
     }
     umask(0);

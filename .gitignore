@@ -1,5 +1,0 @@
-*.so
-*.so.*
-*.o
-.objects/
-ringsocket

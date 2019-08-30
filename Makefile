@@ -8,6 +8,7 @@ SYSTEM_HEADERS = ringsocket*.h
 
 BIN_DIR = /usr/bin
 INCLUDE_DIR = /usr/include
+WORK_DIR = /srv/ws
 
 RS_CACHELINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
 ifeq ($(RS_CACHELINE_SIZE), 0)
@@ -49,4 +50,5 @@ clean:
 install:
 	cp $(NAME_BIN) $(BIN_DIR)/ && \
 		cp $(SRC_DIR)/$(SYSTEM_HEADERS) $(INCLUDE_DIR)/ && \
+		mkdir -p $(WORK_DIR) && \
 		(useradd --system --shell $(BIN_DIR)/false $(NAME_USER) || true)

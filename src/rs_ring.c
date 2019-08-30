@@ -173,6 +173,7 @@ rs_ret send_close_to_app(
 }
 
 static rs_ret send_newest_wmsg(
+    struct rs_conf const * conf,
     union rs_peer * peer,
     uint8_t const * msg,
     size_t msg_size
@@ -189,7 +190,6 @@ static rs_ret send_newest_wmsg(
         return RS_OK;
     }
     RS_LOG(LOG_DEBUG, "Sending %zu bytes outbound", msg_size);
-    RS_LOG_CHBUF(LOG_DEBUG, "Sending outbound", msg, msg_size);
     switch (peer->is_encrypted ?
         write_tls(peer, msg, msg_size) :
         write_tcp(peer, msg, msg_size)
@@ -201,7 +201,7 @@ static rs_ret send_newest_wmsg(
             // without any events) to try to perform any shutdown procedures
             // that can be done right away layer by layer until the occurence
             // of RS_AGAIN or completion.
-            return handle_peer_events(NULL, NULL, peer, 0, 0);
+            return handle_peer_events(conf, NULL, peer, 0, 0);
         }
         return RS_OK;
     case RS_AGAIN:
@@ -232,22 +232,23 @@ rs_ret receive_from_app(
             uint32_t * peer_i = (uint32_t *) (ring_msg->msg + 1);
             switch (*ring_msg->msg) {
             case RS_OUTBOUND_SINGLE:
-                RS_LOG(LOG_DEBUG, "Sending outbound single...");
+                RS_LOG(LOG_DEBUG, "Sending single outbound msg to peer_i: %u",
+                    *peer_i);
                 head_size += 4;
-                RS_GUARD(send_newest_wmsg(peers + *peer_i,
+                RS_GUARD(send_newest_wmsg(conf, peers + *peer_i,
                     ring_msg->msg + head_size, ring_msg->size - head_size));
                 break;
             case RS_OUTBOUND_ARRAY:
                 peer_c = *peer_i++;
                 head_size += 4 + 4 * peer_c;
                 for (size_t i = 0; i < peer_c; i++) {
-                    RS_GUARD(send_newest_wmsg(peers + peer_i[i],
+                    RS_GUARD(send_newest_wmsg(conf, peers + peer_i[i],
                     ring_msg->msg + head_size, ring_msg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY:
                 for (size_t p_i = 0; p_i < peers_elem_c; p_i++) {
-                    RS_GUARD(send_newest_wmsg(peers + p_i,
+                    RS_GUARD(send_newest_wmsg(conf, peers + p_i,
                         ring_msg->msg + head_size, ring_msg->size - head_size));
                 }
                 break;
@@ -255,8 +256,9 @@ rs_ret receive_from_app(
                 head_size += 4;
                 for (size_t p_i = 0; p_i < peers_elem_c; p_i++) {
                     if (p_i != *peer_i) {
-                        RS_GUARD(send_newest_wmsg(peers + p_i, ring_msg->msg +
-                            head_size, ring_msg->size - head_size));
+                        RS_GUARD(send_newest_wmsg(conf, peers + p_i,
+                            ring_msg->msg + head_size,
+                            ring_msg->size - head_size));
                     }
                 }
                 break;
@@ -266,7 +268,7 @@ rs_ret receive_from_app(
                 for (size_t p_i = 0; p_i < peers_elem_c; p_i++) {
                     for (size_t i = 0; peer_i[i] != p_i; i++) {
                         if (i == peer_c) {
-                            RS_GUARD(send_newest_wmsg(peers + p_i,
+                            RS_GUARD(send_newest_wmsg(conf, peers + p_i,
                                 ring_msg->msg + head_size,
                                 ring_msg->size - head_size));
                             break;
@@ -422,7 +424,7 @@ rs_ret send_pending_write_references(
             // without any events) to try to perform any shutdown procedures
             // that can be done right away layer by layer until the occurence
             // of RS_AGAIN or completion.
-            return handle_peer_events(NULL, NULL, peer, 0, 0);
+            return handle_peer_events(conf, NULL, peer, 0, 0);
         case RS_AGAIN:
             peer->ws.wref_i = wref - wrefs;
             return RS_AGAIN;

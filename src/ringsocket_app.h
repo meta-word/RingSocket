@@ -99,8 +99,8 @@ rs_ret ringsocket_app( \
     \
     /* Prepend-pasting prevents (paramaterized) macro arguments from */ \
     /* getting expanded before this _RS_APP macro is expanded (i.e., */ \
-    /* because RS_INIT(_NONE) isn't defined, whereas _RS_INIT(_NONE) is). */ \
-    _##init_macro; /* Should expand _RS_INIT(_NONE) */ \
+    /* because RS_INIT[_NONE] isn't defined, whereas _RS_INIT[_NONE] is). */ \
+    _##init_macro; /* Should expand _RS_INIT[_NONE] */ \
     \
     struct rs_thread_sleep_state * app_sleep_state = \
         app_args->app_sleep_state; \
@@ -110,7 +110,7 @@ rs_ret ringsocket_app( \
         rs_get_readers_upon_inbound_rings_init(&rs, &inbound_readers)); \
     RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false); \
     \
-    _INIT_##timer_macro; /* Should expand _INIT_RS_TIMER_(NONE/SLEEP/WAKE) */ \
+    _INIT_##timer_macro; /* Should expand _INIT_RS_TIMER_[NONE|SLEEP|WAKE] */ \
     \
     RS_LOG(LOG_DEBUG, "Entering app main loop..."); \
     \
@@ -159,7 +159,7 @@ rs_ret ringsocket_app( \
                 /* of which differ somewhat between RS_TIMER_NONE, */ \
                 /* RS_TIMER_SLEEP, and RS_TIMER_WAKE. */ \
                 RS_LOG(LOG_DEBUG, "Going to sleep..."); \
-                _WAIT_##timer_macro; /* _WAIT_RS_TIMER_(NONE/SLEEP/WAKE) */ \
+                _WAIT_##timer_macro; /* _WAIT_RS_TIMER_[NONE|SLEEP|WAKE] */ \
                 RS_LOG(LOG_DEBUG, "Awoken by a worker thread!"); \
                 idle_c = 0; \
             } \
@@ -181,19 +181,19 @@ rs_ret ringsocket_app( \
                 sizeof(struct rs_inbound_msg_header); \
             switch (header->kind) { \
             case RS_INBOUND_OPEN: \
-                _##open_macro; /* Should expand _RS_OPEN(_NONE) */ \
+                _##open_macro; /* Should expand _RS_OPEN[_NONE] */ \
                 break; \
             case RS_INBOUND_READ: \
                 _##read_macro; /* Should expand _RS_READ_... */ \
                 break; \
             case RS_INBOUND_CLOSE: default: \
-                _##close_macro; /* Should expand _RS_CLOSE(_NONE) */ \
+                _##close_macro; /* Should expand _RS_CLOSE[_NONE] */ \
             } \
             next_inbound_message:; \
         } while ((ring_msg = rs_get_ring_msg(inbound_pair, reader))); \
         inbound_readers[rs.inbound_worker_i] = reader; \
         \
-        _CHECK_##timer_macro; /* _CHECK_RS_TIMER_(NONE/SLEEP/WAKE) */ \
+        _CHECK_##timer_macro; /* _CHECK_RS_TIMER_[NONE|SLEEP|WAKE] */ \
     } \
 } \
 \
@@ -289,7 +289,7 @@ extern inline rs_ret rs_guard_timer_cb( \
 // ############
 // # RS_TIMER #
 
-// _INIT_RS_TIMER_NONE / _INIT_RS_TIMER_SLEEP / _INIT_RS_TIMER_WAKE
+// _INIT_RS_TIMER_[NONE|SLEEP|WAKE]
 
 // Instantiate a timestamp variable...
 #define _INIT_RS_TIMER_SLEEP(timer_cb) _INIT_RS_TIMER_WAKE(timer_cb)
@@ -301,7 +301,7 @@ extern inline rs_ret rs_guard_timer_cb( \
 // ...or don't
 #define _INIT_RS_TIMER_NONE
 
-// _CHECK_RS_TIMER_NONE / _CHECK_RS_TIMER_SLEEP / _CHECK_RS_TIMER_WAKE
+// _CHECK_RS_TIMER_[NONE|SLEEP|WAKE]
 
 // Check if the timer interval has elapsed; and if so, call timer_cb...
 #define _CHECK_RS_TIMER_SLEEP(timer_cb) _CHECK_RS_TIMER_WAKE(timer_cb)
@@ -317,7 +317,7 @@ extern inline rs_ret rs_guard_timer_cb( \
 // ...or don't
 #define _CHECK_RS_TIMER_NONE
 
-// _WAIT_RS_TIMER_NONE / _WAIT_RS_TIMER_SLEEP / _WAIT_RS_TIMER_WAKE
+// _WAIT_RS_TIMER_[NONE|SLEEP|WAKE]
 
 #define _WAIT_RS_TIMER_SLEEP(timer_cb) \
     RS_TIMER_WAIT(timer_cb, RS_FUTEX_WAIT_WITHOUT_TIMEOUT)
@@ -384,7 +384,8 @@ extern inline rs_ret rs_guard_timer_cb( \
 
 #define _RS_CLOSE(close_cb) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
+    call_close_cb: \
+    RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(rs_get_client_id(&rs)))); \
 } while (0)
 
 #define _RS_CLOSE_NONE
@@ -459,7 +460,7 @@ extern inline rs_ret rs_guard_timer_cb( \
 #define RS_READ_ABORT(ws_close_code) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_close_peer(&rs, (ws_close_code))); \
-    goto next_inbound_message; \
+    goto call_close_cb; \
 } while (0)
 
 #define RS_A00(cb) do { \
@@ -683,9 +684,9 @@ do { \
 do { \
     switch (sizeof(type)) { \
     case 1: default: (var) = *((type *) payload); break; \
-    case 2: (var) = *((type *) RS_R_NTOH16(payload)); break; \
-    case 4: (var) = *((type *) RS_R_NTOH32(payload)); break; \
-    case 8: (var) = *((type *) RS_R_NTOH64(payload)); break; \
+    case 2: (var) = RS_R_NTOH16(payload); break; \
+    case 4: (var) = RS_R_NTOH32(payload); break; \
+    case 8: (var) = RS_R_NTOH64(payload); break; \
     } \
     payload += sizeof(type); \
 } while (0)

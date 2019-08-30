@@ -199,6 +199,8 @@ inline void rs_send(
         *ring->writer++ = 126;
         RS_W_HTON16(ring->writer, payload_size);
         ring->writer += 2;
+    } else {
+        *ring->writer++ = payload_size;
     }
     if (rs->wbuf_i) {
         memcpy(ring->writer, rs->wbuf, rs->wbuf_i);
@@ -445,8 +447,10 @@ inline rs_ret rs_close_peer(
 ) {
     struct rs_ring * ring = rs->outbound_rings + rs->inbound_worker_i;
     RS_GUARD(rs_prepare_ring_write(
-        &rs->io_pairs[rs->inbound_worker_i].outbound, ring, 5));
+        &rs->io_pairs[rs->inbound_worker_i].outbound, ring, 9));
     *ring->writer++ = RS_OUTBOUND_SINGLE;
+    *((uint32_t *) ring->writer) = rs->inbound_peer_i;
+    ring->writer += 4;
     *ring->writer++ = 0x88; /* FIN_CLOSE */
     *ring->writer++ = 0x02; /* payload size == 2 */
     *((uint16_t *) ring->writer) = RS_HTON16(ws_close_code);

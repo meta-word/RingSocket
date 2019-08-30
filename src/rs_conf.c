@@ -356,6 +356,8 @@ static rs_ret parse_port(
     }
     RS_GUARD_JG(jg_obj_get_str(jg, obj, "interface",
         &(jg_obj_str){
+            .defa = "",
+            .nullify_empty_str = true,
             .max_byte_c = IF_NAMESIZE
         }, &port->interface));
     if (port->interface && port->listen_ip_kind != RS_LISTEN_IP_ANY) {
