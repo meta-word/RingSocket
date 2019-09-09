@@ -18,6 +18,11 @@ enum rs_data_kind { // The data kind to send as WebSocket message contents
 inline uint64_t rs_get_client_id(
     struct rs_app_cb_args * rs
 ) {
+    if (rs->cb == RS_CALLBACK_TIMER) {
+        RS_LOG(LOG_ERR, "Shutting down: rs_get_client_id() should not be "
+            "called from a timer callback function.");
+        RS_APP_FATAL;
+    }
     return *((uint64_t *) (uint32_t []){
         rs->inbound_worker_i,
         rs->inbound_peer_i
@@ -27,6 +32,11 @@ inline uint64_t rs_get_client_id(
 inline uint64_t rs_get_endpoint_id(
     struct rs_app_cb_args * rs
 ) {
+    if (rs->cb == RS_CALLBACK_TIMER) {
+        RS_LOG(LOG_ERR, "Shutting down: rs_get_endpoint_id() should not be "
+            "called from a timer callback function.");
+        RS_APP_FATAL;
+    }
     return rs->inbound_endpoint_id;
 }
 
@@ -277,6 +287,16 @@ inline void rs_to_cur(
     void const * p,
     size_t size
 ) {
+    if (rs->cb == RS_CALLBACK_CLOSE) {
+        RS_LOG(LOG_ERR, "Shutting down: rs_to_cur() should not be called from "
+            "an RS_CLOSE() callback function.");
+        RS_APP_FATAL;
+    }
+    if (rs->cb == RS_CALLBACK_TIMER) {
+        RS_LOG(LOG_ERR, "Shutting down: rs_to_cur() should not be "
+            "called from a timer callback function.");
+        RS_APP_FATAL;
+    }
     rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
         (uint32_t []){rs->inbound_peer_i}, 1, data_kind, p, size);
     rs->wbuf_i = 0;
@@ -353,6 +373,16 @@ inline void rs_to_every_except_cur(
     void const * p,
     size_t size
 ) {
+    if (rs->cb == RS_CALLBACK_CLOSE) {
+        RS_LOG(LOG_ERR, "Shutting down: rs_to_every_except_cur() should not be "
+            "called from an RS_CLOSE() callback function.");
+        RS_APP_FATAL;
+    }
+    if (rs->cb == RS_CALLBACK_TIMER) {
+        RS_LOG(LOG_ERR, "Shutting down: rs_to_every_except_cur() should not be "
+            "called from a timer callback function.");
+        RS_APP_FATAL;
+    }
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,

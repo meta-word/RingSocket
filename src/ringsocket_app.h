@@ -38,6 +38,13 @@ enum rs_outbound_kind {
     RS_OUTBOUND_EVERY_EXCEPT_ARRAY = 4
 };
 
+enum rs_callback {
+    RS_CALLBACK_OPEN = 0,
+    RS_CALLBACK_READ = 1,
+    RS_CALLBACK_CLOSE = 2,
+    RS_CALLBACK_TIMER = 3
+};
+
 // All peer closures originating in an rs app use the 4xxx range exclusively:
 // "Status codes in the range 4000-4999 are reserved for private use and thus
 // can't be registered.  Such codes can be used by prior agreements between
@@ -62,6 +69,7 @@ struct rs_app_cb_args {
     uint8_t * wbuf;
     size_t wbuf_size;
     size_t wbuf_i;
+    enum rs_callback cb;
     uint32_t inbound_peer_i;
     int inbound_socket_fd;
     uint16_t inbound_endpoint_id;
@@ -159,6 +167,7 @@ rs_ret ringsocket_app( \
                 /* of which differ somewhat between RS_TIMER_NONE, */ \
                 /* RS_TIMER_SLEEP, and RS_TIMER_WAKE. */ \
                 RS_LOG(LOG_DEBUG, "Going to sleep..."); \
+                rs.cb = RS_CALLBACK_TIMER; \
                 _WAIT_##timer_macro; /* _WAIT_RS_TIMER_[NONE|SLEEP|WAKE] */ \
                 RS_LOG(LOG_DEBUG, "Awoken by a worker thread!"); \
                 idle_c = 0; \
@@ -181,18 +190,20 @@ rs_ret ringsocket_app( \
                 sizeof(struct rs_inbound_msg_header); \
             switch (header->kind) { \
             case RS_INBOUND_OPEN: \
+                rs.cb = RS_CALLBACK_OPEN; \
                 _##open_macro; /* Should expand _RS_OPEN[_NONE] */ \
                 break; \
             case RS_INBOUND_READ: \
+                rs.cb = RS_CALLBACK_READ; \
                 _##read_macro; /* Should expand _RS_READ_... */ \
                 break; \
             case RS_INBOUND_CLOSE: default: \
                 _##close_macro; /* Should expand _RS_CLOSE[_NONE] */ \
             } \
-            next_inbound_message:; \
         } while ((ring_msg = rs_get_ring_msg(inbound_pair, reader))); \
         inbound_readers[rs.inbound_worker_i] = reader; \
         \
+        rs.cb = RS_CALLBACK_TIMER; \
         _CHECK_##timer_macro; /* _CHECK_RS_TIMER_[NONE|SLEEP|WAKE] */ \
     } \
 } \
@@ -310,7 +321,7 @@ extern inline rs_ret rs_guard_timer_cb( \
     RS_GUARD_APP(rs_get_cur_time_microsec(&new_timestamp_microsec)); \
     if (new_timestamp_microsec >= timestamp_microsec + interval_microsec) { \
         timestamp_microsec = new_timestamp_microsec; \
-        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
+        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(&rs), &interval_microsec)); \
     } \
 } while (0)
 
@@ -345,7 +356,7 @@ extern inline rs_ret rs_guard_timer_cb( \
     } else { \
         timestamp_microsec = new_timestamp_microsec; \
         timer_cb_and_futex_wait: \
-        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
+        RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(&rs), &interval_microsec)); \
         _##futex_macro; /* _RS_FUTEX_WAIT_WITH(OUT)_TIMEOUT */ \
     } \
 } while (0)
@@ -360,7 +371,8 @@ extern inline rs_ret rs_guard_timer_cb( \
             break; \
         case RS_AGAIN: /* futex timed out: assume timing was accurate-ish */ \
             timestamp_microsec += interval_microsec; \
-            RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(), &interval_microsec)); \
+            RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(&rs), \
+                &interval_microsec)); \
             continue; \
         default: \
             RS_APP_FATAL; \
@@ -385,7 +397,8 @@ extern inline rs_ret rs_guard_timer_cb( \
 #define _RS_CLOSE(close_cb) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     call_close_cb: \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(rs_get_client_id(&rs)))); \
+    rs.cb = RS_CALLBACK_CLOSE; \
+    RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
 } while (0)
 
 #define _RS_CLOSE_NONE
