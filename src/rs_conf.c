@@ -42,7 +42,7 @@
 #define RS_IP_ADDR_MAX_STRLEN 0x3F // 63
 #define RS_HOSTNAME_MAX_STRLEN 0x3FF // 1023
 #define RS_PATH_MAX_STRLEN 0x1FFF // 8191
-#define RS_URI_MAX_STRLEN 0x1FFF // 8191
+#define RS_URL_MAX_STRLEN 0x1FFF // 8191
 #define RS_MAX_ALLOWED_ORIGIN_C 0x1FFF // 8191
 #define RS_ALLOWED_ORIGIN_MAX_STRLEN 0x1FFF // 8191
 #define RS_DEFAULT_SHUTDOWN_WAIT_HTTP 15 // in seconds
@@ -129,11 +129,11 @@ static rs_ret add_ip_addrs_from_strs(
     return RS_OK;
 }
 
-static rs_ret parse_uri(
-    char const * uri,
+static rs_ret parse_url(
+    char const * url,
     struct rs_conf_endpoint * endpoint
 ) {
-    char const * str = uri;
+    char const * str = url;
     if (*str++ == 'w') {
         if (*str++ == 's') {
             if (*str == 's') {
@@ -143,19 +143,19 @@ static rs_ret parse_uri(
             if (*str++ == ':') {
                 if (*str++ == '/') {
                     if (*str++ == '/') {
-                        goto parse_uri_hostname;
+                        goto parse_url_hostname;
                     }
                 }
             }
         }
     }
-    RS_LOG(LOG_ERR, "WebSocket URI \"%s\" does not start with the required "
-        "scheme \"wss://\" or \"ws://\"", uri);
+    RS_LOG(LOG_ERR, "WebSocket URL \"%s\" does not start with the required "
+        "scheme \"wss://\" or \"ws://\"", url);
     return RS_FATAL;
-    parse_uri_hostname:
+    parse_url_hostname:
     if (*str == '\0') {
-        RS_LOG(LOG_ERR, "WebSocket URI \"%s\" seems to be missing a hostname",
-            uri);
+        RS_LOG(LOG_ERR, "WebSocket URL \"%s\" seems to be missing a hostname",
+            url);
         return RS_FATAL;
     }
     char * slash = strchr(str, '/');
@@ -163,16 +163,16 @@ static rs_ret parse_uri(
         char * colon = strchr(str, ':');
         if (colon) {
             if (slash && colon > slash) {
-                RS_LOG(LOG_ERR, "WebSocket URI \"%s\" seems to contain a stray "
+                RS_LOG(LOG_ERR, "WebSocket URL \"%s\" seems to contain a stray "
                     "colon in its path. A colon is only allowed in the "
-                    "hostname section as a port number designator.", uri);
+                    "hostname section as a port number designator.", url);
                 return RS_FATAL;
             }
             long i = strtol(++colon, NULL, 10);
             if (i < 0 || i > UINT16_MAX) {
-                RS_LOG(LOG_ERR, "WebSocket URI \"%s\" contains an invalid port "
+                RS_LOG(LOG_ERR, "WebSocket URL \"%s\" contains an invalid port "
                     "number. Port numbers must be integers within the range "
-                    "1 through 65535.", uri);
+                    "1 through 65535.", url);
                 return RS_FATAL;
             }
             endpoint->port_number = i;
@@ -199,12 +199,12 @@ static rs_ret parse_uri(
 static rs_ret check_if_endpoint_is_duplicate(
     struct rs_conf_endpoint const * old,
     struct rs_conf_endpoint const * new,
-    char const * uri
+    char const * url
 ) {
     if (strcmp(old->url, new->url) || strcmp(old->hostname, new->hostname)) {
         return RS_OK;
     }
-    RS_LOG(LOG_ERR, "Duplicate endpoint WebSocket URI: %s", uri);
+    RS_LOG(LOG_ERR, "Duplicate endpoint WebSocket URL: %s", url);
     return RS_FATAL;
 }
 
@@ -241,20 +241,20 @@ static rs_ret parse_endpoint(
         }
     }
 
-    char * uri = NULL;
-    RS_GUARD_JG(jg_obj_get_str(jg, obj, "uri",
+    char * url = NULL;
+    RS_GUARD_JG(jg_obj_get_str(jg, obj, "url",
         &(jg_obj_str){
-            .max_byte_c = RS_URI_MAX_STRLEN
-        }, &uri));
-    RS_GUARD(parse_uri(uri, endpoint));
+            .max_byte_c = RS_URL_MAX_STRLEN
+        }, &url));
+    RS_GUARD(parse_url(url, endpoint));
     for (struct rs_conf_app *a = conf->apps; a < app; a++) {
         for (struct rs_conf_endpoint *e = a->endpoints;
              e < a->endpoints + a->endpoint_c; e++) {
-            RS_GUARD(check_if_endpoint_is_duplicate(e, endpoint, uri));
+            RS_GUARD(check_if_endpoint_is_duplicate(e, endpoint, url));
         }
     }
     for (struct rs_conf_endpoint *e = app->endpoints; e < endpoint; e++) {
-        RS_GUARD(check_if_endpoint_is_duplicate(e, endpoint, uri));
+        RS_GUARD(check_if_endpoint_is_duplicate(e, endpoint, url));
     }
     if (strlen(endpoint->hostname) > conf->hostname_max_strlen) {
         conf->hostname_max_strlen = strlen(endpoint->hostname);
@@ -267,10 +267,10 @@ static rs_ret parse_endpoint(
         if (port->port_number == endpoint->port_number) {
             if (port->is_encrypted != endpoint->is_encrypted) {
                 RS_LOG(LOG_ERR, "The port number '%u' contained in WebSocket "
-                    "URI \"%s\" is listed under \"ports\" with%s the "
+                    "URL \"%s\" is listed under \"ports\" with%s the "
                     "\"is_unencrypted\" flag, but this contradicts the scheme "
-                    "with which the URI begins (\"ws%s://\"), which specifies "
-                    "an %sencrypted connection.", endpoint->port_number, uri,
+                    "with which the URL begins (\"ws%s://\"), which specifies "
+                    "an %sencrypted connection.", endpoint->port_number, url,
                     port->is_encrypted ? "out" : "", endpoint->is_encrypted ?
                     "s" : "", endpoint->is_encrypted ? "" : "un");
                 return RS_FATAL;
@@ -287,29 +287,29 @@ static rs_ret parse_endpoint(
                     RS_LOG(LOG_ERR, "Could not find any TLS certificate "
                         "listed under the configuration file's \"certs\" that "
                         "matches the hostname portion \"%s\" of the secure "
-                        "WebSocket URI \"%s\".", endpoint->hostname, uri);
+                        "WebSocket URL \"%s\".", endpoint->hostname, url);
                     return RS_FATAL;
                 }
             }
-            RS_FREE(uri);
+            RS_FREE(url);
             return RS_OK;
         }
     }
     switch (endpoint->port_number) {
     case 80:
-        RS_LOG(LOG_ERR, "WebSocket URI \"%s\" implies endpoint port number "
+        RS_LOG(LOG_ERR, "WebSocket URL \"%s\" implies endpoint port number "
             "80, but no \"ports\" entry in the configuration file listing "
-            "such a \"port_number\" was found.", uri);
+            "such a \"port_number\" was found.", url);
         return RS_FATAL;
     case 443:
-        RS_LOG(LOG_ERR, "WebSocket URI \"%s\" implies endpoint port number "
+        RS_LOG(LOG_ERR, "WebSocket URL \"%s\" implies endpoint port number "
             "443, but no \"ports\" entry in the configuration file listing "
-            "such a \"port_number\" was found.", uri);
+            "such a \"port_number\" was found.", url);
         return RS_FATAL;
     default:
-        RS_LOG(LOG_ERR, "The port number '%u' contained in WebSocket URI "
+        RS_LOG(LOG_ERR, "The port number '%u' contained in WebSocket URL "
             "\"%s\" is not listed under \"ports\" in the configuration file.",
-            endpoint->port_number, uri);
+            endpoint->port_number, url);
         return RS_FATAL;
     }
 }
