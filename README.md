@@ -34,8 +34,9 @@ shared object at compile time.
 * [Configuration](#configuration)
   * [Global configuration](#global-configuration)
   * [Port configuration](#port-configuration)
-  * [Cert configuration](#cert-configuration)
+  * [TLS certificate configuration](#tls-certificate-configuration)
   * [App configuration](#app-configuration)
+  * [Endpoint configuration](#endpoint-configuration)
 * [Control flow overview](#control-flow-overview)
   * [Startup](#startup)
   * [Worker threads](#worker-threads)
@@ -243,6 +244,12 @@ uint64_t rs_get_client_id(rs_t * rs);
 [todo: write documentation]
 
 ```C
+uint16_t rs_get_endpoint_id(rs_t * rs);
+```
+
+[todo: write documentation]
+
+```C
 void rs_w_p(rs_t * rs, void const * src, size_t size);
 
 void rs_w_str(rs_t * rs, char const * str);
@@ -268,12 +275,12 @@ void rs_w_int64_hton(rs_t * rs, int64_t i64);
 [todo: write documentation]
 
 ```C
-void rs_to_single(rs_t * rs, enum rs_data_kind kind, uint64_t id);
-void rs_to_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * ids, size_t id_c);
+void rs_to_single(rs_t * rs, enum rs_data_kind kind, uint64_t cid);
+void rs_to_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * cids, size_t cid_c);
 void rs_to_cur(rs_t * rs, enum rs_data_kind kind);
 void rs_to_every(rs_t * rs, enum rs_data_kind kind);
-void rs_to_every_except_single(rs_t * rs, enum rs_data_kind kind, uint64_t id);
-void rs_to_every_except_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * ids, size_t id_c);
+void rs_to_every_except_single(rs_t * rs, enum rs_data_kind kind, uint64_t cid);
+void rs_to_every_except_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * cids, size_t cid_c);
 void rs_to_every_except_cur(rs_t * rs, enum rs_data_kind kind);
 ```
 
@@ -322,7 +329,7 @@ Other keys recognized in the root JSON object control global configuration value
   number of apps is greater than or equal to the number of cores).
 
 The remainder of the global options are mostly intended for performance
-optimization. It's probably wise to just omit these "until you know what you're
+optimization. It's probably wise to just omit these unless "you know what you're
 doing":
 * `"shutdown_wait_http"`: The number of seconds to wait for a closing peer to
   fulfill its role in an orderly bi-directional shutdown handshake from the HTTP
@@ -337,18 +344,18 @@ doing":
   connections) that RingSocket is allowed to handle simultaneously. Default:
   `4096`
 * `"max_ws_msg_size"`: Sets the maximum number of bytes a single WebSocket
-  message may contain. Default: `16777216` (i.e., 16MB)
+  message may contain. Default: `16777216` (i.e., 16 MB)
 * `"realloc_multiplier"`: The factor with which RingSocket should multipy the
   size of any memory buffer that has run out of free space when attempting to
   reallocate a larger buffer on the heap. Default: `1.5`
 * `"worker_rbuf_size"`: The initial size in bytes of each worker thread's read
-  buffer for incoming WebSocket messages. Default: `33554432` (i.e., 32MB)
+  buffer for incoming WebSocket messages. Default: `33554432` (i.e., 32 MB)
 * `"inbound_ring_buf_size"`: The initial size in bytes of each worker/app pair's
   ring buffer with which worker threads relay incoming WebSocket messages to app
-  threads. Default: `67108864` (i.e., 64MB)
+  threads. Default: `67108864` (i.e., 64 MB)
 * `"outbound_ring_buf_size"`: The initial size in bytes of each app/worker
   pair's ring buffer with which app threads relay outgoing WebSocket messages to
-  worker threads. Default: `134217728` (i.e., 128MB)
+  worker threads. Default: `134217728` (i.e., 128 MB)
 * `"wrefs_elem_c"`: The initial number of elements of each worker thread's array
   of write references, with which they keep track of the extent to which
   recipients have received their copies of outgoing WebSocket messages.
@@ -361,15 +368,75 @@ doing":
 
 ### Port configuration
 
-[todo: write documentation]
+Each element of the `"ports"` array must be a JSON object containing at least
+the key:
+* "`port_number`": a TCP port number on which to listen for incoming
+connections.
 
-### Cert configuration
+The following optional keys are also recognized inside this JSON object:
+* `"is_unencrypted"`: [todo: write documentation]
+* `"ip_addrs"`: [todo: write documentation]
+* `"interface"`: [todo: write documentation]
+* `"pv4only"`: [todo: write documentation]
+* `"ipv6only"`: [todo: write documentation]
+* `"ipv4_is_embedded_in_ipv6"`: [todo: write documentation]
 
-[todo: write documentation]
+### TLS certificate configuration
+
+Each element of the `"certs"` array must be a JSON object containing the
+following keys:
+* `"hostnames"`: [todo: write documentation]
+* `"privkey_path"`: [todo: write documentation]
+* `"pubchain_path"`: [todo: write documentation]
 
 ### App configuration
 
-[todo: write documentation]
+Each element of the `"apps"` array must be a JSON object containing at least the
+following keys:
+* `"name"`: Log messages recorded from this app's thread will
+  include this name string as a prefix.
+* `"app_path"`: The absolute path to this app's shared object file (e.g.,
+  `"/usr/local/lib/foo.so"`).
+* `"endpoints"`: an array of JSON objects holding endpoint configurations. See
+  [Endpoint configuration](#endpoint-configuration).
+
+The following optional keys are also recognized inside this JSON object:
+* `"no_open_cb"`: Setting this value to `"true"` reduces a bit of unnecessary
+  overhead for apps that omit the client "open" callback by specifying
+  `RS_OPEN_NONE`, by telling worker threads that they don't need to inform this
+  app's thread of new connections being established.
+* `"no_close_cb"`: Same mechanism as `"no_open_cb"`: tell worker threads they
+  need not inform this app's thread of connections that are no longer available.
+* `"wbuf_size"`: The initial size in bytes of this app's write buffer, which is
+  used to accumulate data written with the `rs_w_...()` helper functions before
+  their concatenated contents is written to the outbound ring buffers with any
+  of the `rs_to_...()` helper functions. Default: `1048576` (i.e., 1 MB)
+* `"update_queue_size"`: An app-specific value that takes preference over the
+  global `"update_queue_size"` mentioned at
+  [Global configuration](#global-configuration).
+
+### Endpoint configuration
+
+Each element of the `"endpoints"` array (see
+[App configuration](#app-configuration)) must be a JSON object containing the
+following keys:
+* `"endpoint_id"`: An integer value in the range [0...UINT16_MAX] corresponding
+  to this endpoint, which an app can obtain with the RingSocket helper function
+  `rs_get_endpoint_id()` in order to determine to which endpoint a WebSocket
+  client established its connection with the app. This way an app handling
+  multiple endpoints can differentiate the content it serves, or assign
+   different endpoint-based privileges to its WebSocket clients.
+* `"url"`: The fully-qualified URL string belonging to this endpoint (e.g.,
+  `"wss://example.com:12345/foo"`). Note that the port number contained in or
+  implied by this URL must also be listed as a `"port_number"` of a
+  [Port configuration](#port-configuration) JSON object. Furthermore, the scheme
+  part of the URL must correspond to that port object's `"is_unencrypted"` flag:
+  `"is_unencrypted: false"` (the default) for `wss://` URLs, and
+  `"is_unencrypted: true"` for `ws://` URLs.
+* `"allowed_origins"`: An array of fully-qualified URL strings specifying from
+  which origins WebSocket clients that include the *Origin* HTTP header
+  (i.e., browser clients) are allowed to connect to this endpoint (e.g.,
+  `["http://localhost:8080", "https://example.com/foo"]`).
 
 ## Control flow overview
 
