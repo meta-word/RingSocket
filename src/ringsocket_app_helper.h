@@ -8,6 +8,11 @@
 // Inline functions allowing apps to only include a single
 // #include <ringsocket.h>, while avoiding function call overhead.
 
+enum rs_data_kind { // The data kind to send as WebSocket message contents
+ RS_BIN = 0, // Binary data
+ RS_UTF8 = 1 // UTF-8 data (AKA Text data)
+};
+
 // API functions
 
 inline uint64_t rs_get_client_id(
@@ -154,7 +159,7 @@ inline void rs_send(
     enum rs_outbound_kind outbound_kind,
     uint32_t const * recipients,
     uint32_t recipient_c,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     void const * p,
     size_t size
 ) {
@@ -190,7 +195,7 @@ inline void rs_send(
             ring->writer += 4;
         } while (--recipient_c);
     }
-    *ring->writer++ = is_utf8 ? 0x81 : 0x82;
+    *ring->writer++ = data_kind == RS_UTF8 ? 0x81 : 0x82;
     if (payload_size > UINT16_MAX) {
         *ring->writer++ = 127;
         RS_W_HTON64(ring->writer, payload_size);
@@ -217,19 +222,19 @@ inline void rs_send(
 
 inline void rs_to_single(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     uint64_t client_id,
     void const * p,
     size_t size
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
-    rs_send(rs, *u32, RS_OUTBOUND_SINGLE, u32 + 1, 1, is_utf8, p, size);
+    rs_send(rs, *u32, RS_OUTBOUND_SINGLE, u32 + 1, 1, data_kind, p, size);
     rs->wbuf_i = 0;
 }
 
 inline void rs_to_multi(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     uint64_t const * client_ids,
     size_t client_c,
     void const * p,
@@ -248,12 +253,12 @@ inline void rs_to_multi(
         case 0:
             continue;
         case 1:
-            rs_send(rs, i, RS_OUTBOUND_SINGLE, cur_clients, 1, is_utf8, p,
+            rs_send(rs, i, RS_OUTBOUND_SINGLE, cur_clients, 1, data_kind, p,
                 size);
             continue;
         default:
             rs_send(rs, i, RS_OUTBOUND_ARRAY, cur_clients, cur_client_c,
-                is_utf8, p, size);
+                data_kind, p, size);
             continue;
         }
     }
@@ -262,30 +267,30 @@ inline void rs_to_multi(
 
 inline void rs_to_cur(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     void const * p,
     size_t size
 ) {
     rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
-        (uint32_t []){rs->inbound_peer_i}, 1, is_utf8, p, size);
+        (uint32_t []){rs->inbound_peer_i}, 1, data_kind, p, size);
     rs->wbuf_i = 0;
 }
 
 inline void rs_to_every(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     void const * p,
     size_t size
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
-        rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+        rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
     }
     rs->wbuf_i = 0;
 }
 
 inline void rs_to_every_except_single(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     uint64_t client_id,
     void const * p,
     size_t size
@@ -293,10 +298,10 @@ inline void rs_to_every_except_single(
     uint32_t * u32 = (uint32_t *) &client_id;
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == *u32) {
-            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, u32 + 1, 1, is_utf8,
-                p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, u32 + 1, 1,
+                data_kind, p, size);
         } else {
-            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
         }
     }
     rs->wbuf_i = 0;
@@ -304,7 +309,7 @@ inline void rs_to_every_except_single(
 
 inline void rs_to_every_except_multi(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     uint64_t const * client_ids,
     size_t client_c,
     void const * p,
@@ -321,15 +326,15 @@ inline void rs_to_every_except_multi(
         }
         switch (cur_client_c) {
         case 0:
-            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
             continue;
         case 1:
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, cur_clients, 1,
-                is_utf8, p, size);
+                data_kind, p, size);
             continue;
         default:
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_ARRAY, cur_clients,
-                cur_client_c, is_utf8, p, size);
+                cur_client_c, data_kind, p, size);
             continue;
         }
     }
@@ -338,16 +343,16 @@ inline void rs_to_every_except_multi(
 
 inline void rs_to_every_except_cur(
     struct rs_app_cb_args * rs,
-    bool is_utf8,
+    enum rs_data_kind data_kind,
     void const * p,
     size_t size
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
-                (uint32_t []){rs->inbound_peer_i}, 1, is_utf8, p, size);
+                (uint32_t []){rs->inbound_peer_i}, 1, data_kind, p, size);
         } else {
-            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, is_utf8, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
         }
     }
     rs->wbuf_i = 0;

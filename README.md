@@ -267,13 +267,13 @@ void rs_w_int64_hton(rs_t * rs, int64_t i64);
 [todo: write documentation]
 
 ```C
-void rs_to_single(rs_t * rs, bool is_utf8, uint64_t client_id);
-void rs_to_multi(rs_t * rs, bool is_utf8, uint64_t const * client_ids, size_t client_c);
-void rs_to_cur(rs_t * rs, bool is_utf8);
-void rs_to_every(rs_t * rs, bool is_utf8);
-void rs_to_every_except_single(rs_t * rs, bool is_utf8, uint64_t client_id);
-void rs_to_every_except_multi(rs_t * rs, bool is_utf8, uint64_t const * client_ids, size_t client_c);
-void rs_to_every_except_cur(rs_t * rs, bool is_utf8);
+void rs_to_single(rs_t * rs, enum rs_data_kind kind, uint64_t id);
+void rs_to_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * ids, size_t id_c);
+void rs_to_cur(rs_t * rs, enum rs_data_kind kind);
+void rs_to_every(rs_t * rs, enum rs_data_kind kind);
+void rs_to_every_except_single(rs_t * rs, enum rs_data_kind kind, uint64_t id);
+void rs_to_every_except_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * ids, size_t id_c);
+void rs_to_every_except_cur(rs_t * rs, enum rs_data_kind kind);
 ```
 
 [todo: write documentation]
