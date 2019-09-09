@@ -32,9 +32,10 @@ shared object at compile time.
   * [App callback return values](#app-callback-return-values)
   * [App helper functions](#app-helper-functions)
 * [Configuration](#configuration)
-  * [Ports](#ports)
-  * [Certs](#certs)
-  * [Apps](#apps)
+  * [Global configuration](#global-configuration)
+  * [Port configuration](#port-configuration)
+  * [Cert configuration](#cert-configuration)
+  * [App configuration](#app-configuration)
 * [Control flow overview](#control-flow-overview)
   * [Startup](#startup)
   * [Worker threads](#worker-threads)
@@ -280,17 +281,93 @@ void rs_to_every_except_cur(rs_t * rs, enum rs_data_kind kind);
 
 ## Configuration
 
-All configuration options are expected to be specified in a `ringsocket.json` JSON file, at `\etc\ringsocket.json` by default.
+By default, all configuration options are specified in a JSON file at
+`/etc/ringsocket.json`. To load the configuration from a different location,
+specify its path as a command line option when executing the RingSocket binary
+(e.g., `ringsocket /usr/local/etc/foo.json`).
 
-### Ports
+### Global configuration
+
+The configuration file's JSON root must be a JSON object containing at least the
+keys `"ports"` and `"apps"`, whose values must be arrays consisting of at least
+one JSON object element. Additionally, if any listed port is indended for use
+with `wss` traffic (WebSocket encrypted with TLS), the JSON root must also
+contain a key called "certs" with an array of at least one JSON object element:
+
+```js
+// The JSON standard does not officially support comments,
+// but Jgrandson (the JSON parser used by RingSocket) does allow them anyway.
+{
+  "ports": [{
+     // Port-specific configuration goes here
+   }],
+  "certs": [{ // required when using TLS encryption
+     // Cert-specific configuration goes here
+   }],
+  "apps": [{
+     // App-specific configuration goes here
+   }],
+   // Global configuration goes here
+}
+```
+Other keys recognized in the root JSON object control global configuration values:
+* `"log_level"`: The minimum level of importance at which log messages are
+  printed to *syslog* (i.e., messages of less importance than the value of
+  `"log_level"` are not recorded in the system log). Recognized values in order
+  from high to low are: `"error"`, `"warning"`, `"notice"`, `"info"`, and
+  `"debug"`. Default: `"warning"`
+* `"worker_c"`: The number of worker threads RingSocket should use. If omitted,
+  RingSocket will choose that number to be equal to the number of CPU cores
+  available to the system minus the number of apps configured (or 1, if the
+  number of apps is greater than or equal to the number of cores).
+
+The remainder of the global options are mostly intended for performance
+optimization. It's probably wise to just omit these "until you know what you're
+doing":
+* `"shutdown_wait_http"`: The number of seconds to wait for a closing peer to
+  fulfill its role in an orderly bi-directional shutdown handshake from the HTTP
+  layer downward (i.e., in cases where the client did not yet complete a HTTP
+  Upgrade handshake to the WebSocket layer), before unilaterally aborting the
+  connection. Default: `15`
+* `"shutdown_wait_ws"`: The number of seconds to wait for a closing peer to
+  fulfill its role in an orderly bi-directional shutdown handshake from the
+  WebSocket layer downward, before unilaterally aborting the connection.
+  Default: `30`
+* `"fd_alloc_c"`: The maximum number of open file descriptors (i.e., network
+  connections) that RingSocket is allowed to handle simultaneously. Default:
+  `4096`
+* `"max_ws_msg_size"`: Sets the maximum number of bytes a single WebSocket
+  message may contain. Default: `16777216` (i.e., 16MB)
+* `"realloc_multiplier"`: The factor with which RingSocket should multipy the
+  size of any memory buffer that has run out of free space when attempting to
+  reallocate a larger buffer on the heap. Default: `1.5`
+* `"worker_rbuf_size"`: The initial size in bytes of each worker thread's read
+  buffer for incoming WebSocket messages. Default: `33554432` (i.e., 32MB)
+* `"inbound_ring_buf_size"`: The initial size in bytes of each worker/app pair's
+  ring buffer with which worker threads relay incoming WebSocket messages to app
+  threads. Default: `67108864` (i.e., 64MB)
+* `"outbound_ring_buf_size"`: The initial size in bytes of each app/worker
+  pair's ring buffer with which app threads relay outgoing WebSocket messages to
+  worker threads. Default: `134217728` (i.e., 128MB)
+* `"wrefs_elem_c"`: The initial number of elements of each worker thread's array
+  of write references, with which they keep track of the extent to which
+  recipients have received their copies of outgoing WebSocket messages.
+  Default: `10000`
+* `"epoll_buf_elem_c"`: Determines the number of epoll events each worker thread
+  can store during each call to `epoll_wait()`. Default: `100`
+* `"update_queue_size"`: The number of ring buffer writes to deliberately
+  queue in order to guard against CPU memory reordering (see
+  [ringsocket_ring.h](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_ring.h)). Default: `5`
+
+### Port configuration
 
 [todo: write documentation]
 
-### Certs
+### Cert configuration
 
 [todo: write documentation]
 
-### Apps
+### App configuration
 
 [todo: write documentation]
 
