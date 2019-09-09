@@ -24,6 +24,12 @@ inline uint64_t rs_get_client_id(
     });
 }
 
+inline uint64_t rs_get_endpoint_id(
+    struct rs_app_cb_args * rs
+) {
+    return rs->inbound_endpoint_id;
+}
+
 inline rs_ret rs_check_app_wsize(
     struct rs_app_cb_args * rs,
     size_t incr_size
