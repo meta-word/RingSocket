@@ -22,6 +22,18 @@
 #include <stdatomic.h> // atomic_uintptr_t, atomic_load/store_explicit()
 #include <threads.h> // thread stuff
 
+// It is highly recommended that the correct cache line size of the target
+// architecture be passed to the compiler. For example:
+// > gcc -DRS_CACHELINE_SIZE=$(shell getconf LEVEL1_DCACHE_LINESIZE)
+// When not defined, guess a cache line size of 64, which may cause significant
+// performance penalities when inaccurate.
+#ifndef RS_CACHELINE_SIZE
+#define RS_CACHELINE_SIZE 64
+#endif
+#if RS_CACHELINE_SIZE == 0
+#define RS_CACHELINE_SIZE 64
+#endif
+
 // Every RingSocket app callback function receives the same (rs_t * rs) opaque
 // pointer type as its first 1st argument. (Or maybe just pretend it's opaque?)
 typedef struct rs_app_cb_args rs_t;
