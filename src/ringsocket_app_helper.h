@@ -64,6 +64,13 @@ inline void rs_w_p(
     rs->wbuf_i += size;
 }
 
+inline void rs_w_str(
+    struct rs_app_cb_args * rs,
+    char const * str // Must be null-terminated
+) {
+    rs_w_p(rs, str, strlen(str));
+}
+
 inline void rs_w_uint8(
     struct rs_app_cb_args * rs,
     uint8_t u8
