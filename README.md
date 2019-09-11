@@ -286,19 +286,49 @@ void rs_w_int16_hton(rs_t * rs, int16_t i16);
 void rs_w_int32_hton(rs_t * rs, int32_t i32);
 void rs_w_int64_hton(rs_t * rs, int64_t i64);
 ```
-[todo: write documentation]
+
+These functions concatenate a buffer/string/integer onto a temporary internal
+write buffer. The app thread will only flush the contents of this internal
+buffer out to one or more outbound ring buffers once one of the `rs_to_...()`
+functions listed below is called.
+
+Note that each `rs_w_..._hton()` function above will take care of converting
+integer endianness from host byte order to network byte order on any system
+where these orders differ. Also note that the string passed to `rs_w_str()` must
+be NULL-terminated—in case of unterminated strings just use `rs_w_p()` instead.
 
 ```C
+// Write to a single WebSocket client, specified by client_id.
 void rs_to_single(rs_t * rs, enum rs_data_kind kind, uint64_t cid);
+
+// Write to multiple WebSocket clients, specified by a client_id array.
 void rs_to_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * cids, size_t cid_c);
+
+// Reply to the WebSocket client that evoked the current RS_OPEN() or RS_READ()
+// callback. Calling this function from RS_CLOSE() or RS_TIMER_...() callbacks
+// will result in a fatal error.
 void rs_to_cur(rs_t * rs, enum rs_data_kind kind);
+
+// Write to every WebSocket client currently connected to this app.
 void rs_to_every(rs_t * rs, enum rs_data_kind kind);
+
+// Write to every WebSocket client except one, as specified by its client_id.
 void rs_to_every_except_single(rs_t * rs, enum rs_data_kind kind, uint64_t cid);
+
+// Write to every WebSocket client except some, as specified by client_id array.
 void rs_to_every_except_multi(rs_t * rs, enum rs_data_kind kind, uint64_t const * cids, size_t cid_c);
+
+// Write to every WebSocket client except the one that evoked the current
+// RS_OPEN() or RS_READ()callback. Calling this function from RS_CLOSE() or
+// RS_TIMER_...() callbacks will result in a fatal error.
 void rs_to_every_except_cur(rs_t * rs, enum rs_data_kind kind);
 ```
 
-[todo: write documentation]
+These functions write and flush any data buffered by the `rs_w_...()` functions
+above to one or more outbound ring buffers, depending on the function variant
+and any `client_id`s specified. From each outbound ring buffer, a corresponding
+worker thread will take care of writing this data to any specified WebSocket
+client recipients.
 
 ## Configuration
 
