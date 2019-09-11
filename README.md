@@ -241,13 +241,27 @@ leaving the range [4000...4899] for app authors to assign as they see fit.
 uint64_t rs_get_client_id(rs_t * rs);
 ```
 
-[todo: write documentation]
+Obtains the client ID belonging to the WebSocket client connection that evoked
+the current `RS_OPEN()`, `RS_READ()`, or `RS_CLOSE()` callback function.
+I.e., every ID is mapped to one specific TCP socket file descriptor. Note that
+calling this function from an `RS_TIMER_...()` callback will result in a fatal
+error.
+
+Also note that this ID is only valid while the corresponding connection is live.
+Using an ID after the corresponding `RS_CLOSE()` callback function has returned
+may result in errors and security vulnerabilities, given that RingSocket may
+then assign the same ID to an unrelated future client connection.
 
 ```C
 uint16_t rs_get_endpoint_id(rs_t * rs);
 ```
 
-[todo: write documentation]
+Obtains the endpoint ID of the WebSocket client connection that evoked
+the current `RS_OPEN()`, `RS_READ()`, or `RS_CLOSE()` callback function.
+For apps with multiple [configured endpoint urls](#endpoint-configuration),
+this function allows the app to determine through which of those the WebSocket
+client established its connection. Note that calling this function from an
+`RS_TIMER_...()` callback will result in a fatal error.
 
 ```C
 void rs_w_p(rs_t * rs, void const * src, size_t size);
