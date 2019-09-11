@@ -374,20 +374,48 @@ the key:
 connections.
 
 The following optional keys are also recognized inside this JSON object:
-* `"is_unencrypted"`: [todo: write documentation]
-* `"ip_addrs"`: [todo: write documentation]
-* `"interface"`: [todo: write documentation]
-* `"pv4only"`: [todo: write documentation]
-* `"ipv6only"`: [todo: write documentation]
-* `"ipv4_is_embedded_in_ipv6"`: [todo: write documentation]
+* `"is_unencrypted"`: If `true`, this port will only accept plaintext `ws://`
+  WebSocket connections. If `false`, (the default) this port will only accept
+  TLS-encrypted `wss://` WebSocket connections. See the explanation of the
+  `"url"` key-value of app [endpoints](#endpoint-configuration) for more
+  information.
+* `"ip_addrs"`: An array of IP address strings on which this port will listen
+  for incoming connections. If omitted, RingSocket listens to `["0.0.0.0"]`,
+  which means it will accept connections to any interface and IP address known
+  on the RingSocket host system (provided that the port number matches).
+* `"interface"`: The name of a destination network interface available on the
+  RingSocket host system to which to accept incoming connections. If omitted,
+  RingSocket will accept connections from any interface (provided that the port
+  number matches).
+
+  Note that RingSocket does not allow specifying both the "`ip_addrs`" and
+  `"interface`" options for the same port.
+* `"ipv4only"`: If `true`, this port will only accept IPv4 connections.
+  If `false` (the default), RingSocket will allow both IPv4 and IPv6
+  connections on this port.
+* `"ipv6only"`: If `true`, this port will only accept IPv6 connections.
+  If `false` (the default), RingSocket will allow both IPv4 and IPv6
+  connections on this port.
+* `"ipv4_is_embedded_in_ipv6"`: If `true`, Ringsocket will use a single IPv6
+  stack on this port, in which IPv4 addresses are mapped to IPv6 addresses.
+  For example, if an app were to log the address of an incoming connection
+  from IPv4 address `192.0.2.128` it would show as the IPv6 address
+  `::ffff:192.0.2.128`.
+  If `false` (the default), RingSocket will use separate IP stacks for IPv4 and
+  IPv6 on this port.
 
 ### TLS certificate configuration
 
 Each element of the `"certs"` array must be a JSON object containing the
 following keys:
-* `"hostnames"`: [todo: write documentation]
-* `"privkey_path"`: [todo: write documentation]
-* `"pubchain_path"`: [todo: write documentation]
+* `"hostnames"`: An array of strings of the domains to which this TLS
+  certificate has been issued.  
+  E.g., `["example.com", "*.example.com"]`.
+* `"privkey_path"`: The absolute path to the certificate's private key file.  
+  E.g., `"/etc/letsencrypt/live/example.com/privkey.pem"`.
+* `"pubchain_path"`: The absolute path to the certificate's full public key
+  chain file.  
+  E.g., `"/etc/letsencrypt/live/example.com/fullchain.pem"`.
 
 ### App configuration
 
@@ -417,6 +445,10 @@ The following optional keys are also recognized inside this JSON object:
 
 ### Endpoint configuration
 
+An endpoint is unique URL/ID pair with which an app can be accessed by WebSocket
+clients. RingSocket supports configuring any number of endpoints per app within
+the range [1...UINT16_MAX].
+
 Each element of the `"endpoints"` array (see
 [App configuration](#app-configuration)) must be a JSON object containing the
 following keys:
@@ -427,12 +459,18 @@ following keys:
   multiple endpoints can differentiate the content it serves, or assign
    different endpoint-based privileges to its WebSocket clients.
 * `"url"`: The fully-qualified URL string belonging to this endpoint (e.g.,
-  `"wss://example.com:12345/foo"`). Note that the port number contained in or
+  `"wss://example.com:12345/foo"`).
+
+  Note that the port number contained in or
   implied by this URL must also be listed as a `"port_number"` of a
   [Port configuration](#port-configuration) JSON object. Furthermore, the scheme
   part of the URL must correspond to that port object's `"is_unencrypted"` flag:
   `"is_unencrypted: false"` (the default) for `wss://` URLs, and
   `"is_unencrypted: true"` for `ws://` URLs.
+
+  Finally, note that every `wss://` endpoint URL must have a hostname component
+  that is listed among the `"hostnames"` of any of the
+  [configured TLS certificates](#tls-certificate-configuration).
 * `"allowed_origins"`: An array of fully-qualified URL strings specifying from
   which origins WebSocket clients that include the *Origin* HTTP header
   (i.e., browser clients) are allowed to connect to this endpoint (e.g.,
@@ -486,4 +524,4 @@ but also happy to work remotely.
     | | | |  _ \    | | | |  _ \| | | |/ _  |/ _  | / ___) _ \|    \ 
     | | | | |_) ) @ | | | | |_) ) |_| ( (_| ( (_| |( (__| |_| | | | |
      \___/|____/     \___/|____/|____/ \____|\____(_)____)___/|_|_|_|
-（日本語能力試験N1を取得／永住者の在留資格あり）
+（2010年に日本語能力試験N1に合格／2017年に日本永住権を取得）
