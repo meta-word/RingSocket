@@ -3,8 +3,8 @@
 RingSocket is a highly scalable WebSocket server for Linux written in C (C11)
 featuring:
 
-* A modular server app API allowing fully self-contained backend apps to be
-  plugged in at runtime
+* A modular server app API facilitating fully self-contained runtime-pluggable
+  backend apps
 * A completely lockless multi-threaded design consisting of worker threads,
   app threads, and ring buffers
 * A fully event-based architecture: epoll-based event loops for workers, and
@@ -150,7 +150,28 @@ callback function—without waiting for the client to make a request for it.
 
 ##### RS_READ_BIN(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])<br />RS_READ_UTF8(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])
 
-[todo: write documentation]
+Declaring `RS_READ_BIN(foo_read, macro1, macro2)` will cause RingSocket to call
+an app-provided `int foo_read(rs_t * rs, type1 var1, type2 var2)` callback
+function whenever a WebSocket message originating from a WebSocket client
+arrives at this app. All arguments other than the callback argument must be one
+of the following macro arguments (up to a maximum of 15 macro arguments), which
+allow RingSocket to determine the type and number of variables the read callback
+function expects to receive, as well as to validate them in advance of calling
+said function:
+* [`RS_NET(type[, elem_c])`](#rs_nettype-elem_crs_ntohtype-elem_c)
+* [`RS_NTOH(type[, elem_c])`](#rs_nettype-elem_crs_ntohtype-elem_c)
+* [`RS_NET_VLA(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NTOH_VLA(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NET_HEAP(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NTOH_HEAP(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_STR_VLA(type, min_elem_c, max_elem_c)`](#rs_strtype-min_elem_c-max_elem_crs_str_heaptype-min_elem_c-max_elem_c)
+* [`RS_STR_HEAP(type, min_elem_c, max_elem_c)`](#rs_strtype-min_elem_c-max_elem_crs_str_heaptype-min_elem_c-max_elem_c)
+
+`RS_READ_UTF8()` behaves the same as `RS_READ_BIN()`, except that it requires
+received WebSocket messages to have a payload of type text (i.e., UTF-8) rather
+than a plain binary payload. RingSocket validates the UTF-8 encoding of all
+WebSocket messages of type text in advance, in conformance of
+[RFC 6455 Section 5.6](https://tools.ietf.org/html/rfc6455#section-5.6).
 
 ##### RS_READ_SWITCH(*case_m1*[, *case_m2*[, ...]])
 
@@ -166,7 +187,12 @@ wish to support.
 
 ##### RS_CASE_BIN(*case_val*, *read_cb*[, *read_m1*[, *read_m2*[, ...]]])<br />RS_CASE_UTF8(*case_val*, *read_cb*[, *read_m1*[, *read_m2*[, ...]]])
 
-[todo: write documentation]
+Apart from *case_val*, which fulfills the role described at
+[`RS_READ_SWITCH(case_m1[, ...])`](#rs_read_switchcase_m1-case_m2-); these
+macros accept the same arguments as
+[`RS_READ_BIN(read_cb[, ...])`](#rs_read_binread_cb-read_m1-read_m2-) and
+[`RS_READ_UTF8(read_cb[, ...])`](#rs_read_utf8read_cb-read_m1-read_m2-)
+respectively.
 
 ##### RS_NET(*type*[, *elem_c*])<br />RS_NTOH(*type*[, *elem_c*])
 
@@ -528,7 +554,7 @@ following keys:
 1. The process switches to running as user `ringsock` (see "Installation" above).
 1. All capabilities are removed except those needed for configuration purposes.
 1. The process daemonizes (double `fork()`, closing of std streams, etc).
-1. The configuration file is parsed (see "Configuration" below).
+1. The [configuration file](#configuration) is parsed.
 1. Resource limits are set.
 1. Network ports on which to listen for incoming WebSocket traffic are opened.
 1. Each app DLL (`.so` file) specified in the configuration file is loaded with `dlopen()`.
