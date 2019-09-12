@@ -196,15 +196,36 @@ respectively.
 
 ##### RS_NET(*type*[, *elem_c*])<br />RS_NTOH(*type*[, *elem_c*])
 
-[todo: write documentation]
+The argument position of each `RS_NET(type)` decalaration corresponds to the
+type expected of an argument to the read callback function in the same position.
+E.g., `RS_READ(foo, RS_NET(uint64_t), RS_NET(int8_t))` would correspond to a
+function signature of `int foo(rs_t * rs, uint64_t u64, int8_t i8);`.
+
+`RS_NTOH` usage is identical to that of `RS_NET`, except that `RS_NTOH` also
+takes care of converting the endianness of received integers from network byte
+order to host byte order on any system where these orders differ.
+
+When supplied with a 2nd argument, that argument is interpreted as a `size_t`
+designating the number of elements of an array of the type given as the 1st
+argument. E.g., `RS_READ(foo, RS_NTOH(uint64_t, 7), RS_NET(int8_t))` would
+correspond to a function signature of
+`int foo(rs_t * rs, uint64_t * u64_arr, int8_t i8);`, with RingSocket taking
+care of validating that `u64_arr` contains exactly 7 uint64_t elements.
 
 ##### RS_NET_VLA(*type*, *min_elem_c*, *max_elem_c*)<br />RS_NTOH_VLA(*type*, *min_elem_c*, *max_elem_c*)<br />RS_NET_HEAP(*type*, *min_elem_c*, *max_elem_c*)<br />RS_NTOH_HEAP(*type*, *min_elem_c*, *max_elem_c*)
 
-[todo: write documentation]
+These variants are only valid as the last argument passed `RS_READ...()`. E.g.,
+`RS_READ_BIN(foo, RS_NET(char) RS_NTOH_VLA(int32_t, 1, 10))` corresponds to
+`int foo(char ch, int32_t * i32_arr, size_t elem_c)` where `elem_c` is an
+additional `size_t` argument holding the number of elements actually received
+and accessible by the preceding array pointer, which in this example must have a
+minimum length of 1 element and a maximum length of 10 elements.
 
 ##### RS_STR(*min_byte_c*, *max_byte_c*)<br />RS_STR_HEAP(*min_byte_c*, *max_byte_c*)
 
-[todo: write documentation]
+Same usage as the macros directly above, except that a type of `char` is
+implied, and that the string arrays passed to the callback function are
+NULL-terminated.
 
 ##### RS_CLOSE(*close_cb*)
 
@@ -260,6 +281,19 @@ cannot be registered, making them available for custom use by applications.
 Within that range though, RingSocket limits itself to using the range
 [4900...4999] for [internally returned status codes](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_app.h),
 leaving the range [4000...4899] for app authors to assign as they see fit.
+
+RingSocket currently closes WebSocket client connections internally with one of
+the following status codes when a received WebSocket payload doesn't meet the
+app's requirements as specified by `RS_READ_...()`:
+* **4900**: WRONG SIZE: The received message's payload size did not match the
+  sum of all sizes of the read callback function's parameters.
+* **4901**: WRONG DATA TYPE: An
+  [`RS_READ_UTF8(read_cb[, ...])`](#rs_read_utf8read_cb-read_m1-read_m2-) read
+  callback received a message with a binary data type, or vice versa.
+* **4902**: UNKNOWN CASE: The 1st byte of the message received did not
+  correspond to the *case_val* of any
+  [RS_CASE_...](#rs_case_bincase_val-read_cb-read_m1-read_m2-rs_case_utf8case_val-read_cb-read_m1-read_m2-)
+  within a [`RS_READ_SWITCH(case_m1[, ...])`](#rs_read_switchcase_m1-case_m2-).
 
 ### App helper functions
 
