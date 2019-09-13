@@ -616,8 +616,8 @@ extern inline rs_ret rs_guard_timer_cb( \
     RS_MACRIFY_TYPE( \
         RS_256_3( \
             RS_NET_SINGLE, \
-            RS_NET_STA, \
-            RS_NET_VLA, \
+            RS_NET_ARR, \
+            RS_NET_ARR_MAX, \
             __VA_ARGS__ \
         ), \
         name_i, \
@@ -628,8 +628,8 @@ extern inline rs_ret rs_guard_timer_cb( \
     RS_MACRIFY_TYPE( \
         RS_256_3( \
             RS_NTOH_SINGLE, \
-            RS_NTOH_STA, \
-            RS_NTOH_VLA, \
+            RS_NTOH_ARR, \
+            RS_NTOH_ARR_MAX, \
             __VA_ARGS__ \
         ), \
         name_i, \
@@ -668,21 +668,31 @@ extern inline rs_ret rs_guard_timer_cb( \
     type v##name_i = *((type *) payload); \
     payload += sizeof(type)
 
-#define RS_NET_ARR(var, elem_c, type) \
+#define RS_NET_MEMCPY(var, elem_c, type) \
 do { \
     memcpy(var, payload, (elem_c) * sizeof(type)); \
     payload += (elem_c) * sizeof(type); \
 } while (0)
 
-#define RS_NET_STA(name_i, type, elem_c) \
+#define RS_NET_ARR(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
     thread_local static type v##name_i[elem_c] = {0}; \
-    RS_NET_ARR(v##name_i, elem_c, type)
+    RS_NET_MEMCPY(v##name_i, elem_c, type)
+
+#define _01RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
+    type v1[max_elem_c] = {0}; \
+    RS_NET_MEMCPY(v1, elem_c, type)
+
+#define _01RS_NET_STA(type, min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
+    thread_local static type v1[max_elem_c] = {0}; \
+    RS_NET_MEMCPY(v1, elem_c, type)
 
 #define _01RS_NET_VLA(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[elem_c]; /* VLA */ \
-    RS_NET_ARR(v1, elem_c, type)
+    RS_NET_MEMCPY(v1, elem_c, type)
 
 #define _01RS_NET_HEAP(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
@@ -691,7 +701,7 @@ do { \
         RS_LOG(LOG_ALERT, "Failed to malloc()."); \
         RS_APP_FATAL; \
     } \
-    RS_NET_ARR(v1, elem_c, type)
+    RS_NET_MEMCPY(v1, elem_c, type)
 
 #define RS_NTOH_ASSIGN(var, type) \
 do { \
@@ -709,11 +719,27 @@ do { \
     type v##name_i = 0; \
     RS_NTOH_ASSIGN(v##name_i, type)
 
-#define RS_NTOH_STA(name_i, type, elem_c) \
+#define RS_NTOH_ARR(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
-    thread_local static type v##name_i[elem_c] = {0}; \
+    type v##name_i[elem_c] = {0}; \
     for (size_t i = 0; i < elem_c; i++) { \
         RS_NTOH_ASSIGN(v##name_i[i], type); \
+    } \
+    do { ; } while (0)
+
+#define _01RS_NTOH_ARR_MAX(type, min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
+    type v1[max_elem_c] = {0}; \
+    for (size_t i = 0; i < elem_c; i++) { \
+        RS_NTOH_ASSIGN(v1[i], type); \
+    } \
+    do { ; } while (0)
+
+#define _01RS_NTOH_STA(type, min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
+    thread_local static type v1[max_elem_c] = {0}; \
+    for (size_t i = 0; i < elem_c; i++) { \
+        RS_NTOH_ASSIGN(v1[i], type); \
     } \
     do { ; } while (0)
 
@@ -739,8 +765,19 @@ do { \
 
 #define _01RS_STR(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
+    char v1[(max_elem_c) + 1] = {0}; \
+    RS_NET_MEMCPY(v1, elem_c, char); \
+
+#define _01RS_STR_STA(min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
+    thread_local static char v1[(max_elem_c) + 1] = {0}; \
+    RS_NET_MEMCPY(v1, elem_c, char); \
+    v1[elem_c] = '\0'
+
+#define _01RS_STR_VLA(min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
     char v1[elem_c + 1]; /* VLA */ \
-    RS_NET_ARR(v1, elem_c, char); \
+    RS_NET_MEMCPY(v1, elem_c, char); \
     v1[elem_c] = '\0'
 
 #define _01RS_STR_HEAP(min_elem_c, max_elem_c) \
@@ -750,7 +787,7 @@ do { \
         RS_LOG(LOG_ALERT, "Failed to malloc()."); \
         RS_APP_FATAL; \
     } \
-    RS_NET_ARR(v1, elem_c, char); \
+    RS_NET_MEMCPY(v1, elem_c, char); \
     v1[elem_c] = '\0'
 
 // Determine whether to include a final "elem_c" parameter in the calback call,

@@ -148,30 +148,41 @@ WebSocket clients of this app always first need to receive some data from the
 server in order to get started, such data can be sent immediately from this
 callback function—without waiting for the client to make a request for it.
 
-##### RS_READ_BIN(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])<br />RS_READ_UTF8(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])
+##### RS_READ_BIN(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])
 
 Declaring `RS_READ_BIN(foo_read, macro1, macro2)` will cause RingSocket to call
 an app-provided `int foo_read(rs_t * rs, type1 var1, type2 var2)` callback
-function whenever a WebSocket message originating from a WebSocket client
-arrives at this app. All arguments other than the callback argument must be one
-of the following macro arguments (up to a maximum of 15 macro arguments), which
-allow RingSocket to determine the type and number of variables the read callback
-function expects to receive, as well as to validate them in advance of calling
-said function:
-* [`RS_NET(type[, elem_c])`](#rs_nettype-elem_crs_ntohtype-elem_c)
-* [`RS_NTOH(type[, elem_c])`](#rs_nettype-elem_crs_ntohtype-elem_c)
-* [`RS_NET_VLA(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
-* [`RS_NTOH_VLA(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
-* [`RS_NET_HEAP(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
-* [`RS_NTOH_HEAP(type, min_elem_c, max_elem_c)`](#rs_net_vlatype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
-* [`RS_STR_VLA(type, min_elem_c, max_elem_c)`](#rs_strtype-min_elem_c-max_elem_crs_str_heaptype-min_elem_c-max_elem_c)
-* [`RS_STR_HEAP(type, min_elem_c, max_elem_c)`](#rs_strtype-min_elem_c-max_elem_crs_str_heaptype-min_elem_c-max_elem_c)
+function whenever a WebSocket message with binary data originating from a
+WebSocket client arrives at this app. All arguments other than the callback
+argument must be one of the following macro arguments (up to a maximum of 15
+macro arguments), which allow RingSocket to determine the type and number of
+variables the read callback function expects to receive, as well as to validate
+them in advance of calling said function:
+* [`RS_NET(type)`](#rs_nettypers_nettype-elem_crs_nettype-min_elem_c-max_elem_c)
+* [`RS_NET(type, elem_c)`](#rs_nettypers_nettype-elem_crs_nettype-min_elem_c-max_elem_c)
+* [`RS_NET(type, min_elem_c, max_elem_c)`](#rs_nettypers_nettype-elem_crs_nettype-min_elem_c-max_elem_c)
+* [`RS_NET_STA(type, min_elem_c, max_elem_c)`](#rs_net_statype-min_elem_c-max_elem_crs_net_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_statype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NET_VLA(type, min_elem_c, max_elem_c)`](#rs_net_statype-min_elem_c-max_elem_crs_net_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_statype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NET_HEAP(type, min_elem_c, max_elem_c)`](#rs_net_statype-min_elem_c-max_elem_crs_net_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_statype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NTOH(type)`](#rs_ntohtypers_ntohtype-elem_crs_ntohtype-min_elem_c-max_elem_c)
+* [`RS_NTOH(type, elem_c)`](#rs_ntohtypers_ntohtype-elem_crs_ntohtype-min_elem_c-max_elem_c)
+* [`RS_NTOH(type, min_elem_c, max_elem_c)`](#rs_ntohtypers_ntohtype-elem_crs_ntohtype-min_elem_c-max_elem_c)
+* [`RS_NTOH_STA(type, min_elem_c, max_elem_c)`](#rs_net_statype-min_elem_c-max_elem_crs_net_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_statype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NTOH_VLA(type, min_elem_c, max_elem_c)`](#rs_net_statype-min_elem_c-max_elem_crs_net_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_statype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_NTOH_HEAP(type, min_elem_c, max_elem_c)`](#rs_net_statype-min_elem_c-max_elem_crs_net_vlatype-min_elem_c-max_elem_crs_net_heaptype-min_elem_c-max_elem_crs_ntoh_statype-min_elem_c-max_elem_crs_ntoh_vlatype-min_elem_c-max_elem_crs_ntoh_heaptype-min_elem_c-max_elem_c)
+* [`RS_STR(min_elem_c, max_elem_c)`](#rs_strmin_byte_c-max_byte_crs_str_stamin_byte_c-max_byte_crs_str_vlamin_byte_c-max_byte_crs_str_heapmin_byte_c-max_byte_c)
+* [`RS_STR_STA(min_elem_c, max_elem_c)`](#rs_strmin_byte_c-max_byte_crs_str_stamin_byte_c-max_byte_crs_str_vlamin_byte_c-max_byte_crs_str_heapmin_byte_c-max_byte_c)
+* [`RS_STR_VLA(min_elem_c, max_elem_c)`](#rs_strmin_byte_c-max_byte_crs_str_stamin_byte_c-max_byte_crs_str_vlamin_byte_c-max_byte_crs_str_heapmin_byte_c-max_byte_c)
+* [`RS_STR_HEAP(min_elem_c, max_elem_c)`](#rs_strmin_byte_c-max_byte_crs_str_stamin_byte_c-max_byte_crs_str_vlamin_byte_c-max_byte_crs_str_heapmin_byte_c-max_byte_c)
 
-`RS_READ_UTF8()` behaves the same as `RS_READ_BIN()`, except that it requires
-received WebSocket messages to have a payload of type text (i.e., UTF-8) rather
-than a plain binary payload. RingSocket validates the UTF-8 encoding of all
-WebSocket messages of type text in advance, in conformance of
-[RFC 6455 Section 5.6](https://tools.ietf.org/html/rfc6455#section-5.6).
+##### RS_READ_UTF8(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])
+
+Same usage as
+[`RS_READ_BIN(read_cb[, ...])`](#rs_read_binread_cb-read_m1-read_m2-),
+except that it requires received WebSocket messages to have a payload of type
+text (i.e., UTF-8) rather than a plain binary payload. RingSocket validates the
+UTF-8 encoding of all WebSocket messages of type text in advance, in conformance
+of [RFC 6455 Section 5.6](https://tools.ietf.org/html/rfc6455#section-5.6).
 
 ##### RS_READ_SWITCH(*case_m1*[, *case_m2*[, ...]])
 
@@ -185,7 +196,7 @@ the app author to provide up to a maximum of 255 unique read callback functions,
 accommodating the differentiation between any of the kinds of requests it may
 wish to support.
 
-##### RS_CASE_BIN(*case_val*, *read_cb*[, *read_m1*[, *read_m2*[, ...]]])<br />RS_CASE_UTF8(*case_val*, *read_cb*[, *read_m1*[, *read_m2*[, ...]]])
+##### RS_CASE_BIN(*case_val*, *read_cb*[, *read_m1*[, *read_m2*[, ...]]])<br>RS_CASE_UTF8(*case_val*, *read_cb*[, *read_m1*[, *read_m2*[, ...]]])
 
 Apart from *case_val*, which fulfills the role described at
 [`RS_READ_SWITCH(case_m1[, ...])`](#rs_read_switchcase_m1-case_m2-); these
@@ -194,36 +205,55 @@ macros accept the same arguments as
 [`RS_READ_UTF8(read_cb[, ...])`](#rs_read_utf8read_cb-read_m1-read_m2-)
 respectively.
 
-##### RS_NET(*type*[, *elem_c*])<br />RS_NTOH(*type*[, *elem_c*])
+##### RS_NET(*type*)<br>RS_NET(*type*, *elem_c*)<br>RS_NET(*type*, *min_elem_c*, *max_elem_c*)
 
 The argument position of each `RS_NET(type)` decalaration corresponds to the
 type expected of an argument to the read callback function in the same position.
-E.g., `RS_READ(foo, RS_NET(uint64_t), RS_NET(int8_t))` would correspond to a
+E.g., `RS_READ_BIN(foo, RS_NET(uint64_t), RS_NET(int8_t))` would correspond to a
 function signature of `int foo(rs_t * rs, uint64_t u64, int8_t i8);`.
 
-`RS_NTOH` usage is identical to that of `RS_NET`, except that `RS_NTOH` also
-takes care of converting the endianness of received integers from network byte
-order to host byte order on any system where these orders differ.
-
 When supplied with a 2nd argument, that argument is interpreted as a `size_t`
-designating the number of elements of an array of the type given as the 1st
-argument. E.g., `RS_READ(foo, RS_NTOH(uint64_t, 7), RS_NET(int8_t))` would
-correspond to a function signature of
-`int foo(rs_t * rs, uint64_t * u64_arr, int8_t i8);`, with RingSocket taking
-care of validating that `u64_arr` contains exactly 7 uint64_t elements.
+designating the number of elements of an array of the *type* given as the 1st
+argument. E.g., `RS_READ_BIN(foo, RS_NET(uint8_t, 7))` would correspond to a
+function signature of `int foo(rs_t * rs, uint8_t * u8_arr);`, with RingSocket
+taking care of validating that `u8_arr` contains exactly 7 elements.
 
-##### RS_NET_VLA(*type*, *min_elem_c*, *max_elem_c*)<br />RS_NTOH_VLA(*type*, *min_elem_c*, *max_elem_c*)<br />RS_NET_HEAP(*type*, *min_elem_c*, *max_elem_c*)<br />RS_NTOH_HEAP(*type*, *min_elem_c*, *max_elem_c*)
-
-These variants are only valid as the last argument passed `RS_READ...()`. E.g.,
-`RS_READ_BIN(foo, RS_NET(char) RS_NTOH_VLA(int32_t, 1, 10))` corresponds to
+The form with arity 3 is only valid as the last argument passed to
+`RS_READ_...()`: when supplied with a 2nd and 3rd argument, those arguments are
+interpreted as *min_elem_c* and *max_elem_c*, setting a lower and upper bound on
+the permissible number of elements of the given *type*. E.g.,
+`RS_READ_BIN(foo, RS_NET(int32_t, 1, 10))` would correspond to
 `int foo(char ch, int32_t * i32_arr, size_t elem_c)` where `elem_c` is an
 additional `size_t` argument holding the number of elements actually received
 and accessible by the preceding array pointer, which in this example must have a
 minimum length of 1 element and a maximum length of 10 elements.
 
-##### RS_STR(*min_byte_c*, *max_byte_c*)<br />RS_STR_HEAP(*min_byte_c*, *max_byte_c*)
+##### RS_NTOH(*type*)<br>RS_NTOH(*type*, *elem_c*)<br>RS_NTOH(*type*, *min_elem_c*, *max_elem_c*)
 
-Same usage as the macros directly above, except that a type of `char` is
+Identical to
+[`RS_NET(type[, ...])`](#rs_nettypers_nettype-elem_crs_nettype-min_elem_c-max_elem_c),
+except that these macros also take care of converting the endianness of
+corresponding integers from network byte order to host byte order on any system
+where these orders differ.
+
+##### RS_NET_STA(*type*, *min_elem_c*, *max_elem_c*)<br>RS_NET_VLA(*type*, *min_elem_c*, *max_elem_c*)<br>RS_NET_HEAP(*type*, *min_elem_c*, *max_elem_c*)<br>RS_NTOH_STA(*type*, *min_elem_c*, *max_elem_c*)<br>RS_NTOH_VLA(*type*, *min_elem_c*, *max_elem_c*)<br>RS_NTOH_HEAP(*type*, *min_elem_c*, *max_elem_c*)
+
+Same forms as the arity 3 form of
+[`RS_NET(type[, ...])`](#rs_nettypers_nettype-elem_crs_nettype-min_elem_c-max_elem_c) and
+[`RS_NTOH(type[, ...])`](#rs_ntohtypers_ntohtype-elem_crs_ntohtype-min_elem_c-max_elem_c)
+respectively, except that instead of instantiating a stack array of fixed size
+*max_elem_c*, these macros allocate their arrays as follows:
+* ..._STA: A `thread_local static` array of fixed size *max_elem_c*
+* ..._VLA: A C99 Variable Length Array with a variable size matching the actual
+  instance's *elem_c*
+* ..._HEAP: An array `malloc()`ed on the fly. RingSocket will not `free()` this
+  array, as doing so is the prerogative of the app code. In other words, using
+  this flavor eliminates the allocation of a temporary array in cases where the
+  app intends to `malloc()` memory for the same contents anyway.
+
+##### RS_STR(*min_byte_c*, *max_byte_c*)<br>RS_STR_STA(*min_byte_c*, *max_byte_c*)<br>RS_STR_VLA(*min_byte_c*, *max_byte_c*)<br>RS_STR_HEAP(*min_byte_c*, *max_byte_c*)
+
+Same usage as the macros of arity 3 above, except that a type of `char` is
 implied, and that the string arrays passed to the callback function are
 NULL-terminated.
 
@@ -240,7 +270,7 @@ that the client will already have been marked as closed. Any other helper
 functionality remains valid here though; including getting the client ID of the
 closed client, or sending data to *other* clients.
 
-##### RS_TIMER_SLEEP(*timer_cb*, *microseconds*)<br />RS_TIMER_WAKE(*timer_cb*, *microseconds*)
+##### RS_TIMER_SLEEP(*timer_cb*, *microseconds*)<br>RS_TIMER_WAKE(*timer_cb*, *microseconds*)
 
 Declaring `RS_TIMER_WAKE(foo_timer, 12345)` will cause RingSocket to call an
 app-provided `int foo_timer(rs_t * rs)` callback function every `12345`
