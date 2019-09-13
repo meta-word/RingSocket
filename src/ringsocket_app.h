@@ -676,7 +676,7 @@ do { \
 
 #define RS_NET_ARR(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
-    thread_local static type v##name_i[elem_c] = {0}; \
+    type v##name_i[elem_c] = {0}; \
     RS_NET_MEMCPY(v##name_i, elem_c, type)
 
 #define _01RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
