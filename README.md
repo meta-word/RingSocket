@@ -20,9 +20,9 @@ featuring:
 * Principled coding practices designed to guard against the occurrence of
   security-related problems 
 
-Planned features include app language ports: write server apps in languages
-other than C such as Python, to be embedded directly into the server app's
-shared object at compile time.
+Planned features include app language ports: support for write server apps in
+languages other than C such as
+[embedded Python](https://docs.python.org/3/extending/embedding.html).
 
 ## Table of contents
 
@@ -635,11 +635,11 @@ following keys:
 
 ## Todo
 
-* Fill in the [todo: write documentation] parts of this README.md
 * Move wref stuff out of `rs_ring.c` into a separate `rs_wref.c`
 * Replace randomizing BPF with cpu affinity-based EBPF
 * Reduce thread_local usage in favor of stack variables to optimize performance
 * Add/improve comments for the lesser documented parts of the codebase
+* Write a comprehensive test suite
 
 ## Contributing
 
