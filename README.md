@@ -86,7 +86,7 @@ int silly_calc(rs_t * rs, int32_t i32, uint16_t * arr, size_t elem_c) {
 
     // Calculate the sum of all received integers as an int64_t
     int64_t i64 = i32;
-    // The RS_NTOH_VLA(uint16_t, 1, 10) given below ensures that 0 < elem_c < 11
+    // The RS_NTOH(uint16_t, 1, 10) given below ensures that 0 < elem_c < 11
     for (size_t i = 0; i < elem_c; i++) {
         i64 += u16_arr[i];
     }
@@ -107,7 +107,7 @@ int silly_calc(rs_t * rs, int32_t i32, uint16_t * arr, size_t elem_c) {
 RS_APP( // See "RS_APP(m1, m2, m3, m4, m5)" reference below
     RS_INIT_NONE, // Omit callback during RingSocket startup
     RS_OPEN_NONE, // Omit callback for WebSocket client connection establishment
-    RS_READ_BIN(silly_calc, RS_NTOH(int32_t), RS_NTOH_VLA(uint16_t, 1, 10)),
+    RS_READ_BIN(silly_calc, RS_NTOH(int32_t), RS_NTOH(uint16_t, 1, 10)),
     RS_CLOSE_NONE, // Omit callback for WebSocket client disconnection events
     RS_TIMER_NONE // Omit timed interval callback
 );
