@@ -56,7 +56,7 @@ rs_ret write_tcp(
         peer->is_writing = true;
         return RS_AGAIN;
     }
-    if (errno = EAGAIN) {
+    if (errno == EAGAIN) {
         peer->is_writing = true;
         return RS_AGAIN;
     }
