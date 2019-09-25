@@ -335,7 +335,9 @@ Obtains the client ID belonging to the WebSocket client connection that evoked
 the current `RS_OPEN()`, `RS_READ()`, or `RS_CLOSE()` callback function.
 I.e., every ID is mapped to one specific TCP socket file descriptor. Note that
 calling this function from an `RS_TIMER_...()` callback will result in a fatal
-error.
+error. Valid client ID values are always greater than 0, which means apps can
+use a value of 0 to indicate the lack of a client ID (e.g., as unassigned
+elements in an array of client IDs).
 
 Also note that this ID is only valid while the corresponding connection is live.
 Using an ID after the corresponding `RS_CLOSE()` callback function has returned
