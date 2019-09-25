@@ -353,7 +353,7 @@ inline void rs_to_every_except_multi(
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
             uint32_t * u32 = (uint32_t *) (client_ids + j);
-            if (*u32++ - 1 ==) {
+            if (*u32++ - 1 == i) {
                 cur_clients[cur_client_c++] = *u32;
             }
         }
