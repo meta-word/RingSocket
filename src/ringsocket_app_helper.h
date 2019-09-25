@@ -251,7 +251,7 @@ inline void rs_to_single(
     size_t size
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
-    rs_send(rs, *u32, RS_OUTBOUND_SINGLE, u32 + 1, 1, data_kind, p, size);
+    rs_send(rs, *u32 - 1, RS_OUTBOUND_SINGLE, u32 + 1, 1, data_kind, p, size);
     rs->wbuf_i = 0;
 }
 
@@ -268,7 +268,7 @@ inline void rs_to_multi(
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
             uint32_t * u32 = (uint32_t *) (client_ids + j);
-            if (*u32++ == i + 1) {
+            if (*u32++ - 1 == i) {
                 cur_clients[cur_client_c++] = *u32;
             }
         }
@@ -330,7 +330,7 @@ inline void rs_to_every_except_single(
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
-        if (*u32 == i + 1) {
+        if (*u32 - 1 == i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, u32 + 1, 1,
                 data_kind, p, size);
         } else {
@@ -353,7 +353,7 @@ inline void rs_to_every_except_multi(
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
             uint32_t * u32 = (uint32_t *) (client_ids + j);
-            if (*u32++ == i + 1) {
+            if (*u32++ - 1 ==) {
                 cur_clients[cur_client_c++] = *u32;
             }
         }
