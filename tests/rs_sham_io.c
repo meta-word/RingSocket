@@ -40,7 +40,10 @@
 
 #define RS_MAPPED_PEER_NONE UINT32_MAX // Returned by get_mapped_peer_i() below
 
+// A struct holding references to all wrapped original library functions.
 thread_local static struct {
+    // Using unions is a "relatively clean" way to avoid compiler complaints
+    // regarding casting of object pointers to function pointers.
     union {
         void * sym;
         int (* func)(int);
@@ -61,7 +64,7 @@ thread_local static struct {
         void * sym;
         ssize_t (* func)(int, const void *, size_t);
     } write;
-} actual = {0};
+} orig = {0};
 
 struct rs_fd_peer_map {
     int fd; // The socket file descriptor for which sham IO events are created
@@ -75,7 +78,7 @@ thread_local struct epoll_event * sham_events = NULL;
 thread_local static size_t sham_events_elem_c = 0;
 thread_local static int sham_event_c = 0; // Use int to match epoll signatures
 
-static rs_ret set_actual_function_symbol(
+static rs_ret set_original_function_symbol(
     const char * func_name,
     void * * sym
 ) {
@@ -90,11 +93,11 @@ static rs_ret set_actual_function_symbol(
 static rs_ret init_sham(
     void
 ) {
-    RS_GUARD(set_actual_function_symbol("close", &actual.close.sym));
-    RS_GUARD(set_actual_function_symbol("epoll_ctl", &actual.epoll_ctl.sym));
-    RS_GUARD(set_actual_function_symbol("epoll_wait", &actual.epoll_wait.sym));
-    RS_GUARD(set_actual_function_symbol("read", &actual.read.sym));
-    RS_GUARD(set_actual_function_symbol("write", &actual.write.sym));
+    RS_GUARD(set_original_function_symbol("close", &orig.close.sym));
+    RS_GUARD(set_original_function_symbol("epoll_ctl", &orig.epoll_ctl.sym));
+    RS_GUARD(set_original_function_symbol("epoll_wait", &orig.epoll_wait.sym));
+    RS_GUARD(set_original_function_symbol("read", &orig.read.sym));
+    RS_GUARD(set_original_function_symbol("write", &orig.write.sym));
     map_elem_c = sham_events_elem_c = RS_SHAM_IO_INIT_ELEM_C;
     RS_CALLOC(map, map_elem_c);
     RS_CALLOC(sham_events, sham_events_elem_c);
@@ -202,7 +205,7 @@ int epoll_ctl(
             exit(2);
         }
     }
-    return actual.epoll_ctl.func(epoll_fd, op, fd, event);
+    return orig.epoll_ctl.func(epoll_fd, op, fd, event);
 }
 
 int close(
@@ -213,7 +216,7 @@ int close(
     } else if (init_sham() != RS_OK) {
         exit(3);
     }
-    return actual.close.func(fd);
+    return orig.close.func(fd);
 }
 
 int epoll_wait(
@@ -226,7 +229,7 @@ int epoll_wait(
         exit(4);
     }
     if (!sham_event_c) {
-        return actual.epoll_wait.func(epoll_fd, events, max_event_c, timeout);
+        return orig.epoll_wait.func(epoll_fd, events, max_event_c, timeout);
     }
     if (sham_event_c > max_event_c) {
         memcpy(events, sham_events, max_event_c);
@@ -265,7 +268,7 @@ ssize_t read(
     }
     uint32_t mapped_peer_i = get_mapped_peer_i(fd);
     if (mapped_peer_i == RS_MAPPED_PEER_NONE) {
-        return actual.read.func(fd, buf, byte_c);
+        return orig.read.func(fd, buf, byte_c);
     }
     struct epoll_event * e = get_sham_events(mapped_peer_i);
     ssize_t sham_byte_c = 0;
@@ -290,7 +293,7 @@ ssize_t read(
             return -1;
         }
     }
-    return actual.read.func(fd, buf, sham_byte_c);
+    return orig.read.func(fd, buf, sham_byte_c);
 }
 
 ssize_t write(
@@ -303,7 +306,7 @@ ssize_t write(
     }
     uint32_t mapped_peer_i = get_mapped_peer_i(fd);
     if (mapped_peer_i == RS_MAPPED_PEER_NONE) {
-        return actual.write.func(fd, buf, byte_c);
+        return orig.write.func(fd, buf, byte_c);
     }
     struct epoll_event * e = get_sham_events(mapped_peer_i);
     ssize_t sham_byte_c = 0;
@@ -328,5 +331,5 @@ ssize_t write(
             return -1;
         }
     }
-    return actual.write.func(fd, buf, sham_byte_c);
+    return orig.write.func(fd, buf, sham_byte_c);
 }
