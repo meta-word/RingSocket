@@ -1,13 +1,44 @@
+// SPDX-License-Identifier: MIT
+// Copyright © 2019 William Budd
+
+// This file is intended to be compiled as a shared object that should be
+// preloaded by RingSocket by executing it with a command such as:
+// "sudo LD_PRELOAD=$PWD/rs_sham_io.so ringsocket"
+//
+// The objective of this file is to simulate EAGAIN/partial IO events by
+// wrapping the <unistd.h> read() and write() functions. This is accomplished
+// at runtime by using LD_PRELOAD to replace those functions with our own
+// versions that in turn call the dlsym()-loaded original read() and write()
+// functions where necessary. (For more information, Google "LD_PRELOAD trick".)
+//
+// This is valuable for testing purposes, because it greatly increases code
+// coverage of branches that are only evaluated under certain heavy loads.
+// EAGAIN on write() in particular is hard to test deterministically without
+// wrappers such as these.
+//
+// Due to the fact that RingSocket polls IO availability trough epoll in
+// edge-triggered mode, any simulated EAGAIN must be followed by a simulated
+// EPOLLIN/EPOLLOUT event to prevent indefinite stalls, which is why this file
+// also wraps the epoll_wait() function. Furthermore, due to how RingSocket
+// uses a peer index variable instead of the socket file descriptor as its epoll
+// event data, the epoll_ctl() and close() functions are wrapped too, in order
+// to keep track of any "fd" to "peer_i" mappings.
+//
+// Note that this file also works as intended for wss:// connections, owing to
+// the fact that OpenSSL internally calls the same read() and write() functions
+// (at least on Linux), as evidenced by the bottom part of:
+// https://github.com/openssl/openssl/blob/master/include/internal/sockets.h
+
 #define _GNU_SOURCE // Because posix doesn't define RTLD_NEXT
 
-#include "../src/rs_event.h" // RS_EVENT_PEER and <ringsocket.h>
+#include "../src/rs_event.h" // RS_EVENT_PEER and other RingSocket macros
 #include <dlfcn.h> // dlsym()
 #include <sys/epoll.h>
 
 #define RS_SHAM_IO_REALLOC_FACTOR 1.5
 #define RS_SHAM_IO_INIT_ELEM_C 1000
 
-#define RS_MAPPED_PEER_NONE UINT32_MAX
+#define RS_MAPPED_PEER_NONE UINT32_MAX // Returned by get_mapped_peer_i() below
 
 thread_local static struct {
     union {
