@@ -4,7 +4,7 @@
 #include <ringsocket.h>
 
 #define RS_TEST_MAX_CLIENT_C 10
-#define RS_TEST_INCR_MAX_MSG_BYTE_C(_cur_byte_c) (1.1 * ((_cur_byte_c) + 100))
+#define RS_TEST_INCR_MSG_BYTE_C(_cur_byte_c) (1.1 * ((_cur_byte_c) + 100))
 #define RS_TEST_MAX_MSG_BYTE_C 536870912 // 512 MB
 
 typedef enum {
@@ -14,7 +14,7 @@ typedef enum {
     RS_TEST_BAD_MSG = 4001
 } rs_test_ret;
 
-thread_local static uint64_t client_ids[RS_TEST_CLIENT_C] = {0};
+thread_local static uint64_t client_ids[RS_TEST_MAX_CLIENT_C] = {0};
 thread_local static size_t client_c = 0;
 
 static size_t randrange(
@@ -57,51 +57,58 @@ static uint64_t get_nth_client_id( // 0th client == first client...........
 }
 
 static void send_somewhere(
+    rs_t * rs,
     bool cb_has_cur
 ) {
     switch (client_c) {
     case 1:
         switch (randrange(2 + cb_has_cur)) {
-        case 0: rs_to_every(rs, RS_BIN); return;
-        case 1: rs_to_single(rs, RS_BIN, get_nth_client_id(0)); return;
-        case 2: rs_to_cur(rs, RS_BIN); return;
+        case 0:
+            rs_to_every(rs, RS_BIN);
+            break;
+        case 1:
+            rs_to_single(rs, RS_BIN, get_nth_client_id(0));
+            break;
+        case 2:
+            rs_to_cur(rs, RS_BIN);
         }
+        break;
     case 2:
         switch (randrange(6 + 2 * cb_has_cur)) {
         case 0:
             rs_to_every(rs, RS_BIN);
-            return;
+            break;
         case 1:
             rs_to_single(rs, RS_BIN, get_nth_client_id(0));
-            return;
+            break;
         case 2:
             rs_to_single(rs, RS_BIN, get_nth_client_id(1));
-            return;
+            break;
         case 3:
             rs_to_multi(rs, RS_BIN,
                 (uint64_t []){get_nth_client_id(0), get_nth_client_id(1)}, 2);
-            return;
+            break;
         case 4:
             rs_to_every_except_single(rs, RS_BIN, get_nth_client_id(0));
-            return;
+            break;
         case 5:
             rs_to_every_except_single(rs, RS_BIN, get_nth_client_id(1));
-            return;
+            break;
         case 6:
             rs_to_cur(rs, RS_BIN);
-            return;
+            break;
         case 7:
             rs_to_every_except_cur(rs, RS_BIN);
-            return;
         }
+        break;
     default:
         switch (randrange(6 + 2 * cb_has_cur)) {
         case 0:
             rs_to_every(rs, RS_BIN);
-            return;
+            break;
         case 1:
-            rs_to_single(rs, RS_BIN, get_nth_client_id(randrange(client_c));
-            return;
+            rs_to_single(rs, RS_BIN, get_nth_client_id(randrange(client_c)));
+            break;
         case 2:
             {
                 size_t r[2] = {0};
@@ -109,7 +116,7 @@ static void send_somewhere(
                 rs_to_multi(rs, RS_BIN, (uint64_t []){get_nth_client_id(r[0]),
                     get_nth_client_id(r[1])}, 2);
             }
-            return;
+            break;
         case 3:
             {
                 size_t r[3] = {0};
@@ -117,11 +124,11 @@ static void send_somewhere(
                 rs_to_multi(rs, RS_BIN, (uint64_t []){get_nth_client_id(r[0]),
                     get_nth_client_id(r[1]), get_nth_client_id(r[2])}, 3);
             }
-            return;
+            break;
         case 4:
             rs_to_every_except_single(rs, RS_BIN,
-                get_nth_client_id(randrange(client_c));
-            return;
+                get_nth_client_id(randrange(client_c)));
+            break;
         case 5:
             {
                 size_t r[2] = {0};
@@ -129,13 +136,12 @@ static void send_somewhere(
                 rs_to_every_except_multi(rs, RS_BIN, (uint64_t []){
                     get_nth_client_id(r[0]), get_nth_client_id(r[1])}, 2);
             }
-            return;
+            break;
         case 6:
             rs_to_cur(rs, RS_BIN);
-            return;
+            break;
         case 7:
             rs_to_every_except_cur(rs, RS_BIN);
-            return;
         }
     }
 }
@@ -162,6 +168,7 @@ rs_test_ret init_cb(
     void
 ) { // Feed some quasi-crappy seed to quasi-crappy rand().
     srand((unsigned) time(NULL));
+    return RS_TEST_OK;
 }
 
 rs_test_ret open_cb(
@@ -221,7 +228,7 @@ int timer_cb(
 }
 
 RS_APP(
-    RS_INIT_NONE(init_cb),
+    RS_INIT(init_cb),
     RS_OPEN(open_cb),
     RS_READ_BIN(read_cb, RS_NET_STA(uint8_t, 0, RS_TEST_MAX_MSG_BYTE_C)),
     RS_CLOSE(close_cb),
