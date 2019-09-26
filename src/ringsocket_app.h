@@ -791,11 +791,17 @@ do { \
     v1[elem_c] = '\0'
 
 // Determine whether to include a final "elem_c" parameter in the calback call,
-// depending on whether the corresponding "v1" parameter is a non-static array.
+// depending on whether the corresponding "v1" parameter has a variable length.
 #define __RS_NET(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
-#define __RS_NTOH(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
-#define __RS_STR(...) RS_ELEM_C_PARAM
+#define __RS_NET_STA(...) RS_ELEM_C_PARAM
+#define __RS_NET_VLA(...) RS_ELEM_C_PARAM
 #define __RS_NET_HEAP(...) RS_ELEM_C_PARAM
+#define __RS_NTOH(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
+#define __RS_NTOH_STA(...) RS_ELEM_C_PARAM
+#define __RS_NTOH_VLA(...) RS_ELEM_C_PARAM
 #define __RS_NTOH_HEAP(...) RS_ELEM_C_PARAM
+#define __RS_STR(...) RS_ELEM_C_PARAM
+#define __RS_STR_STA(...) RS_ELEM_C_PARAM
+#define __RS_STR_VLA(...) RS_ELEM_C_PARAM
 #define __RS_STR_HEAP(...) RS_ELEM_C_PARAM
 #define RS_ELEM_C_PARAM , elem_c
