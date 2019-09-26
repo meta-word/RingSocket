@@ -182,11 +182,9 @@ inline void rs_send(
     enum rs_outbound_kind outbound_kind,
     uint32_t const * recipients,
     uint32_t recipient_c,
-    enum rs_data_kind data_kind,
-    void const * p,
-    size_t size
+    enum rs_data_kind data_kind
 ) {
-    size_t payload_size = rs->wbuf_i + size;
+    size_t payload_size = rs->wbuf_i;
     if (payload_size > rs->conf->max_ws_msg_size) {
         RS_LOG(LOG_ERR, "Payload of size %zu exceeds the configured "
             "max_ws_msg_size %zu. Shutting down to avert further trouble...",
@@ -234,10 +232,6 @@ inline void rs_send(
         memcpy(ring->writer, rs->wbuf, rs->wbuf_i);
         ring->writer += rs->wbuf_i;
     }
-    if (size) {
-        memcpy(ring->writer, p, size);
-        ring->writer += size;
-    }
     RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
         rs->worker_sleep_states, rs->worker_eventfds, ring->writer, worker_i,
         true));
@@ -246,12 +240,10 @@ inline void rs_send(
 inline void rs_to_single(
     struct rs_app_cb_args * rs,
     enum rs_data_kind data_kind,
-    uint64_t client_id,
-    void const * p,
-    size_t size
+    uint64_t client_id
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
-    rs_send(rs, *u32 - 1, RS_OUTBOUND_SINGLE, u32 + 1, 1, data_kind, p, size);
+    rs_send(rs, *u32 - 1, RS_OUTBOUND_SINGLE, u32 + 1, 1, data_kind);
     rs->wbuf_i = 0;
 }
 
@@ -259,9 +251,7 @@ inline void rs_to_multi(
     struct rs_app_cb_args * rs,
     enum rs_data_kind data_kind,
     uint64_t const * client_ids,
-    size_t client_c,
-    void const * p,
-    size_t size
+    size_t client_c
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         uint32_t cur_clients[client_c];
@@ -276,12 +266,11 @@ inline void rs_to_multi(
         case 0:
             continue;
         case 1:
-            rs_send(rs, i, RS_OUTBOUND_SINGLE, cur_clients, 1, data_kind, p,
-                size);
+            rs_send(rs, i, RS_OUTBOUND_SINGLE, cur_clients, 1, data_kind);
             continue;
         default:
             rs_send(rs, i, RS_OUTBOUND_ARRAY, cur_clients, cur_client_c,
-                data_kind, p, size);
+                data_kind);
             continue;
         }
     }
@@ -290,9 +279,7 @@ inline void rs_to_multi(
 
 inline void rs_to_cur(
     struct rs_app_cb_args * rs,
-    enum rs_data_kind data_kind,
-    void const * p,
-    size_t size
+    enum rs_data_kind data_kind
 ) {
     if (rs->cb == RS_CALLBACK_CLOSE) {
         RS_LOG(LOG_ERR, "Shutting down: rs_to_cur() should not be called from "
@@ -305,18 +292,16 @@ inline void rs_to_cur(
         RS_APP_FATAL;
     }
     rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
-        (uint32_t []){rs->inbound_peer_i}, 1, data_kind, p, size);
+        (uint32_t []){rs->inbound_peer_i}, 1, data_kind);
     rs->wbuf_i = 0;
 }
 
 inline void rs_to_every(
     struct rs_app_cb_args * rs,
-    enum rs_data_kind data_kind,
-    void const * p,
-    size_t size
+    enum rs_data_kind data_kind
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
-        rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
+        rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind);
     }
     rs->wbuf_i = 0;
 }
@@ -324,17 +309,15 @@ inline void rs_to_every(
 inline void rs_to_every_except_single(
     struct rs_app_cb_args * rs,
     enum rs_data_kind data_kind,
-    uint64_t client_id,
-    void const * p,
-    size_t size
+    uint64_t client_id
 ) {
     uint32_t * u32 = (uint32_t *) &client_id;
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (*u32 - 1 == i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, u32 + 1, 1,
-                data_kind, p, size);
+                data_kind);
         } else {
-            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind);
         }
     }
     rs->wbuf_i = 0;
@@ -344,9 +327,7 @@ inline void rs_to_every_except_multi(
     struct rs_app_cb_args * rs,
     enum rs_data_kind data_kind,
     uint64_t const * client_ids,
-    size_t client_c,
-    void const * p,
-    size_t size
+    size_t client_c
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         uint32_t cur_clients[client_c];
@@ -359,15 +340,15 @@ inline void rs_to_every_except_multi(
         }
         switch (cur_client_c) {
         case 0:
-            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind);
             continue;
         case 1:
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, cur_clients, 1,
-                data_kind, p, size);
+                data_kind);
             continue;
         default:
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_ARRAY, cur_clients,
-                cur_client_c, data_kind, p, size);
+                cur_client_c, data_kind);
             continue;
         }
     }
@@ -376,9 +357,7 @@ inline void rs_to_every_except_multi(
 
 inline void rs_to_every_except_cur(
     struct rs_app_cb_args * rs,
-    enum rs_data_kind data_kind,
-    void const * p,
-    size_t size
+    enum rs_data_kind data_kind
 ) {
     if (rs->cb == RS_CALLBACK_CLOSE) {
         RS_LOG(LOG_ERR, "Shutting down: rs_to_every_except_cur() should not be "
@@ -393,9 +372,9 @@ inline void rs_to_every_except_cur(
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
-                (uint32_t []){rs->inbound_peer_i}, 1, data_kind, p, size);
+                (uint32_t []){rs->inbound_peer_i}, 1, data_kind);
         } else {
-            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind, p, size);
+            rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind);
         }
     }
     rs->wbuf_i = 0;
