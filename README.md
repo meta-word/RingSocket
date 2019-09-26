@@ -273,8 +273,10 @@ closed client, or sending data to *other* clients.
 ##### RS_TIMER_SLEEP(*timer_cb*, *microseconds*)<br>RS_TIMER_WAKE(*timer_cb*, *microseconds*)
 
 Declaring `RS_TIMER_WAKE(foo_timer, 12345)` will cause RingSocket to call an
-app-provided `int foo_timer(rs_t * rs)` callback function every `12345`
-microseconds.
+app-provided `int foo_timer(rs_t * rs)` callback function approximately `12345`
+microseconds after app startup. The value returned by this callback determines
+if/when the callback will be called again: see
+[app callback return values](#app-callback-return-values).
 
 The RingSocket app event loop is designed to stall on CPU-friendly FUTEX_WAIT
 system calls during times when no traffic arrives from any WebSocket client,
@@ -296,12 +298,16 @@ iteration of a timer callback.
 
 Every app callback function must return type `int`.
 Recognized return values are:
-* **0**: SUCCESS: all is well, and any WebSocket connection associated with the
-callback is kept alive.
 * **-1**: FATAL ERROR: this will cause the entire RingSocket daemon to `exit()`
 (in the current implementation at least). Only return this value in the event of
 critical and unrecoverable errors that leave your app in a wholly unusable
 state.
+* **0**: SUCCESS: indicate that all is well. However, when returned by a timer
+callback, this status code also signifies that the timer callback does not need
+to be called again.
+* **>0**: CALL AGAIN *(timer callbacks only)*: any integer value *t* greater
+than zero returned by a timer callback will cause that callback function to be
+called again after approximately *t* microseconds.
 * **[4000...4899]**: CLOSE CLIENT CONNECTION *(open and read callbacks only)*:
 Tell RingSocket to close the connection with the WebSocket client associated
 with the callback, applying a WebSocket Close Frame Status Code equal to the

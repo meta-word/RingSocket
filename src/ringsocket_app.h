@@ -303,9 +303,9 @@ extern inline rs_ret rs_guard_timer_cb( \
 // _INIT_RS_TIMER_[NONE|SLEEP|WAKE]
 
 // Instantiate a timestamp variable...
-#define _INIT_RS_TIMER_SLEEP(timer_cb) _INIT_RS_TIMER_WAKE(timer_cb)
-#define _INIT_RS_TIMER_WAKE(timer_cb) \
-    uint64_t interval_microsec = 0; \
+#define _INIT_RS_TIMER_SLEEP(t_cb, t_i) _INIT_RS_TIMER_WAKE(t_cb, t_i)
+#define _INIT_RS_TIMER_WAKE(timer_cb, timer_interval) \
+    uint64_t interval_microsec = timer_interval; \
     uint64_t timestamp_microsec = 0; /* overflows every 585 thousand years */ \
     RS_GUARD_APP(rs_get_cur_time_microsec(&timestamp_microsec))
 
@@ -315,8 +315,8 @@ extern inline rs_ret rs_guard_timer_cb( \
 // _CHECK_RS_TIMER_[NONE|SLEEP|WAKE]
 
 // Check if the timer interval has elapsed; and if so, call timer_cb...
-#define _CHECK_RS_TIMER_SLEEP(timer_cb) _CHECK_RS_TIMER_WAKE(timer_cb)
-#define _CHECK_RS_TIMER_WAKE(timer_cb) do { \
+#define _CHECK_RS_TIMER_SLEEP(t_cb, t_i) _CHECK_RS_TIMER_WAKE(t_cb, t_i)
+#define _CHECK_RS_TIMER_WAKE(timer_cb, _) do { \
     uint64_t new_timestamp_microsec = 0; \
     RS_GUARD_APP(rs_get_cur_time_microsec(&new_timestamp_microsec)); \
     if (new_timestamp_microsec >= timestamp_microsec + interval_microsec) { \
@@ -330,10 +330,10 @@ extern inline rs_ret rs_guard_timer_cb( \
 
 // _WAIT_RS_TIMER_[NONE|SLEEP|WAKE]
 
-#define _WAIT_RS_TIMER_SLEEP(timer_cb) \
+#define _WAIT_RS_TIMER_SLEEP(timer_cb, _) \
     RS_TIMER_WAIT(timer_cb, RS_FUTEX_WAIT_WITHOUT_TIMEOUT)
 
-#define _WAIT_RS_TIMER_WAKE(timer_cb) \
+#define _WAIT_RS_TIMER_WAKE(timer_cb, _) \
     RS_TIMER_WAIT(timer_cb, RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb))
 
 #define _WAIT_RS_TIMER_NONE _RS_FUTEX_WAIT_WITHOUT_TIMEOUT
@@ -364,7 +364,7 @@ extern inline rs_ret rs_guard_timer_cb( \
 #define _RS_FUTEX_WAIT_WITHOUT_TIMEOUT \
     RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, RS_TIME_INF))
 
-#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb, interval_microsec) do { \
+#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb) do { \
     for (;;) { \
         switch (rs_wait_for_worker(app_sleep_state, interval_microsec)) { \
         case RS_OK: /* a worker thread woke this thread up */ \
