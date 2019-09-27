@@ -172,7 +172,7 @@ static rs_ret parse_url(
             if (i < 0 || i > UINT16_MAX) {
                 RS_LOG(LOG_ERR, "WebSocket URL \"%s\" contains an invalid port "
                     "number. Port numbers must be integers within the range "
-                    "1 through 65535.", url);
+                    "0 through 65535.", url);
                 return RS_FATAL;
             }
             endpoint->port_number = i;
