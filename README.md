@@ -628,7 +628,7 @@ following keys:
   Note that the port number contained in or
   implied by this URL must also be listed as a `"port_number"` of a
   [Port configuration](#port-configuration) JSON object (when using
-  `"port_number": 0`, just write your URL`s port designation as `:0`).
+  `"port_number": 0`, just write your URL's port designation as `:0`).
   Furthermore, the scheme part of the URL must correspond to that port object's
   `"is_unencrypted"` flag: `"is_unencrypted": false` (the default) for `wss://`
   URLs, and `"is_unencrypted": true` for `ws://` URLs.
