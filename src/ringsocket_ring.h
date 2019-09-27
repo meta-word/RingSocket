@@ -368,3 +368,20 @@ inline rs_ret rs_flush_ring_updates(
     }
     return RS_OK;
 }
+
+// See the comment at the bottom of RS_APP() in ringsocket_app.h for explanation
+#define RS_INLINE_PROTOTYPES_RING \
+extern inline rs_ret rs_prepare_ring_write(struct rs_thread_pair * pair, \
+    struct rs_ring * ring, uint32_t msg_size); \
+extern inline struct rs_ring_msg * rs_get_ring_msg(struct rs_thread_pair *, \
+    uint8_t const *); \
+extern inline rs_ret rs_wake_up_app(struct rs_thread_sleep_state *); \
+extern inline rs_ret rs_wake_up_worker(struct rs_thread_sleep_state *, int); \
+extern inline rs_ret rs_wait_for_worker(struct rs_thread_sleep_state *, \
+    uint64_t); \
+extern inline rs_ret rs_enqueue_ring_update(struct rs_ring_update_queue *, \
+    struct rs_thread_io_pairs *, struct rs_thread_sleep_state *, int const *, \
+    uint8_t const *, size_t, bool); \
+extern inline rs_ret rs_flush_ring_updates(struct rs_ring_update_queue *, \
+    struct rs_thread_io_pairs *, struct rs_thread_sleep_state *, int const *, \
+    size_t)

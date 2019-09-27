@@ -16,7 +16,7 @@ enum rs_data_kind { // The data kind to send as WebSocket message contents
 // API functions
 
 inline uint64_t rs_get_client_id(
-    struct rs_app_cb_args * rs
+    rs_t * rs
 ) {
     if (rs->cb == RS_CALLBACK_TIMER) {
         RS_LOG(LOG_ERR, "Shutting down: rs_get_client_id() should not be "
@@ -30,7 +30,7 @@ inline uint64_t rs_get_client_id(
 }
 
 inline uint64_t rs_get_endpoint_id(
-    struct rs_app_cb_args * rs
+    rs_t * rs
 ) {
     if (rs->cb == RS_CALLBACK_TIMER) {
         RS_LOG(LOG_ERR, "Shutting down: rs_get_endpoint_id() should not be "
@@ -41,7 +41,7 @@ inline uint64_t rs_get_endpoint_id(
 }
 
 inline rs_ret rs_check_app_wsize(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     size_t incr_size
 ) {
     if (!rs->wbuf) {
@@ -55,7 +55,7 @@ inline rs_ret rs_check_app_wsize(
 }
 
 inline void rs_w_p(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     void const * src,
     size_t size
 ) {
@@ -65,14 +65,14 @@ inline void rs_w_p(
 }
 
 inline void rs_w_str(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     char const * str // Must be null-terminated
 ) {
     rs_w_p(rs, str, strlen(str));
 }
 
 inline void rs_w_uint8(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint8_t u8
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 1));
@@ -80,7 +80,7 @@ inline void rs_w_uint8(
 }
 
 inline void rs_w_uint16(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint16_t u16
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 2));
@@ -89,7 +89,7 @@ inline void rs_w_uint16(
 }
 
 inline void rs_w_uint32(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint32_t u32
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 4));
@@ -98,7 +98,7 @@ inline void rs_w_uint32(
 }
 
 inline void rs_w_uint64(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint32_t u64
 ) {
     RS_GUARD_APP(rs_check_app_wsize(rs, 8));
@@ -107,77 +107,77 @@ inline void rs_w_uint64(
 }
 
 inline void rs_w_uint16_hton(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint16_t u16
 ) {
     rs_w_uint16(rs, RS_HTON16(u16));
 }
 
 inline void rs_w_uint32_hton(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint32_t u32
 ) {
     rs_w_uint32(rs, RS_HTON32(u32));
 }
 
 inline void rs_w_uint64_hton(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint64_t u64
 ) {
     rs_w_uint64(rs, RS_HTON64(u64));
 }
 
 inline void rs_w_int8(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int8_t i8
 ) {
     rs_w_uint8(rs, i8);
 }
 
 inline void rs_w_int16(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int16_t i16
 ) {
     rs_w_uint16(rs, i16);
 }
 
 inline void rs_w_int32(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int32_t i32
 ) {
     rs_w_uint32(rs, i32);
 }
 
 inline void rs_w_int64(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int64_t i64
 ) {
     rs_w_uint64(rs, i64);
 }
 
 inline void rs_w_int16_hton(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int16_t i16
 ) {
     rs_w_uint16_hton(rs, i16);
 }
 
 inline void rs_w_int32_hton(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int32_t i32
 ) {
     rs_w_uint32_hton(rs, i32);
 }
 
 inline void rs_w_int64_hton(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int64_t i64
 ) {
     rs_w_uint64_hton(rs, i64);
 }
 
 inline void rs_send(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     size_t worker_i,
     enum rs_outbound_kind outbound_kind,
     uint32_t const * recipients,
@@ -238,7 +238,7 @@ inline void rs_send(
 }
 
 inline void rs_to_single(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind,
     uint64_t client_id
 ) {
@@ -248,7 +248,7 @@ inline void rs_to_single(
 }
 
 inline void rs_to_multi(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind,
     uint64_t const * client_ids,
     size_t client_c
@@ -278,7 +278,7 @@ inline void rs_to_multi(
 }
 
 inline void rs_to_cur(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind
 ) {
     if (rs->cb == RS_CALLBACK_CLOSE) {
@@ -297,7 +297,7 @@ inline void rs_to_cur(
 }
 
 inline void rs_to_every(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind
 ) {
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
@@ -307,7 +307,7 @@ inline void rs_to_every(
 }
 
 inline void rs_to_every_except_single(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind,
     uint64_t client_id
 ) {
@@ -324,7 +324,7 @@ inline void rs_to_every_except_single(
 }
 
 inline void rs_to_every_except_multi(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind,
     uint64_t const * client_ids,
     size_t client_c
@@ -356,7 +356,7 @@ inline void rs_to_every_except_multi(
 }
 
 inline void rs_to_every_except_cur(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     enum rs_data_kind data_kind
 ) {
     if (rs->cb == RS_CALLBACK_CLOSE) {
@@ -383,7 +383,7 @@ inline void rs_to_every_except_cur(
 // Non-API functions
 
 inline rs_ret rs_init_outbound_rings(
-    struct rs_app_cb_args * rs
+    rs_t * rs
 ) {
     RS_CALLOC(rs->outbound_rings, rs->conf->worker_c);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
@@ -404,7 +404,7 @@ inline rs_ret rs_init_outbound_rings(
 
 inline rs_ret rs_init_app_cb_args(
     struct rs_app_args * app_args,
-    struct rs_app_cb_args * rs
+    rs_t * rs
 ) {
     struct rs_conf const * conf = app_args->conf;
     struct rs_conf_app const * conf_app = conf->apps + app_args->app_i;
@@ -469,7 +469,7 @@ inline rs_ret rs_get_cur_time_microsec(
 }
 
 inline rs_ret rs_close_peer(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     uint16_t ws_close_code
 ) {
     struct rs_ring * ring = rs->outbound_rings + rs->inbound_worker_i;
@@ -506,7 +506,7 @@ inline rs_ret rs_guard_cb(
 }
 
 inline rs_ret rs_guard_peer_cb(
-    struct rs_app_cb_args * rs,
+    rs_t * rs,
     int ret
 ) {
     switch (ret) {
@@ -555,3 +555,46 @@ inline rs_ret rs_guard_timer_cb(
         "again).", ret);
     return RS_FATAL;
 }
+
+// See the comment at the bottom of RS_APP() in ringsocket_app.h for explanation
+#define RS_INLINE_PROTOTYPES_APP \
+extern inline uint64_t rs_get_client_id(rs_t *); \
+extern inline uint64_t rs_get_endpoint_id(rs_t *); \
+extern inline rs_ret rs_check_app_wsize(rs_t *, size_t); \
+extern inline void rs_w_p(rs_t *, void const *, size_t); \
+extern inline void rs_w_str(rs_t *, char const *); \
+extern inline void rs_w_uint8(rs_t *, uint8_t); \
+extern inline void rs_w_uint16(rs_t *, uint16_t); \
+extern inline void rs_w_uint32(rs_t *, uint32_t); \
+extern inline void rs_w_uint64(rs_t *, uint32_t); \
+extern inline void rs_w_uint16_hton(rs_t *, uint16_t); \
+extern inline void rs_w_uint32_hton(rs_t *, uint32_t); \
+extern inline void rs_w_uint64_hton(rs_t *, uint64_t); \
+extern inline void rs_w_int8(rs_t *, int8_t); \
+extern inline void rs_w_int16(rs_t *, int16_t); \
+extern inline void rs_w_int32(rs_t *, int32_t); \
+extern inline void rs_w_int64(rs_t *, int64_t); \
+extern inline void rs_w_int16_hton(rs_t *, int16_t); \
+extern inline void rs_w_int32_hton(rs_t *, int32_t); \
+extern inline void rs_w_int64_hton(rs_t *, int64_t); \
+extern inline void rs_send(rs_t *, size_t, enum rs_outbound_kind, \
+    uint32_t const *, uint32_t, enum rs_data_kind); \
+extern inline void rs_to_single(rs_t *, enum rs_data_kind, uint64_t); \
+extern inline void rs_to_multi(rs_t *, enum rs_data_kind, uint64_t const *, \
+    size_t); \
+extern inline void rs_to_cur(rs_t *, enum rs_data_kind); \
+extern inline void rs_to_every(rs_t *, enum rs_data_kind); \
+extern inline void rs_to_every_except_single(rs_t *, enum rs_data_kind, \
+    uint64_t); \
+extern inline void rs_to_every_except_multi(rs_t *, enum rs_data_kind, \
+    uint64_t const *, size_t); \
+extern inline void rs_to_every_except_cur(rs_t *, enum rs_data_kind); \
+extern inline rs_ret rs_init_outbound_rings(rs_t *); \
+extern inline rs_ret rs_init_app_cb_args(struct rs_app_args *, rs_t *); \
+extern inline rs_ret rs_get_readers_upon_inbound_rings_init( \
+    struct rs_app_cb_args const *, uint8_t const * * *); \
+extern inline rs_ret rs_get_cur_time_microsec(uint64_t *); \
+extern inline rs_ret rs_close_peer(rs_t *, uint16_t); \
+extern inline rs_ret rs_guard_cb(int); \
+extern inline rs_ret rs_guard_peer_cb(rs_t *, int); \
+extern inline rs_ret rs_guard_timer_cb(int64_t, uint64_t *interval_microsec)

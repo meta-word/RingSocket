@@ -81,6 +81,10 @@ struct rs_app_cb_args {
 
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
+#define RS_LOG_VARS \
+int _rs_log_mask = LOG_UPTO(LOG_WARNING); \
+thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
+
 #include <ringsocket_app_helper.h>
 
 // ##########
@@ -88,10 +92,6 @@ struct rs_app_cb_args {
 
 #define _RS_APP(init_macro, open_macro, read_macro, close_macro, \
     timer_macro) \
-\
-int _rs_log_mask = LOG_UPTO(LOG_WARNING); \
-\
-thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}; \
 \
 rs_ret ringsocket_app( \
     struct rs_app_args * app_args \
@@ -208,85 +208,13 @@ rs_ret ringsocket_app( \
     } \
 } \
 \
-extern inline rs_ret rs_prepare_ring_write( \
-    struct rs_thread_pair * pair, \
-    struct rs_ring * ring, \
-    uint32_t msg_size \
-); \
-\
-extern inline struct rs_ring_msg * rs_get_ring_msg( \
-    struct rs_thread_pair * pair, \
-    uint8_t const * reader \
-); \
-\
-extern inline rs_ret rs_wake_up_app( \
-    struct rs_thread_sleep_state * app_sleep_state \
-); \
-\
-extern inline rs_ret rs_wake_up_worker( \
-    struct rs_thread_sleep_state * worker_sleep_state, \
-    int worker_eventfd \
-); \
-\
-extern inline rs_ret rs_wait_for_worker( \
-    struct rs_thread_sleep_state * app_sleep_state, \
-    uint64_t timeout_microsec \
-); \
-\
-extern inline rs_ret rs_enqueue_ring_update( \
-    struct rs_ring_update_queue * updates, \
-    struct rs_thread_io_pairs * io_pairs, \
-    struct rs_thread_sleep_state * worker_sleep_states, \
-    int const * worker_eventfds, \
-    uint8_t const * new_ring_position, \
-    size_t worker_thread_i, \
-    bool is_write \
-); \
-\
-extern inline rs_ret rs_flush_ring_updates( \
-    struct rs_ring_update_queue * updates, \
-    struct rs_thread_io_pairs * io_pairs, \
-    struct rs_thread_sleep_state * sleep_states, \
-    int const * eventfds, \
-    size_t dest_thread_c \
-); \
-\
-extern inline rs_ret rs_init_outbound_rings( \
-    struct rs_app_cb_args * rs \
-); \
-\
-extern inline rs_ret rs_init_app_cb_args( \
-    struct rs_app_args * app_args, \
-    struct rs_app_cb_args * rs \
-); \
-\
-extern inline rs_ret rs_get_readers_upon_inbound_rings_init( \
-    struct rs_app_cb_args const * rs, \
-    uint8_t const * * * inbound_readers \
-); \
-\
-extern inline rs_ret rs_get_cur_time_microsec( \
-    uint64_t * time_microsec \
-); \
-\
-extern inline rs_ret rs_close_peer( \
-    struct rs_app_cb_args * rs, \
-    uint16_t ws_close_code \
-); \
-\
-extern inline rs_ret rs_guard_cb( \
-    int ret \
-); \
-\
-extern inline rs_ret rs_guard_peer_cb( \
-    struct rs_app_cb_args * rs, \
-    int ret \
-); \
-\
-extern inline rs_ret rs_guard_timer_cb( \
-    int64_t ret, \
-    uint64_t * interval_microsec \
-)
+/* Unlike C++ and older versions of C, C99 and C11 requires instantiating */ \
+/* inline functions in at least one compilation unit in order to emit */ \
+/* their generation, hence the need to expand these the RS_APP() macro. */ \
+RS_INLINE_PROTOTYPES_RING; \
+RS_INLINE_PROTOTYPES_APP; \
+/* Required by RS_LOG (see above) */ \
+RS_LOG_VARS
 
 // ###########
 // # RS_INIT #
