@@ -44,7 +44,7 @@ typedef enum {
 // Used instead of setlogmask() in order to optimize out the overhead of calling
 // syslog() and evaluating its arguments for each logging statement beyond the
 // run-time-determined mask level (e.g., LOG_DEBUG).
-extern int _rs_log_mask;
+extern int _rs_log_max;
 // Unique thread_local string such as "Worker #7: " or "App Foo: ".
 // Its value is an empty "" during the early single-threaded startup phase.
 extern thread_local char _rs_thread_id_str[];
@@ -88,7 +88,7 @@ extern thread_local char _rs_thread_id_str[];
     )
 
 #define _RS_SYSLOG(lvl, ...) do { \
-    if ((lvl) & _rs_log_mask) { \
+    if ((lvl) <= _rs_log_max) { \
         syslog((lvl), "%s" __FILE__ ":%s():" RS_STRINGIFY(__LINE__) \
             __VA_ARGS__); \
     } \

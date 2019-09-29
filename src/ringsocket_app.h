@@ -13,7 +13,7 @@ struct rs_app_args {
     struct rs_thread_sleep_state * * worker_sleep_states;
     int const * worker_eventfds;
     size_t app_i;
-    int log_mask;
+    int log_max;
 };
 
 struct rs_inbound_msg_header {
@@ -82,7 +82,7 @@ struct rs_app_cb_args {
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
 #define RS_LOG_VARS \
-int _rs_log_mask = LOG_UPTO(LOG_NOTICE); \
+int _rs_log_max = LOG_NOTICE; \
 thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 
 #include <ringsocket_app_helper.h>
@@ -96,7 +96,7 @@ thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 rs_ret ringsocket_app( \
     struct rs_app_args * app_args \
 ) { \
-    _rs_log_mask = app_args->log_mask; \
+    _rs_log_max = app_args->log_max; \
     sprintf(_rs_thread_id_str, "%s: ", \
         app_args->conf->apps[app_args->app_i].name); \
     \

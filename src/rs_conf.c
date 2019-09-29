@@ -53,7 +53,7 @@ static char const default_conf_path[] = "/etc/ringsocket.json";
 // The only 2 vars with external linkage in RingSocket -- see ringsocket_util.h
 
 // Configurable at run-time with the top-level "log_level" option -- see below
-int _rs_log_mask = LOG_UPTO(LOG_NOTICE);
+int _rs_log_max = LOG_NOTICE;
 
 // Worker threads set this to "Worker #%u: " with (worker_i + 1) as the %u arg.
 // App threads set this to "App %s: " were %s is the app "name" string
@@ -542,14 +542,16 @@ static rs_ret parse_configuration(
                 .max_byte_c = RS_CONST_STRLEN("notice"),
             }, log_level));
         if (!strcmp(log_level, "error")) {
-            _rs_log_mask = LOG_UPTO(LOG_ERR);
+            _rs_log_max = LOG_ERR;
         } else if (!strcmp(log_level, "warning")) {
-            _rs_log_mask = LOG_UPTO(LOG_NOTICE);
-        } else if (!strcmp(log_level, "notice")) {
-            _rs_log_mask = LOG_UPTO(LOG_INFO);
+            _rs_log_max = LOG_WARNING;
         } else if (!strcmp(log_level, "info")) {
-            _rs_log_mask = LOG_UPTO(LOG_DEBUG);
-        } else if (strcmp(log_level, "debug")) {
+            _rs_log_max = LOG_INFO;
+            RS_LOG(LOG_INFO, "Syslog log priority set to \"info\"");
+        } else if (!strcmp(log_level, "debug")) {
+            _rs_log_max = LOG_DEBUG;
+            RS_LOG(LOG_INFO, "Syslog log priority set to \"debug\"");
+        } else if (strcmp(log_level, "notice")) {
             RS_LOG(LOG_ERR, "Unrecognized configuration value for "
                 "\"log_level\": \"%s\". The value must be one of: \"error\", "
                 "\"warning\", \"notice\", \"info\", or \"debug\".", log_level);
