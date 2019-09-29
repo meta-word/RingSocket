@@ -471,13 +471,15 @@ contain a key called "certs" with an array of at least one JSON object element:
    // Global configuration goes here
 }
 ```
-Other keys recognized in the root JSON object control global configuration values:
+Other keys recognized in the root JSON object control global configuration
+values:
 * `"log_level"`: The minimum level of importance at which log messages are
   printed to *syslog* (e.g., through
   [`RS_LOG(log_level[, ...])`](#rs_loglog_level-fmt-var1-var2-)). In other
   words, messages of less importance than the value of `"log_level"` are not
   recorded in the system log). Recognized values in order from high to low are:
-  `"error"`, `"warning"`, `"notice"`, `"info"`, and `"debug"`. Default: `"warning"`
+  `"error"`, `"warning"`, `"notice"`, `"info"`, and `"debug"`. Default:
+  `"notice"`
 * `"worker_c"`: The number of worker threads RingSocket should use. If omitted,
   RingSocket will choose that number to be equal to the number of CPU cores
   available to the system minus the number of apps configured (or 1, if the
@@ -527,14 +529,6 @@ Each element of the `"ports"` array must be a JSON object containing at least
 the key:
 * `"port_number"`: A TCP port number on which to listen for incoming
 connections.
-
-  A value of `0` can be used to bind to any available
-  [ephemeral port](https://en.wikipedia.org/wiki/Ephemeral_port), which is
-  useful during debugging/development in order to avoid triggering `bind()`'s
-  `EADDRINUSE` due sockets lingering in the `TCP_WAIT` as leftover from a
-  recently killed instance of RingSocket. Then after starting RingSocket, use
-  a command like `ss -lnpt | grep ringsocket` to find out which port is being
-  listened on.
 
 The following optional keys are also recognized inside this JSON object:
 * `"is_unencrypted"`: If `true`, this port will only accept plaintext `ws://`
@@ -627,11 +621,10 @@ following keys:
 
   Note that the port number contained in or
   implied by this URL must also be listed as a `"port_number"` of a
-  [Port configuration](#port-configuration) JSON object (when using
-  `"port_number": 0`, just write your URL's port designation as `:0`).
-  Furthermore, the scheme part of the URL must correspond to that port object's
-  `"is_unencrypted"` flag: `"is_unencrypted": false` (the default) for `wss://`
-  URLs, and `"is_unencrypted": true` for `ws://` URLs.
+  [Port configuration](#port-configuration) JSON object. Furthermore, the scheme
+  part of the URL must correspond to that port object's `"is_unencrypted"` flag:
+  `"is_unencrypted": false` (the default) for `wss://` URLs, and
+  `"is_unencrypted": true` for `ws://` URLs.
 
   Finally, note that every `wss://` endpoint URL must have a hostname component
   that is listed among the `"hostnames"` of any of the

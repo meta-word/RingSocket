@@ -53,7 +53,7 @@ static char const default_conf_path[] = "/etc/ringsocket.json";
 // The only 2 vars with external linkage in RingSocket -- see ringsocket_util.h
 
 // Configurable at run-time with the top-level "log_level" option -- see below
-int _rs_log_mask = LOG_UPTO(LOG_WARNING);
+int _rs_log_mask = LOG_UPTO(LOG_NOTICE);
 
 // Worker threads set this to "Worker #%u: " with (worker_i + 1) as the %u arg.
 // App threads set this to "App %s: " were %s is the app "name" string
@@ -535,21 +535,21 @@ static rs_ret parse_configuration(
     jg_obj_get_t * root_obj = NULL;
     RS_GUARD_JG(jg_root_get_obj(jg, NULL, &root_obj));
     {
-        char log_level[] = "warning";
+        char log_level[] = "notice";
         RS_GUARD_JG(jg_obj_get_callerstr(jg, root_obj, "log_level",
             &(jg_obj_callerstr){
-                .defa = "warning",
-                .max_byte_c = RS_CONST_STRLEN("warning"),
+                .defa = "notice",
+                .max_byte_c = RS_CONST_STRLEN("notice"),
             }, log_level));
         if (!strcmp(log_level, "error")) {
             _rs_log_mask = LOG_UPTO(LOG_ERR);
-        } else if (!strcmp(log_level, "notice")) {
+        } else if (!strcmp(log_level, "warning")) {
             _rs_log_mask = LOG_UPTO(LOG_NOTICE);
-        } else if (!strcmp(log_level, "info")) {
+        } else if (!strcmp(log_level, "notice")) {
             _rs_log_mask = LOG_UPTO(LOG_INFO);
-        } else if (!strcmp(log_level, "debug")) {
+        } else if (!strcmp(log_level, "info")) {
             _rs_log_mask = LOG_UPTO(LOG_DEBUG);
-        } else if (strcmp(log_level, "warning")) {
+        } else if (strcmp(log_level, "debug")) {
             RS_LOG(LOG_ERR, "Unrecognized configuration value for "
                 "\"log_level\": \"%s\". The value must be one of: \"error\", "
                 "\"warning\", \"notice\", \"info\", or \"debug\".", log_level);

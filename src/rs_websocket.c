@@ -67,7 +67,7 @@ static rs_ret read_ws(
     size_t old_rsize = msg_size + *unparsed_rsize;
     do {
         if (old_rsize > rbuf_size / 2) {
-            RS_LOG(LOG_NOTICE, "Currently received a %zu byte WebSocket "
+            RS_LOG(LOG_WARNING, "Currently received a %zu byte WebSocket "
                 "frame from %s after having received %zu WebSocket payload "
                 "bytes in previous frame(s), the total of which is taking up "
                 "more than half the size of the %zu byte read buffer. It's "
@@ -373,7 +373,7 @@ static rs_ret parse_ws_msg(
                 // Free up any heap memory that was used to hold the current msg
                 if (unparsed_rsize) {
                     RS_REALLOC(peer->heap_buf, unparsed_rsize);
-                    RS_LOG(LOG_DEBUG, "%zu bytes remaining after chunked ws "
+                    RS_LOG(LOG_INFO, "%zu bytes remaining after chunked ws "
                         "msg was parsed.", unparsed_rsize);
                 } else {
                     RS_FREE(peer->heap_buf);
@@ -487,7 +487,7 @@ rs_ret handle_ws_io(
             switch (parse_ws_msg(peer, rbuf, conf->worker_rbuf_size,
                 conf->max_ws_msg_size, &msg, &msg_size)) {
             case RS_OK:
-                RS_LOG_CHBUF(LOG_DEBUG,
+                RS_LOG_CHBUF(LOG_INFO,
                     "Received a chunked WebSocket message from %s",
                     msg, msg_size, get_peer_str(peer));
                 RS_GUARD(send_read_to_app(conf, peer, peer_i, msg, msg_size));

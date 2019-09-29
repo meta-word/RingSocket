@@ -123,7 +123,7 @@ static rs_ret match_hostname(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG_CHBUF(LOG_DEBUG, "Rejected unrecognized hostname",
+            RS_LOG_CHBUF(LOG_NOTICE, "Rejected unrecognized hostname",
                 hostname, hostname_strlen);
             return RS_CLOSE_PEER;
         }
@@ -163,7 +163,7 @@ static rs_ret match_url(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG_CHBUF(LOG_DEBUG, "Rejected unrecognized url",
+            RS_LOG_CHBUF(LOG_NOTICE, "Rejected unrecognized url",
                 url, url_strlen);
             return RS_CLOSE_PEER;
         }
@@ -216,7 +216,7 @@ static bool match_origin(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG_CHBUF(LOG_DEBUG, "Rejected unrecognized origin",
+            RS_LOG_CHBUF(LOG_NOTICE, "Rejected unrecognized origin",
                 origin, origin_strlen);
             return RS_CLOSE_PEER;
         }
@@ -392,7 +392,7 @@ static rs_ret parse_http_upgrade_request(
         }
         RS_H_GETCH(16);
         if (ch > unsaved_str + conf->url_max_strlen) {
-            RS_LOG_CHBUF(LOG_DEBUG, "Rejected url due to max length",
+            RS_LOG_CHBUF(LOG_NOTICE, "Rejected url due to max length",
                 unsaved_str, ch - unsaved_str);
             RS_H_ERR(RS_HTTP_NOT_FOUND);
         }
@@ -470,7 +470,7 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + conf->hostname_max_strlen) {
-                RS_LOG_CHBUF(LOG_DEBUG, "Rejected hostname due to max length",
+                RS_LOG_CHBUF(LOG_NOTICE, "Rejected hostname due to max length",
                     unsaved_str, ch - unsaved_str);
                 RS_H_ERR(RS_HTTP_BAD_REQUEST);
             }
@@ -494,7 +494,7 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + conf->allowed_origin_max_strlen) {
-                RS_LOG_CHBUF(LOG_DEBUG, "Rejected origin due to max length",
+                RS_LOG_CHBUF(LOG_NOTICE, "Rejected origin due to max length",
                     unsaved_str, ch - unsaved_str);
                 RS_H_ERR(RS_HTTP_FORBIDDEN);
             }

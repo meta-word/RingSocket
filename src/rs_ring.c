@@ -205,6 +205,8 @@ static rs_ret send_newest_wmsg(
         }
         return RS_OK;
     case RS_AGAIN:
+        RS_LOG(LOG_INFO, "write_%s(peer, msg, %zu) returned RS_AGAIN",
+            peer->is_encrypted ? "tls" : "tcp", msg_size);
         peer->ws.wref_c = 1;
         peer->ws.wref_i = newest_wref_i;
         wrefs[newest_wref_i].remaining_recipient_c++;

@@ -82,7 +82,7 @@ struct rs_app_cb_args {
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
 #define RS_LOG_VARS \
-int _rs_log_mask = LOG_UPTO(LOG_WARNING); \
+int _rs_log_mask = LOG_UPTO(LOG_NOTICE); \
 thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 
 #include <ringsocket_app_helper.h>
@@ -169,7 +169,7 @@ rs_ret ringsocket_app( \
                 RS_LOG(LOG_DEBUG, "Going to sleep..."); \
                 rs.cb = RS_CALLBACK_TIMER; \
                 _WAIT_##timer_macro; /* _WAIT_RS_TIMER_[NONE|SLEEP|WAKE] */ \
-                RS_LOG(LOG_DEBUG, "Awoken by a worker thread!"); \
+                RS_LOG(LOG_DEBUG, "Awoken by a worker thread."); \
                 idle_c = 0; \
             } \
             continue; \
@@ -276,6 +276,9 @@ RS_LOG_VARS
         case RS_OK: /* a worker thread already woke this thread up */ \
             break; \
         case RS_AGAIN: /* futex timed out: assume timing was accurate-ish */ \
+            /* RS_LOG(LOG_DEBUG, "RS_TIMER_...(): Futex timed out " \ */ \
+            /* "after (supposedly) %f second(s)", \ */ \
+            /* .000001 * interval_microsec); - */ \
             timestamp_microsec += interval_microsec; \
             goto timer_cb_and_futex_wait; \
         default: \
@@ -298,6 +301,9 @@ RS_LOG_VARS
         case RS_OK: /* a worker thread woke this thread up */ \
             break; \
         case RS_AGAIN: /* futex timed out: assume timing was accurate-ish */ \
+            /* RS_LOG(LOG_DEBUG, "RS_TIMER_WAKE(): Futex timed out " \ */ \
+            /* "after (supposedly) %f second(s)", \ */ \
+            /* .000001 * interval_microsec); - */ \
             timestamp_microsec += interval_microsec; \
             RS_GUARD_APP(rs_guard_timer_cb((timer_cb)(&rs), \
                 &interval_microsec)); \

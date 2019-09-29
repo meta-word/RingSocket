@@ -149,6 +149,7 @@ inline rs_ret rs_prepare_ring_write(
                 ring->buf_size *= ring->alloc_multiplier;
                 // Use RS_CACHE_ALIGNED_CALLOC() to eliminate possibility of
                 // false sharing with preceding or trailing heap bytes.
+                ring->buf = NULL; // As required by RS_CACHE_ALIGNED_CALLOC()
                 RS_CACHE_ALIGNED_CALLOC(ring->buf, ring->buf_size);
                 RS_LOG(LOG_NOTICE, "Allocated a new ring buffer with size %zu",
                     ring->buf_size);

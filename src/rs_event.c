@@ -36,7 +36,7 @@ rs_ret handle_peer_events(
         }
     } else if (events & EPOLLHUP) {
         // Don't user get_peer_str() because the peer may already be gone.
-        RS_LOG(LOG_DEBUG, "Received EPOLLHUP (all events: %s)",
+        RS_LOG(LOG_INFO, "Received EPOLLHUP (all events: %s)",
             get_epoll_events_str(events));
         // HUP means that the peer has disappeared, or at least is not going to
         // read anything it is sent from here on out. However, there is a
@@ -48,7 +48,7 @@ rs_ret handle_peer_events(
         }
     } else if (events & EPOLLRDHUP) {
         // Don't user get_peer_str() because the peer may already be gone.
-        RS_LOG(LOG_DEBUG, "Received EPOLLRDHUP (all events: %s)",
+        RS_LOG(LOG_INFO, "Received EPOLLRDHUP (all events: %s)",
             get_epoll_events_str(events));
         // Although RDHUP is supposed to mean that there will no longer be any
         // data left to read from the peer, this flag can not be interpreted as
@@ -63,7 +63,7 @@ rs_ret handle_peer_events(
     }
     if (peer->is_writing && !(events & EPOLLOUT) &&
         peer->mortality == RS_MORTALITY_LIVE) {
-        RS_LOG(LOG_DEBUG, "Writing blocked for %s with events %s",
+        RS_LOG(LOG_INFO, "Writing blocked for %s with events %s",
             get_peer_str(peer), get_epoll_events_str(events));
         return RS_OK;
     }

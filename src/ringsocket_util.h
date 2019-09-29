@@ -144,7 +144,7 @@ extern thread_local char _rs_thread_id_str[];
 #define RS_CACHE_ALIGNED_CALLOC(pointer, elem_c) do { \
     if (pointer) { \
         RS_LOG(LOG_CRIT, "Pointer argument of " \
-            "RS_CACHE_ALIGNED_ALLOC(pointer, elem_c) must be NULL."); \
+            "RS_CACHE_ALIGNED_CALLOC(pointer, elem_c) must be NULL."); \
         return RS_FATAL; \
     } \
     size_t alloc_size = (elem_c) * sizeof(*(pointer)); \
