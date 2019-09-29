@@ -3,7 +3,7 @@
 
 // This file is intended to be compiled as a shared object that should be
 // preloaded by RingSocket by executing it with a command such as:
-// "sudo LD_PRELOAD=$PWD/rs_sham_io.so ringsocket"
+// "sudo LD_PRELOAD=$PWD/rs_preload_sham_io.so ringsocket"
 //
 // The objective of this file is to simulate EAGAIN/partial IO events by
 // wrapping the <unistd.h> read() and write() functions. This is accomplished

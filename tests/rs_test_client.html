@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright © 2019 William Budd -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RingSocket Test Client</title>
+<style>
+html {
+	 width: 100%;
+	 height: 100%;
+	 margin: 0;
+	 padding: 0;
+	 background-color: #333;
+}
+body {
+  display: flex;
+  flex-direction: column;
+  max-width: 50rem;
+  min-height: 100%;
+  margin: 0 auto; 
+	 padding: 0;
+}
+#rsSpawn {
+  align-self: center;
+  margin: 1rem 0;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+	 font-size: 1rem;
+}
+#rsLog {
+  flex-grow: 1;
+	 margin: 0;
+	 padding: 1rem;
+  color: #FFF;
+	 font-size: 0.9rem;
+ 	background-color: #171717;
+}
+</style>
+</head>
+<body>
+<noscript>To test RingSocket in a browser, enable JavaScript.</noscript>
+<button id="rsSpawn">Spawn a new WebSocket client</button>
+<div id="rsLog"></div>
+<script type="text/javascript">
+
+'use strict';
+
+// Old-fashioned Javascript style to ensure compatibility with outdated browsers
+
+var rsURL = 'ws://localhost:RANDOM_PORT_PLACEHOLDER/stress';
+
+var rsLog = document.getElementById("rsLog");
+rsLog.log = function (wsNum, str) {
+ this.innerHTML += '[WS#' + wsNum + '] ' + str + '<br>';
+}
+rsLog.warn = function (wsNum, str) {
+ this.innerHTML += '<span style="color: orange;">[WS#' + wsNum + '] ' +
+   str + '</span><br>';
+}
+rsLog.err = function (wsNum, str) {
+ this.innerHTML += '<span style="color: red;">[WS#' + wsNum + '] ' +
+   str + '</span><br>';
+}
+
+var wsCount = 0;
+document.getElementById("rsSpawn").addEventListener("click", function () {
+  var wsNum = ++wsCount;
+  rsLog.log(wsNum, "Attempting to connect to " + rsURL);
+  var ws = new WebSocket(rsURL);
+  ws.binaryType = 'arraybuffer';
+  ws.onclose = function (ev) {
+    if (ev.code === 1006) {
+      rsLog.err(wsNum,
+        'Connection failed: please check your browser\'s developer console.');
+    } else {
+      rsLog.warn(wsNum, 'WebSocket close code: ' + ev.code);
+    }
+  }
+  ws.onmessage = function (ev) {
+    if (!(ev.data instanceof ArrayBuffer)) {
+      rsLog.err(wsNum, 'Unexpectedly received non-binary RingSocket data.');
+      return;
+    }
+    var data = new Uint8Array(ev.data);
+    for (var i = 0; i < ev.data.byteLength; i++) {
+      if (data[i] !== 255 - i % 256) {
+        rsLog.err(wsNum, 'Received a message at byte index ' + i +
+                         ' with a value of ' + data[i] +
+                         ' instead of the expected value ' + (255 - i % 256));
+        return;
+      }
+    }
+    rsLog.log(wsNum, 'Validated a ' + ev.data.byteLength +
+        ' byte message from RingSocket: echoing the same message back.');
+  }
+});
+
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "log_level": "info",
+  "worker_c": 3,
+  "ports": [{
+    "port_number": RANDOM_PORT_PLACEHOLDER,
+    "is_unencrypted": true
+  }],
+  "apps": [{
+    "name": "Stress",
+    "app_path": "/tmp/rs_test_app_stress.so",
+    "endpoints": [{
+      "endpoint_id": 1,
+      "url": "ws://localhost:RANDOM_PORT_PLACEHOLDER/stress",
+      "allowed_origins": ["file://"]
+    }]
+  }]
+}

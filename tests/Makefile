@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 # Copyright © 2019 William Budd
 
-SHAM_NAME = rs_sham_io
-SHAM_SRC = $(SHAM_NAME).c
-SHAM_SONAME = $(SHAM_NAME).so
+PRELOAD_NAME = rs_preload_sham_io
+PRELOAD_SRC = $(PRELOAD_NAME).c
+PRELOAD_SONAME = $(PRELOAD_NAME).so
 
-APP_NAME = rs_test_app_traffic
+APP_NAME = rs_test_app_stress
 APP_SRC = $(APP_NAME).c
 APP_SONAME = $(APP_NAME).so
 
@@ -13,13 +13,13 @@ CC = gcc
 FLAGS = -Wall -Wextra -Wpedantic -std=c11 -O3 -fpic -shared -Wl,-z,relro,-z,now
 
 .PHONY: all
-all: sham app
+all: preload app
 
-.PHONY: sham
-sham: $(SHAM_SONAME)
+.PHONY: preload
+preload: $(PRELOAD_SONAME)
 
-$(SHAM_SONAME):
-	$(CC) $(FLAGS) -o $(SHAM_SONAME) $(SHAM_SRC)
+$(PRELOAD_SONAME):
+	$(CC) $(FLAGS) -o $(PRELOAD_SONAME) $(PRELOAD_SRC)
 
 .PHONY: app
 app: $(APP_SONAME)
@@ -30,4 +30,4 @@ $(APP_SONAME):
 
 .PHONY: clean
 clean:
-	rm -rf $(SHAM_SONAME) $(APP_SONAME)
+	rm -rf $(PRELOAD_SONAME) $(APP_SONAME)

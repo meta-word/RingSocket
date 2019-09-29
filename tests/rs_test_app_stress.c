@@ -64,12 +64,15 @@ static void send_somewhere(
     case 1:
         switch (randrange(2 + cb_has_cur)) {
         case 0:
+            RS_LOG(LOG_DEBUG,"rs_to_every....");
             rs_to_every(rs, RS_BIN);
             break;
         case 1:
+            RS_LOG(LOG_DEBUG,"rs_to_every....");
             rs_to_single(rs, RS_BIN, get_nth_client_id(0));
             break;
         case 2:
+            RS_LOG(LOG_DEBUG,"rs_to_cur....");
             rs_to_cur(rs, RS_BIN);
         }
         break;
@@ -159,6 +162,7 @@ static void send_something(
     for (size_t i = 0; i < byte_c; i++) {
         rs_w_uint8(rs, 255 - i % 256);
     }
+    RS_LOG(LOG_DEBUG,"Written %zu bytes", byte_c);
     send_somewhere(rs, cb_has_cur);
     byte_c = RS_TEST_INCR_MSG_BYTE_C(byte_c);
     byte_c %= RS_TEST_MAX_MSG_BYTE_C;
@@ -179,7 +183,6 @@ rs_test_ret open_cb(
         if (!*cid) {
             *cid = rs_get_client_id(rs);
             client_c++;
-            send_something(rs, true);
             return RS_TEST_OK;
         }
     }
@@ -192,6 +195,7 @@ int read_cb(
     uint8_t * msg,
     size_t msg_byte_c
 ) {
+    (void) rs;
     for (size_t i = 0; i < msg_byte_c; i++) {
         if (msg[i] != 255 - i % 256) { // expect same as send_something() sends
             RS_LOG(LOG_ERR, "Received a message byte at index %zu with a value "
@@ -200,7 +204,7 @@ int read_cb(
             return RS_TEST_BAD_MSG;
         }
     }
-    send_something(rs, true);
+    RS_LOG(LOG_DEBUG,"Validated a %zu byte message from a client.");
     return RS_TEST_OK;
 }
 
@@ -223,8 +227,11 @@ int close_cb(
 int timer_cb(
     rs_t * rs
 ) {
-    send_something(rs, false);
-    return RS_TEST_OK;
+    if (client_c) {
+        RS_LOG(LOG_DEBUG,"Timer timed out: let's send_something().");
+        send_something(rs, false);
+    }
+    return 1000000;
 }
 
 RS_APP(
@@ -232,5 +239,5 @@ RS_APP(
     RS_OPEN(open_cb),
     RS_READ_BIN(read_cb, RS_NET_STA(uint8_t, 0, RS_TEST_MAX_MSG_BYTE_C)),
     RS_CLOSE(close_cb),
-    RS_TIMER_WAKE(timer_cb, 1000)
+    RS_TIMER_WAKE(timer_cb, 1000000)
 );
