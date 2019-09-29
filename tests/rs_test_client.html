@@ -8,41 +8,56 @@
 <title>RingSocket Test Client</title>
 <style>
 html {
-	 width: 100%;
-	 height: 100%;
-	 margin: 0;
-	 padding: 0;
-	 background-color: #333;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #333;
 }
 body {
-  display: flex;
-  flex-direction: column;
-  max-width: 50rem;
-  min-height: 100%;
+  position: relative;
+  width: 50rem;
+  height: 100%;
   margin: 0 auto; 
-	 padding: 0;
-}
-#rsSpawn {
-  align-self: center;
-  margin: 1rem 0;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-	 font-size: 1rem;
+  padding: 0;
 }
 #rsLog {
-  flex-grow: 1;
-	 margin: 0;
-	 padding: 1rem;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 3rem;
+  padding: 1rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 0.9rem;
   color: #FFF;
-	 font-size: 0.9rem;
- 	background-color: #171717;
+  background-color: #171717;
+}
+#rsSpawn {
+  position: absolute;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translate(-50%, 50%);
+  padding: 1rem;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.warn {
+  color: orange;
+}
+.err {
+  color: red;
 }
 </style>
 </head>
 <body>
 <noscript>To test RingSocket in a browser, enable JavaScript.</noscript>
-<button id="rsSpawn">Spawn a new WebSocket client</button>
 <div id="rsLog"></div>
+<button id="rsSpawn">Spawn a WebSocket client</button>
 <script type="text/javascript">
 
 'use strict';
@@ -50,33 +65,40 @@ body {
 // Old-fashioned Javascript style to ensure compatibility with outdated browsers
 
 var rsURL = 'ws://localhost:RANDOM_PORT_PLACEHOLDER/stress';
+var rsLog = document.getElementById('rsLog');
+var rsSpawn = document.getElementById('rsSpawn')
+var wsCount = 0;
 
-var rsLog = document.getElementById("rsLog");
-rsLog.log = function (wsNum, str) {
- this.innerHTML += '[WS#' + wsNum + '] ' + str + '<br>';
+rsLog.log = function (wsNum, str, prefix, suffix) {
+  this.innerHTML += prefix + '[WS#' + wsNum + '] ' + str + suffix + '\n';
+  rsLog.scrollTop = rsLog.scrollHeight;
 }
 rsLog.warn = function (wsNum, str) {
- this.innerHTML += '<span style="color: orange;">[WS#' + wsNum + '] ' +
-   str + '</span><br>';
+  this.log(wsNum, str, '<span class="warn">', '</span>');
 }
 rsLog.err = function (wsNum, str) {
- this.innerHTML += '<span style="color: red;">[WS#' + wsNum + '] ' +
-   str + '</span><br>';
+  this.log(wsNum, str, '<span class="err">', '</span>');
 }
 
-var wsCount = 0;
-document.getElementById("rsSpawn").addEventListener("click", function () {
+rsSpawn.setSpawnText = function () {
+  this.innerText = 'Spawn WebSocket client #' + (wsCount + 1);
+}
+
+rsSpawn.addEventListener('click', function () {
   var wsNum = ++wsCount;
-  rsLog.log(wsNum, "Attempting to connect to " + rsURL);
+  rsSpawn.setSpawnText();
+  rsLog.log(wsNum, 'Attempting to connect to ' + rsURL, '', '');
   var ws = new WebSocket(rsURL);
   ws.binaryType = 'arraybuffer';
   ws.onclose = function (ev) {
     if (ev.code === 1006) {
       rsLog.err(wsNum,
-        'Connection failed: please check your browser\'s developer console.');
+        'Connection failed: please check your browser&apos;s developer console.'
+      );
     } else {
       rsLog.warn(wsNum, 'WebSocket close code: ' + ev.code);
     }
+    rsSpawn.setSpawnText();
   }
   ws.onmessage = function (ev) {
     if (!(ev.data instanceof ArrayBuffer)) {
@@ -93,7 +115,7 @@ document.getElementById("rsSpawn").addEventListener("click", function () {
       }
     }
     rsLog.log(wsNum, 'Validated a ' + ev.data.byteLength +
-        ' byte message from RingSocket: echoing the same message back.');
+      ' byte message from RingSocket: echoing the same message back.', '', '');
   }
 });
 
