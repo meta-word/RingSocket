@@ -3,7 +3,7 @@
 
 #include <ringsocket.h>
 
-#define RS_TEST_MAX_CLIENT_C 10
+#define RS_TEST_MAX_CLIENT_C 1000
 #define RS_TEST_INCR_MSG_BYTE_C(_cur_byte_c) (1.1 * ((_cur_byte_c) + 100))
 #define RS_TEST_MAX_MSG_BYTE_C 536870912 // 512 MB
 

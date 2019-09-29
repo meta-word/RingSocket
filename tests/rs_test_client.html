@@ -66,11 +66,12 @@ body {
 
 var rsURL = 'ws://localhost:RANDOM_PORT_PLACEHOLDER/stress';
 var rsLog = document.getElementById('rsLog');
-var rsSpawn = document.getElementById('rsSpawn')
+var rsSpawn = document.getElementById('rsSpawn');
 var wsCount = 0;
 
 rsLog.log = function (wsNum, str, prefix, suffix) {
   this.innerHTML += prefix + '[WS#' + wsNum + '] ' + str + suffix + '\n';
+  // Keep the rsLog div contents scrolled to the bottom
   rsLog.scrollTop = rsLog.scrollHeight;
 }
 rsLog.warn = function (wsNum, str) {
@@ -98,6 +99,7 @@ rsSpawn.addEventListener('click', function () {
     } else {
       rsLog.warn(wsNum, 'WebSocket close code: ' + ev.code);
     }
+    wsCount--;
     rsSpawn.setSpawnText();
   }
   ws.onmessage = function (ev) {
