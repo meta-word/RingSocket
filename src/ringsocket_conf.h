@@ -17,7 +17,7 @@ struct rs_conf {
     uint32_t fd_alloc_c;
     uint32_t max_ws_msg_size;
     uint32_t worker_rbuf_size;
-    uint32_t wrefs_elem_c;
+    uint32_t owrefs_elem_c;
     uint16_t epoll_buf_elem_c;
     uint16_t port_c;
     uint16_t cert_c;

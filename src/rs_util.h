@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <ringsocket.h>
+#include "rs_worker.h"
 
 char * get_peer_str(
     union rs_peer * peer

@@ -15,7 +15,8 @@ static char * get_addr_str(
     struct sockaddr_storage addr = {0};
     socklen_t addr_size = sizeof(addr);
     if (getpeername(socket_fd, (struct sockaddr *) &addr, &addr_size) == -1) {
-        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful getpeername(%d, ...)", socket_fd);
+        RS_LOG_ERRNO(LOG_NOTICE, "Unsuccessful getpeername(%d, ...)",
+            socket_fd);
         strcpy(str, "<UNKNOWN>");
         return str + RS_CONST_STRLEN("<UNKNOWN>");
     }
@@ -26,7 +27,7 @@ static char * get_addr_str(
     int ret = getnameinfo((struct sockaddr *) &addr, addr_size, str,
         NI_MAXHOST, port_str, NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV);
     if (ret) {
-        RS_LOG(LOG_ERR, "Unsuccessful getnameinfo(): %s", gai_strerror(ret));
+        RS_LOG(LOG_NOTICE, "Unsuccessful getnameinfo(): %s", gai_strerror(ret));
         if (addr.ss_family == AF_INET6) {
             str--;
         }
@@ -83,8 +84,8 @@ char * get_peer_str(
                 "ws.heap_buf_contains_pong: Y, "
                 "ws.rmsg_is_fragmented: Y, "
                 "ws.rmsg_is_utf8: Y, "
-                "ws.wref_c: 255, "
-                "ws.wref_i: 4294967295, "
+                "ws.owref_c: 255, "
+                "ws.owref_i: 4294967295, "
                 "ws.msg_rsize: 4294967295, "
                 "ws.unparsed_rsize: 4294967295 "
             )
@@ -146,16 +147,16 @@ char * get_peer_str(
             "ws.rmsg_is_fragmented: %c, "
             "ws.rmsg_is_utf8: %c, "
             "ws.rmsg_utf8_state: %" PRIu8 ", "
-            "ws.wref_c: %" PRIu8 ", "
-            "ws.wref_i: %" PRIu32 ", "
+            "ws.owref_c: %" PRIu8 ", "
+            "ws.owref_i: %" PRIu32 ", "
             "ws.msg_rsize: %" PRIu32 ", "
             "ws.%s: %" PRIu32,
             peer->ws.heap_buf_contains_pong ? 'Y' : 'N',
             peer->ws.rmsg_is_fragmented ? 'Y' : 'N',
             peer->ws.rmsg_is_utf8 ? 'Y' : 'N',
             peer->ws.rmsg_utf8_state,
-            peer->ws.wref_c,
-            peer->ws.wref_i,
+            peer->ws.owref_c,
+            peer->ws.owref_i,
             peer->ws.msg_rsize,
             peer->mortality == RS_MORTALITY_LIVE ?
                 "unparsed_rsize" : "close_wmsg_i",

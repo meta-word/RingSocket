@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <ringsocket.h>
+#include "rs_worker.h"
 
 int derive_cert_index_from_hostname(
     struct rs_conf const * conf,
@@ -12,20 +12,21 @@ int derive_cert_index_from_hostname(
 );
 
 rs_ret create_tls_contexts(
-    struct rs_conf const * conf
+    struct rs_worker * worker
 );
 
 rs_ret init_tls_session(
+    struct rs_worker * worker,
     union rs_peer * peer
 );
 
 rs_ret handle_tls_io(
-    union rs_peer * peer,
-    uint8_t * rbuf,
-    size_t rbuf_size
+    struct rs_worker * worker,
+    union rs_peer * peer
 );
 
 rs_ret read_tls(
+    char * tls_err_msg_buf,
     union rs_peer * peer,
     void * rbuf,
     size_t rbuf_size,
@@ -33,6 +34,7 @@ rs_ret read_tls(
 );
 
 rs_ret write_tls(
+    char * tls_err_msg_buf,
     union rs_peer * peer,
     void const * wbuf,
     size_t wbuf_size

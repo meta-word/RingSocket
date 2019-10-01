@@ -8,11 +8,8 @@
 #include "rs_socket.h"
 #include "rs_util.h" // get_peer_str()
 
-#include <assert.h> // static_assert()
 #include <linux/filter.h> // struct sock_filter
 #include <sys/epoll.h> // epoll_create1(), epoll_ctl()
-
-thread_local static struct rs_slots peer_slots = {0};
 
 static rs_ret bind_socket(
     struct rs_conf_port const * port,
@@ -191,27 +188,14 @@ rs_ret bind_to_ports(
     return RS_OK;
 }
 
-rs_ret init_peer_slots(
-    size_t peer_slot_c
-) {
-    return init_slots(peer_slot_c, &peer_slots);
-}
-
-void free_peer_slot(
-    int peer_i
-) {
-    free_slot(&peer_slots, peer_i);
-}
-
 rs_ret listen_to_sockets(
-    struct rs_conf const * conf,
-    size_t worker_i,
+    struct rs_worker * worker,
     int epoll_fd
 ) {
-    for (struct rs_conf_port * p = conf->ports; p < conf->ports + conf->port_c;
-        p++) {
+    for (struct rs_conf_port * p = worker->conf->ports;
+        p < worker->conf->ports + worker->conf->port_c; p++) {
         for (size_t i = 0; i < p->listen_fd_c; i++) {
-            int listen_fd = p->listen_fds[worker_i][i];
+            int listen_fd = p->listen_fds[worker->worker_i][i];
             // todo: for some bizarre reason listen() _sometimes_ returns
             // EADDRINUSE even though each listen_fd (as obtained through bind()
             // after setting both SO_REUSEADDR and SO_REUSEPORT) is never used
@@ -246,14 +230,14 @@ rs_ret listen_to_sockets(
 }
 
 rs_ret accept_sockets(
-    union rs_peer * peers,
+    struct rs_worker * worker,
     int epoll_fd,
     int listen_fd,
     bool is_encrypted
 ) {
     static_assert(EAGAIN == EWOULDBLOCK, "EAGAIN != EWOULDBLOCK");
     for (;;) {
-        // Using NULL as addr and addrlen args to save space on the peers array.
+        // Use NULL as addr and addrlen args to save worker->peers array space.
         // When/if needed, peer info can be obtained with getpeername().
         int socket_fd = accept4(listen_fd, NULL, NULL, SOCK_NONBLOCK);
         if (socket_fd == -1) {
@@ -287,7 +271,7 @@ rs_ret accept_sockets(
             }
         }
         size_t peer_i = 0;
-        if (alloc_slot(&peer_slots, &peer_i) != RS_OK) {
+        if (alloc_slot(&worker->peer_slots, &peer_i) != RS_OK) {
             RS_LOG(LOG_WARNING, "Accept()ed new peer %d, but all peer slots "
                 "are currently full. Aborting peer.", socket_fd);
             if (close(socket_fd) == -1) {
@@ -298,8 +282,8 @@ rs_ret accept_sockets(
         }
         RS_LOG(LOG_DEBUG, "Assigning accept()ed new peer with fd=%d to peer_i "
             "%zu", socket_fd, peer_i);
-        peers[peer_i].socket_fd = socket_fd;
-        peers[peer_i].is_encrypted = is_encrypted;
+        worker->peers[peer_i].socket_fd = socket_fd;
+        worker->peers[peer_i].is_encrypted = is_encrypted;
         struct epoll_event event = {
             .data = {.u64 = *((uint64_t *) (uint32_t []){
                 RS_EVENT_PEER,

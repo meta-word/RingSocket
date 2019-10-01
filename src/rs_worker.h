@@ -3,13 +3,75 @@
 
 #pragma once
 
-#include <ringsocket.h>
+#include "rs_slot.h" // struct rs_slots
 
-#include <openssl/ssl.h> // SSL pointer type
+#include <ringsocket.h>
+#include <openssl/ssl.h>
+
+// It may seem like the rs_worker_args and rs_worker structs could be replaced
+// by a single struct, but their differentation is due to false sharing
+// considerations.
+//
+// Mostly due to the constraints of C11 threading API, rs_worker_args references
+// of all worker threads are held by the initial thread (i.e., the last worker
+// thread). To prevent false sharing with that thread rs_worker_args only holds
+// data that remains constant once workers are spawned; whereas rs_worker only
+// exists on each worker thread's stack, and hence is free of such inhibitions.
+
+struct rs_worker_args {
+    struct rs_conf const * conf; // See ringsocket_conf.h
+    
+    // app_c length array of io_pair arrays allocated by each app respectively
+    struct rs_thread_io_pairs * * io_pairs; // See ringsocket_ring.h
+    
+    // app_c length array of each app's sleep state
+    struct rs_thread_sleep_state * app_sleep_states; // See ringsocket_ring.h
+    struct rs_thread_sleep_state * worker_sleep_state; // See ringsocket_ring.h
+    int worker_eventfd;
+    
+    size_t worker_i;
+};
+
+struct rs_worker {
+    // These 6 members remain indentical to the ones in struct rs_worker_args.
+    struct rs_conf const * const conf;
+    struct rs_thread_io_pairs * * const io_pairs;
+    struct rs_thread_sleep_state * const sleep_state; // == worker_sleep_state
+    struct rs_thread_sleep_state * const app_sleep_states;
+    int const eventfd; // == worker_eventfd
+    size_t worker_i;
+
+    struct rs_ring_update_queue ring_update_queue; // See ringsocket_ring.h
+    struct rs_ring * inbound_rings; // See ringsocket.h
+
+    struct rs_slots peer_slots; // See rs_slot.h
+    union rs_peer * peers; // See union definition below
+    size_t peers_elem_c;
+
+    uint8_t * rbuf;
+
+    // These 3 are used exclusively by rs_hash.c for HTTP Upgrade key hashing.
+    EVP_MD_CTX * sha1_ctx;
+    BIO * base64_bio;
+    BUF_MEM * base64_buf;
+
+    // These are used exclusively by rs_tls.c
+    SSL_CTX * * tls_ctxs;
+#define RS_TLS_ERR_MSG_BUF_BYTE_C 256 // The minimum required by OpenSSL
+    char tls_err_msg_buf[RS_TLS_ERR_MSG_BUF_BYTE_C];
+
+    uint8_t * * outbound_readers;
+
+    struct rs_owref * owrefs; // See below
+    size_t owrefs_elem_c;
+    size_t newest_owref_i;
+    size_t oldest_owref_i;
+    size_t * oldest_owref_i_by_app;
+};
 
 // The worker threads' array of connected peers may need to be quite long, so
 // each peer element should be made as compact as possible to minimize cache
-// misses. Without compromizing semantic clarity, this is achieved as follows:
+// misses, which is why rs_peer is implemented as follows:
 //
 // * Member types are as small as they can be proven to be safe, unless
 //   alignment requirements allow them extra space that would otherwise lead to
@@ -30,7 +92,6 @@
 //   and position to achieve said alignment.
 // * A C11 static_assert(sizeof(union rs_peer) == 40) call makes sure everything
 //   is packed by the compiler as intended.
-
 union rs_peer {
     // 5 64-bit "blocks" amounting to a total size of only 40 bytes
     struct {
@@ -89,8 +150,8 @@ union rs_peer {
             uint8_t rmsg_is_utf8: 1;
             uint8_t rmsg_utf8_state: 5;
         };
-        uint8_t wref_c; // Total of all outbound app wmsgs waiting to be written
-        uint32_t wref_i; // Index to array of rs_wref structs (see below)
+        uint8_t owref_c; // Total of all outbound app wmsgs waiting to be sent
+        uint32_t owref_i; // Index to worker->rs_owrefs array of owref structs
         // 5th 64-bit block
         uint32_t msg_rsize;
         union {
@@ -129,9 +190,30 @@ enum rs_continuation {
     RS_CONT_SENDING = 2 // RS_AGAIN occured during sending
 };
 
-struct rs_wref { // Only applicable when layer == LAYER_WEBSOCKET
+// Each WebSocket message received on an outbound ring buffer from an app can be
+// destined for any number of recipients. struct rs_owref ("Outbound Write
+// Reference") keeps track of peer recipients for which said message has not
+// been (fully) sent yet. (Only applicable when peer layer == LAYER_WEBSOCKET.)
+struct rs_owref {
     struct rs_ring_msg * ring_msg;
     uint32_t remaining_recipient_c;
     uint16_t head_size;
     uint16_t app_i;
 };
+
+// rs_worker.c prototypes
+
+int work(
+    struct rs_worker_args const * worker_args
+);
+
+rs_ret enqueue_ring_update(
+    struct rs_worker * worker,
+    uint8_t * new_ring_position,
+    size_t app_thread_i,
+    bool is_write
+);
+
+rs_ret flush_ring_updates(
+    struct rs_worker * worker
+);

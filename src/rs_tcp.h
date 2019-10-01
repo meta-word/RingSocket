@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <ringsocket.h>
+#include "rs_worker.h"
 
 rs_ret read_tcp(
     union rs_peer * peer,
@@ -23,8 +23,7 @@ rs_ret write_bidirectional_tcp_shutdown(
 );
 
 rs_ret handle_tcp_io(
+    struct rs_worker * worker,
     union rs_peer * peer,
-    uint8_t * rbuf,
-    size_t rbuf_size,
     int peer_i
 );

@@ -4,8 +4,8 @@
 #define _GNU_SOURCE // getgroups(), setresgid(), and setresuid()
 
 #include "rs_conf.h"
-#include "rs_event.h" // work()
-#include "rs_socket.h" // listen_to_ports()
+#include "rs_socket.h" // bind_to_ports()
+#include "rs_worker.h" // work(), struct rs_worker_args
 
 #include <dlfcn.h> // dlopen(), dlsym()
 #include <fcntl.h> // open()
@@ -284,11 +284,11 @@ static rs_ret spawn_app_and_worker_threads(
     struct rs_conf const * conf,
     int (* * app_cbs)(void *)
 ) {
-    // Each (app thread <-> worker_thread) pair needs access to one allocated
-    // rs_shared_io struct.
+    // Each (app thread <-> worker thread) pair needs access to one allocated
+    // rs_thread_io_pairs struct.
     //
     // However, the current (and at this point only) thread will soon become the
-    // last worker thread, which means allocating the rs_shared_io structs
+    // last worker thread, which means allocating the rs_tread_io_pairs structs
     // directly here should be avoided because that might cause the array to
     // linger in one of this thread's cache lines, in which case any stores
     // between an app and a different worker thread would cause false sharing
@@ -355,7 +355,10 @@ static rs_ret spawn_app_and_worker_threads(
     struct rs_worker_args worker_args[conf->worker_c];
     for (size_t i = 0;; i++) {
         worker_args[i].conf = conf;
-        worker_args[i].all_io_pairs = all_io_pairs;
+        RS_CALLOC(worker_args[i].io_pairs, conf->app_c);
+        for (size_t j = 0; j < conf->app_c; j++) {
+            worker_args[i].io_pairs[j] = all_io_pairs[j] + i;
+        }
         worker_args[i].app_sleep_states = app_sleep_states;
         worker_args[i].worker_sleep_state = worker_sleep_states + i;
         worker_args[i].worker_eventfd = worker_eventfds[i];
@@ -370,7 +373,7 @@ static rs_ret spawn_app_and_worker_threads(
         if (thrd_create((thrd_t []){0}, (int (*)(void *)) work,
             worker_args + i) != thrd_success) {
             RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful thrd_create((thrd_t []){0}, "
-                "work, worker_args + %u)", i);
+                "work, worker_args + %zu)", i);
             return RS_FATAL;
         }
     }

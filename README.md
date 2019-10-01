@@ -513,9 +513,9 @@ doing":
 * `"outbound_ring_buf_size"`: The initial size in bytes of each app/worker
   pair's ring buffer with which app threads relay outgoing WebSocket messages to
   worker threads. Default: `134217728` (i.e., 128 MB)
-* `"wrefs_elem_c"`: The initial number of elements of each worker thread's array
-  of write references, with which they keep track of the extent to which
-  recipients have received their copies of outgoing WebSocket messages.
+* `"owrefs_elem_c"`: The initial number of elements of each worker thread's
+  array of outbound write references, with which they keep track of the extent
+  to which recipients have received their copies of outgoing WebSocket messages.
   Default: `10000`
 * `"epoll_buf_elem_c"`: Determines the number of epoll events each worker thread
   can store during each call to `epoll_wait()`. Default: `100`
@@ -659,11 +659,9 @@ following keys:
 
 ## Todo
 
-* Move wref stuff out of `rs_ring.c` into a separate `rs_wref.c`
 * Replace randomizing BPF with cpu affinity-based EBPF
-* Reduce thread_local usage in favor of stack variables to optimize performance
 * Add/improve comments for the lesser documented parts of the codebase
-* Write a comprehensive test suite
+* Increase code test suite coverage
 
 ## Contributing
 

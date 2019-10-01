@@ -9,6 +9,7 @@
 #define _POSIX_C_SOURCE 201112L // CLOCK_MONOTONIC_COARSE
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -18,9 +19,14 @@
 #include <time.h>
 
 // C11 language features
+#include <assert.h> // static_assert()
 #include <stdalign.h> // alignas, aligned_alloc() 
 #include <stdatomic.h> // atomic_uintptr_t, atomic_load/store_explicit()
 #include <threads.h> // thread stuff
+
+// The following headers are used internally -- not part of the RS public API
+#include <ringsocket_variadic.h>
+#include <ringsocket_util.h>
 
 // It is highly recommended that the correct cache line size of the target
 // architecture be passed to the compiler. For example:
@@ -37,10 +43,6 @@
 // Every RingSocket app callback function receives the same (rs_t * rs) opaque
 // pointer type as its first 1st argument. (Or maybe just pretend it's opaque?)
 typedef struct rs_app_cb_args rs_t;
-
-// The following headers are used internally -- not part of the RS public API
-#include <ringsocket_variadic.h>
-#include <ringsocket_util.h>
 
 // The following macros are included here instead of rs_util.h because they
 // may be of use to apps -- hence part of the RS public API
@@ -76,19 +78,18 @@ typedef struct rs_app_cb_args rs_t;
 // 1st arg: log level
 // 2nd arg: format string
 // 3rd arg etc: any parameters corresponding to the format string
-#define RS_LOG(...) _RS_LOG(__VA_ARGS__) // Defined in rs_util.h
+#define RS_LOG(...) _RS_LOG(__VA_ARGS__) // Defined in ringsocket_util.h
 
 // Same as RS_LOG, except that it also appends strerror(errno)
-#define RS_LOG_ERRNO(...) _RS_LOG_ERRNO(__VA_ARGS__) // See rs_util.h
+#define RS_LOG_ERRNO(...) _RS_LOG_ERRNO(__VA_ARGS__) // See ringsocket_util.h
 
 // Same as RS_LOG, except that the 3rd arg is expected to be a non-
 // 0-terminated (str) buffer, of which the size is expected to be the 4th arg.
 #define RS_LOG_CHBUF(lvl, fmt, chbuf, ...) _RS_LOG_CHBUF(lvl, fmt, chbuf, \
-    __VA_ARGS__) // See rs_util.h
+    __VA_ARGS__) // See ringsocket_util.h
 
-// The following headers are used internally -- not part of the RingSocket API
+// More internal headers: defined here because they depend on definitions above.
 #include <ringsocket_conf.h>
-#include <ringsocket_peer.h>
 #include <ringsocket_ring.h>
 #include <ringsocket_app.h>
 

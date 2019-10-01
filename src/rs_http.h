@@ -3,10 +3,9 @@
 
 #pragma once
 
-#include <ringsocket.h>
+#include "rs_worker.h"
 
 rs_ret handle_http_io(
-    struct rs_conf const * conf,
-    union rs_peer * peer,
-    char * rbuf
+    struct rs_worker * worker,
+    union rs_peer * peer
 );

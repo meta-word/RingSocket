@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2019 William Budd
 
+#include "rs_slot.h" // free_slot()
 #include "rs_tcp.h"
-#include "rs_socket.h" // free_peer_slot()
 #include "rs_tls.h" // init_tls_session()
 #include "rs_util.h" // get_peer_str()
 
@@ -86,9 +86,8 @@ rs_ret write_bidirectional_tcp_shutdown(
 }
 
 static rs_ret read_bidirectional_tcp_shutdown(
-    union rs_peer * peer,
-    uint8_t * rbuf,
-    size_t rbuf_size
+    struct rs_worker * worker,
+    union rs_peer * peer
 ) {
     // write_bidirectional_tcp_shutdown() should have been called already.
     // read() until 0 is returned, signifying the completion of a bidirectional
@@ -96,11 +95,13 @@ static rs_ret read_bidirectional_tcp_shutdown(
     // RS_LAYER_TCP, any bytes read() at this stage are not considered usable,
     // so they are ignored by repeatedly reading them into the start of rbuf,
     // to be readily overwritten during any next read().
-    ssize_t rsize = read(peer->socket_fd, rbuf, rbuf_size);
+    ssize_t rsize = read(peer->socket_fd, worker->rbuf,
+        worker->conf->worker_rbuf_size);
     while (rsize > 0) {
         RS_LOG(LOG_INFO, "Read(%d, ...) %ld bytes of ignored TCP data from "
             "%s", peer->socket_fd, rsize, get_peer_str(peer));
-        rsize = read(peer->socket_fd, rbuf, rbuf_size);
+        rsize = read(peer->socket_fd, worker->rbuf,
+            worker->conf->worker_rbuf_size);
     }
     if (!rsize) {
         return RS_CLOSE_PEER;
@@ -111,21 +112,20 @@ static rs_ret read_bidirectional_tcp_shutdown(
     }
     RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful read(%d, rbuf, %zu) from %s in "
         "RS_IO_STATE_CLOSING_READ_ONLY while at the TCP layer",
-        peer->socket_fd, rbuf_size, get_peer_str(peer));
+        peer->socket_fd, worker->conf->worker_rbuf_size, get_peer_str(peer));
     return RS_CLOSE_PEER;
 }
 
 rs_ret handle_tcp_io(
+    struct rs_worker * worker,
     union rs_peer * peer,
-    uint8_t * rbuf,
-    size_t rbuf_size,
     int peer_i
 ) {
     switch (peer->mortality) {
     case RS_MORTALITY_LIVE: // This is a new peer
         if (peer->is_encrypted) {
             peer->layer = RS_LAYER_TLS;
-            RS_GUARD(init_tls_session(peer));
+            RS_GUARD(init_tls_session(worker, peer));
         } else {
             peer->layer = RS_LAYER_HTTP;
         }
@@ -145,7 +145,7 @@ rs_ret handle_tcp_io(
         }
         // fall through
     case RS_MORTALITY_SHUTDOWN_READ:
-        switch (read_bidirectional_tcp_shutdown(peer, rbuf, rbuf_size)) {
+        switch (read_bidirectional_tcp_shutdown(worker, peer)) {
         case RS_AGAIN:
             return RS_OK;
         case RS_FATAL:
@@ -169,6 +169,6 @@ rs_ret handle_tcp_io(
     // is now guaranteed to be gone, along with any events it may otherwise have
     // continued to trigger. (See Q&A #6 of man 7 epoll.)
     memset(peer, 0, sizeof(union rs_peer));
-    free_peer_slot(peer_i);
+    free_slot(&worker->peer_slots, peer_i);
     return RS_OK;
 }

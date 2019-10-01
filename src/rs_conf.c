@@ -31,8 +31,8 @@
 #define RS_DEFAULT_REALLOC_MULTIPLIER 1.5
 #define RS_MIN_REALLOC_MULTIPLIER 1.05
 #define RS_MAX_REALLOC_MULTIPLIER 2.5
-#define RS_DEFAULT_WREFS_ELEM_C 10000
-#define RS_MIN_WREFS_ELEM_C 1000
+#define RS_DEFAULT_OWREFS_ELEM_C 10000
+#define RS_MIN_OWREFS_ELEM_C 1000
 #define RS_DEFAULT_EPOLL_BUF_ELEM_C 100
 #define RS_MIN_EPOLL_BUF_ELEM_C 10
 #define RS_DEFAULT_UPDATE_QUEUE_SIZE 5
@@ -613,13 +613,13 @@ static rs_ret parse_configuration(
         return RS_FATAL;
     }
 
-    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "wrefs_elem_c",
+    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "owrefs_elem_c",
         &(jg_obj_uint32){
-            .defa = &(uint32_t){RS_DEFAULT_WREFS_ELEM_C},
-            .min = &(uint32_t){RS_MIN_WREFS_ELEM_C},
-            .min_reason = "Setting the initial number of elements of the wrefs "
+            .defa = &(uint32_t){RS_DEFAULT_OWREFS_ELEM_C},
+            .min = &(uint32_t){RS_MIN_OWREFS_ELEM_C},
+            .min_reason = "Setting the initial number of elements of the owrefs "
                 "array any lower is a bad idea."
-        }, &conf->wrefs_elem_c));
+        }, &conf->owrefs_elem_c));
 
     RS_GUARD_JG(jg_obj_get_uint16(jg, root_obj, "epoll_buf_elem_c",
         &(jg_obj_uint16){

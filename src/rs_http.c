@@ -22,15 +22,15 @@ static char const * http_errors[] = {
 };
 
 static rs_ret read_http(
+    struct rs_worker * worker,
     union rs_peer * peer,
-    char * rbuf,
-    size_t rbuf_size,
     size_t jump_distance,
     char * * unsaved_str,
     char * * ch,
     char * * ch_over,
     char * wskey
 ) {
+    char * rbuf = (char *) worker->rbuf;
     // To read as much as possible in one go (and to stay in the same cache
     // area), the 1st byte of the upcoming new read will be placed at the start
     // of rbuf, or at that start plus an offset as required to accomodate
@@ -48,8 +48,10 @@ static rs_ret read_http(
     }
     size_t rsize = 0;
     rs_ret ret = peer->is_encrypted ?
-        read_tls(peer, *ch, rbuf_size - unsaved_strlen, &rsize) :
-        read_tcp(peer, *ch, rbuf_size - unsaved_strlen, &rsize);
+        read_tls(worker->tls_err_msg_buf,
+            peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize):
+        read_tcp(
+            peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize);
     *ch_over = *ch + rsize;
     if (ret != RS_AGAIN) {
         return ret;
@@ -249,29 +251,30 @@ static bool match_origin(
 // corresponding goto statement, which will readily fly anywhere -- effectively
 // implementing an ISO C-compliant variadic goto.
 static rs_ret parse_http_upgrade_request(
-    struct rs_conf const * conf,
+    struct rs_worker * worker,
     union rs_peer * peer,
-    char * rbuf,
     char * * wskey
 ) {
-    char * ch = rbuf; // pointer to the character currently being parsed
+    char * ch = (char *) worker->rbuf; // the character currently being parsed
     char * ch_over = ch; // pointer to the 1st out-of-read-bounds rbuf element
     // pointer to start of url/host/origin/wskey val str currently being parsed
     char * unsaved_str = NULL;
     // If the previous call to this function was broken off while in the middle
-    // of parsing an unsaved_str, that partial string was stored in peer->rbuf,
-    // and must now be copied to rbuf as a prefix to a new read()
+    // of parsing an unsaved_str, that partial string was stored in
+    // peer->heap_buf, and must now be copied to worker->rbuf as a prefix to a
+    // new read()
     if (peer->http.partial_strlen) {
         if (peer->http.wskey_was_parsed) {
             *wskey = (char *) peer->heap_buf;
-            memcpy(rbuf, peer->heap_buf + 22, peer->http.partial_strlen);
+            memcpy(worker->rbuf, peer->heap_buf + 22,
+                peer->http.partial_strlen);
         } else {
-            memcpy(rbuf, peer->heap_buf, peer->http.partial_strlen);
+            memcpy(worker->rbuf, peer->heap_buf, peer->http.partial_strlen);
             RS_FREE(peer->heap_buf);
         }
         ch += peer->http.partial_strlen;
         ch_over = ch;
-        unsaved_str = rbuf;
+        unsaved_str = (char *) worker->rbuf;
         peer->http.partial_strlen = 0;
     }
     // The above-mentioned case<->goto label mapping jump table switch:
@@ -295,8 +298,8 @@ static rs_ret parse_http_upgrade_request(
 #define RS_H_GETCH(jump_distance) do { \
     RS_H_##jump_distance: \
     if (++ch >= ch_over) { \
-        RS_GUARD(read_http(peer, rbuf, conf->worker_rbuf_size, jump_distance, \
-            &unsaved_str, &ch, &ch_over, *wskey)); \
+        RS_GUARD(read_http(worker, peer, jump_distance, &unsaved_str, &ch, \
+            &ch_over, *wskey)); \
     } \
 } while (0)
     // Often repeated parsing procedures are implemented as nice 'n ugly macros
@@ -367,20 +370,20 @@ static rs_ret parse_http_upgrade_request(
         RS_H_GETCH(13); unsaved_str = ch;
         while (*ch != '/') {
             if (*ch == ' ') { // a top-level absolute-form URI
-                if (match_hostname(conf, peer, unsaved_str, ch - unsaved_str,
-                    false) != RS_OK) {
+                if (match_hostname(worker->conf, peer, unsaved_str,
+                    ch - unsaved_str, false) != RS_OK) {
                     RS_H_ERR(RS_HTTP_BAD_REQUEST);
                 }
                 unsaved_str = NULL;
                 goto parse_http_version;
             }
-            if (ch >= unsaved_str + conf->hostname_max_strlen) {
+            if (ch >= unsaved_str + worker->conf->hostname_max_strlen) {
                 RS_H_ERR(RS_HTTP_BAD_REQUEST);
             }
             RS_H_GETCH(14);
         }
-        if (match_hostname(conf, peer, unsaved_str, ch - unsaved_str, false) !=
-            RS_OK) {
+        if (match_hostname(worker->conf, peer, unsaved_str, ch - unsaved_str,
+            false) != RS_OK) {
             RS_H_ERR(RS_HTTP_BAD_REQUEST);
         }
         unsaved_str = NULL;
@@ -391,13 +394,13 @@ static rs_ret parse_http_upgrade_request(
             RS_H_ERR(RS_HTTP_NOT_FOUND);
         }
         RS_H_GETCH(16);
-        if (ch > unsaved_str + conf->url_max_strlen) {
+        if (ch > unsaved_str + worker->conf->url_max_strlen) {
             RS_LOG_CHBUF(LOG_NOTICE, "Rejected url due to max length",
                 unsaved_str, ch - unsaved_str);
             RS_H_ERR(RS_HTTP_NOT_FOUND);
         }
     }
-    if (match_url(conf, peer, unsaved_str, ch - unsaved_str) != RS_OK) {
+    if (match_url(worker->conf, peer, unsaved_str, ch - unsaved_str) != RS_OK) {
         RS_H_ERR(RS_HTTP_NOT_FOUND);
     }
     unsaved_str = NULL;
@@ -469,15 +472,15 @@ static rs_ret parse_http_upgrade_request(
         RS_H_GETCH_AND_SKIP_OPTIONAL_WHITESPACE(52);
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
-            if (ch >= unsaved_str + conf->hostname_max_strlen) {
+            if (ch >= unsaved_str + worker->conf->hostname_max_strlen) {
                 RS_LOG_CHBUF(LOG_NOTICE, "Rejected hostname due to max length",
                     unsaved_str, ch - unsaved_str);
                 RS_H_ERR(RS_HTTP_BAD_REQUEST);
             }
             RS_H_GETCH(53);
         }
-        if (match_hostname(conf, peer, unsaved_str, ch - unsaved_str, true) !=
-            RS_OK) {
+        if (match_hostname(worker->conf, peer, unsaved_str, ch - unsaved_str,
+            true) != RS_OK) {
             RS_H_ERR(RS_HTTP_BAD_REQUEST);
         }
         unsaved_str = NULL;
@@ -493,14 +496,14 @@ static rs_ret parse_http_upgrade_request(
         RS_H_GETCH_AND_SKIP_OPTIONAL_WHITESPACE(61);
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
-            if (ch >= unsaved_str + conf->allowed_origin_max_strlen) {
+            if (ch >= unsaved_str + worker->conf->allowed_origin_max_strlen) {
                 RS_LOG_CHBUF(LOG_NOTICE, "Rejected origin due to max length",
                     unsaved_str, ch - unsaved_str);
                 RS_H_ERR(RS_HTTP_FORBIDDEN);
             }
             RS_H_GETCH(62);
         }
-        if (match_origin(conf, peer, unsaved_str, ch - unsaved_str) !=
+        if (match_origin(worker->conf, peer, unsaved_str, ch - unsaved_str) !=
             RS_OK) {
             RS_H_ERR(RS_HTTP_FORBIDDEN);
         }
@@ -569,6 +572,7 @@ static rs_ret parse_http_upgrade_request(
 }
 
 static rs_ret write_http_upgrade_response(
+    struct rs_worker * worker,
     union rs_peer * peer,
     char * wskey
 ) {
@@ -581,12 +585,13 @@ static rs_ret write_http_upgrade_response(
     char * const wskey_hash_dest = http101 + RS_CONST_STRLEN(http101) -
         RS_CONST_STRLEN("=\r\n\r\n") - 27;
     if (wskey) {
-        RS_GUARD(get_websocket_key_hash(wskey, wskey_hash_dest));
+        RS_GUARD(get_websocket_key_hash(worker, wskey, wskey_hash_dest));
     } else {
         memcpy(wskey_hash_dest, peer->heap_buf, 27);
     }
     rs_ret ret = peer->is_encrypted ?
-        write_tls(peer, http101, RS_CONST_STRLEN(http101)) :
+        write_tls(worker->tls_err_msg_buf,
+            peer, http101, RS_CONST_STRLEN(http101)) :
         write_tcp(peer, http101, RS_CONST_STRLEN(http101));
     switch (ret) {
     case RS_OK:
@@ -610,18 +615,18 @@ static rs_ret write_http_upgrade_response(
 }
 
 static rs_ret write_http_error_response(
+    char * tls_err_msg_buf,
     union rs_peer * peer
 ) {
     char const * msg = http_errors[peer->http.error_i];
     return peer->is_encrypted ?
-        write_tls(peer, msg, RS_CONST_STRLEN(msg)) :
+        write_tls(tls_err_msg_buf, peer, msg, RS_CONST_STRLEN(msg)) :
         write_tcp(peer, msg, RS_CONST_STRLEN(msg));
 }
 
 rs_ret handle_http_io(
-    struct rs_conf const * conf,
-    union rs_peer * peer,
-    char * rbuf
+    struct rs_worker * worker,
+    union rs_peer * peer
 ) {
     char * wskey = NULL;
     switch (peer->mortality) {
@@ -629,7 +634,7 @@ rs_ret handle_http_io(
         switch (peer->continuation) {
         case RS_CONT_NONE:
         case RS_CONT_PARSING:
-            switch (parse_http_upgrade_request(conf, peer, rbuf, &wskey)) {
+            switch (parse_http_upgrade_request(worker, peer, &wskey)) {
             case RS_OK:
                 goto write_http_upgrade;
             case RS_AGAIN:
@@ -649,7 +654,7 @@ rs_ret handle_http_io(
             break;
         case RS_CONT_SENDING: default:
             write_http_upgrade:
-            switch (write_http_upgrade_response(peer, wskey)) {
+            switch (write_http_upgrade_response(worker, peer, wskey)) {
             case RS_OK:
                 // Keep shared peer union members as-is, but reset all
                 // http/ws-specific union members to 0.
@@ -671,12 +676,12 @@ rs_ret handle_http_io(
         break;
     case RS_MORTALITY_SHUTDOWN_WRITE:
         write_http_error:
-        switch (write_http_error_response(peer)) {
+        switch (write_http_error_response(worker->tls_err_msg_buf, peer)) {
         case RS_OK:
             // Keep peer->mortality at RS_MORTALITY_SHUTDOWN_WRITE because
             // the next thing will be write_bidirectional_(tls/tcp)_shutdown().
             peer->layer = peer->is_encrypted ? RS_LAYER_TLS : RS_LAYER_TCP;
-            set_shutdown_deadline(peer, conf->shutdown_wait_http);
+            set_shutdown_deadline(peer, worker->conf->shutdown_wait_http);
             return RS_OK;
         case RS_AGAIN:
             peer->continuation = RS_CONT_SENDING;
