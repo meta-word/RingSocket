@@ -26,7 +26,6 @@ rs_ret handle_tls_io(
 );
 
 rs_ret read_tls(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     void * rbuf,
     size_t rbuf_size,
@@ -34,7 +33,6 @@ rs_ret read_tls(
 );
 
 rs_ret write_tls(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     void const * wbuf,
     size_t wbuf_size

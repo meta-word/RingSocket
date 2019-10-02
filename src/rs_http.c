@@ -48,10 +48,10 @@ static rs_ret read_http(
     }
     size_t rsize = 0;
     rs_ret ret = peer->is_encrypted ?
-        read_tls(worker->tls_err_msg_buf,
-            peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize):
-        read_tcp(
-            peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize);
+        read_tls(peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen,
+            &rsize):
+        read_tcp(peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen,
+            &rsize);
     *ch_over = *ch + rsize;
     if (ret != RS_AGAIN) {
         return ret;
@@ -590,8 +590,7 @@ static rs_ret write_http_upgrade_response(
         memcpy(wskey_hash_dest, peer->heap_buf, 27);
     }
     rs_ret ret = peer->is_encrypted ?
-        write_tls(worker->tls_err_msg_buf,
-            peer, http101, RS_CONST_STRLEN(http101)) :
+        write_tls(peer, http101, RS_CONST_STRLEN(http101)):
         write_tcp(peer, http101, RS_CONST_STRLEN(http101));
     switch (ret) {
     case RS_OK:
@@ -615,12 +614,11 @@ static rs_ret write_http_upgrade_response(
 }
 
 static rs_ret write_http_error_response(
-    char * tls_err_msg_buf,
     union rs_peer * peer
 ) {
     char const * msg = http_errors[peer->http.error_i];
     return peer->is_encrypted ?
-        write_tls(tls_err_msg_buf, peer, msg, RS_CONST_STRLEN(msg)) :
+        write_tls(peer, msg, RS_CONST_STRLEN(msg)):
         write_tcp(peer, msg, RS_CONST_STRLEN(msg));
 }
 
@@ -676,7 +674,7 @@ rs_ret handle_http_io(
         break;
     case RS_MORTALITY_SHUTDOWN_WRITE:
         write_http_error:
-        switch (write_http_error_response(worker->tls_err_msg_buf, peer)) {
+        switch (write_http_error_response(peer)) {
         case RS_OK:
             // Keep peer->mortality at RS_MORTALITY_SHUTDOWN_WRITE because
             // the next thing will be write_bidirectional_(tls/tcp)_shutdown().

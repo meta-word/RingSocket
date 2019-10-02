@@ -43,7 +43,6 @@ static uint8_t const close_wmsgs[][4] = {
 };
 
 static rs_ret write_ws_control_frame(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     uint8_t const * control_frame
 ) {
@@ -52,7 +51,7 @@ static rs_ret write_ws_control_frame(
     // Reference: https://tools.ietf.org/html/rfc6455#section-5.5
     size_t wsize = 2 + control_frame[1];
     return peer->is_encrypted ?
-        write_tls(tls_err_msg_buf, peer, control_frame, wsize) :
+        write_tls(peer, control_frame, wsize):
         write_tcp(peer, control_frame, wsize);
 }
 
@@ -79,10 +78,10 @@ static rs_ret read_ws(
         }
         size_t new_rsize = 0;
         rs_ret ret = peer->is_encrypted ?
-            read_tls(worker->tls_err_msg_buf, peer,
-                worker->rbuf + old_rsize, rbuf_size - old_rsize, &new_rsize):
-            read_tcp(peer,
-                worker->rbuf + old_rsize, rbuf_size - old_rsize, &new_rsize);
+            read_tls(peer, worker->rbuf + old_rsize, rbuf_size - old_rsize,
+                &new_rsize):
+            read_tcp(peer, worker->rbuf + old_rsize, rbuf_size - old_rsize,
+                &new_rsize);
         *unparsed_rsize += new_rsize;
         old_rsize += new_rsize;
         switch (ret) {
@@ -157,7 +156,7 @@ static rs_ret parse_ws_msg(
     size_t unparsed_rsize = peer->ws.unparsed_rsize;
 
     if (peer->ws.heap_buf_contains_pong) {
-        RS_GUARD(write_ws_control_frame(worker->tls_err_msg_buf, peer,
+        RS_GUARD(write_ws_control_frame(peer,
             peer->heap_buf + *msg_size + unparsed_rsize));
         // The pong frame has been written out. Altough it's actually still
         // stored in peer->heap_buf, being located behind any of its other data
@@ -395,8 +394,7 @@ static rs_ret parse_ws_msg(
             payload[-2] = RS_OPC_FIN_PONG;
             payload[-1] = payload_size;
             {
-                rs_ret ret = write_ws_control_frame(worker->tls_err_msg_buf,
-                    peer, payload - 2);
+                rs_ret ret = write_ws_control_frame(peer, payload - 2);
                 switch (ret) {
                 case RS_OK:
                     break; // The next step is the same as that of the pong case
@@ -455,7 +453,7 @@ rs_ret handle_ws_io(
     case RS_MORTALITY_SHUTDOWN_WRITE:
         if (peer->continuation == RS_CONT_SENDING) {
             write_ws_close_msg:
-            switch (write_ws_control_frame(worker->tls_err_msg_buf, peer,
+            switch (write_ws_control_frame(peer,
                 close_wmsgs[peer->ws.close_wmsg_i])) {
             case RS_OK:
                 peer->continuation = RS_CONT_NONE;

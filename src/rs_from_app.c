@@ -51,7 +51,7 @@ static rs_ret send_newest_wmsg(
     }
     RS_LOG(LOG_DEBUG, "Sending %zu bytes outbound", msg_size);
     switch (peer->is_encrypted ?
-        write_tls(worker->tls_err_msg_buf, peer, msg, msg_size) :
+        write_tls(peer, msg, msg_size) :
         write_tcp(peer, msg, msg_size)
     ) {
     case RS_OK:
@@ -290,10 +290,8 @@ rs_ret send_pending_owrefs(
     for (struct rs_owref * owref = worker->owrefs + peer->ws.owref_i;;) {
         uint8_t const * ws = owref->ring_msg->msg + owref->head_size;
         switch (peer->is_encrypted ?
-            write_tls(worker->tls_err_msg_buf,
-                peer, ws, owref->ring_msg->size - owref->head_size) :
-            write_tcp(
-                peer, ws, owref->ring_msg->size - owref->head_size)) {
+            write_tls(peer, ws, owref->ring_msg->size - owref->head_size) :
+            write_tcp(peer, ws, owref->ring_msg->size - owref->head_size)) {
         case RS_OK:
             if (*ws != 0x88) {
                 break;

@@ -42,7 +42,7 @@ struct rs_worker {
     size_t worker_i;
 
     struct rs_ring_update_queue ring_update_queue; // See ringsocket_ring.h
-    struct rs_ring * inbound_rings; // See ringsocket.h
+    struct rs_ring * inbound_rings; // See ringsocket.h (for use in rs_to_app.c)
 
     struct rs_slots peer_slots; // See rs_slot.h
     union rs_peer * peers; // See union definition below
@@ -55,14 +55,11 @@ struct rs_worker {
     BIO * base64_bio;
     BUF_MEM * base64_buf;
 
-    // These are used exclusively by rs_tls.c
-    SSL_CTX * * tls_ctxs;
-#define RS_TLS_ERR_MSG_BUF_BYTE_C 256 // The minimum required by OpenSSL
-    char tls_err_msg_buf[RS_TLS_ERR_MSG_BUF_BYTE_C];
+    SSL_CTX * * tls_ctxs; // Used exclusively by rs_tls.c
 
+    // The remaining members are used exclusively by rs_from_app.c
     uint8_t * * outbound_readers;
-
-    struct rs_owref * owrefs; // See below
+    struct rs_owref * owrefs; // See struct definition below
     size_t owrefs_elem_c;
     size_t newest_owref_i;
     size_t oldest_owref_i;

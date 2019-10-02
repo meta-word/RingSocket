@@ -8,6 +8,9 @@
 #include <openssl/conf.h>
 #include <openssl/err.h>
 
+#define RS_TLS_ERR_MSG_BUF_BYTE_C 256 // The minimum required by OpenSSL
+thread_local static char tls_err_msg_buf[RS_TLS_ERR_MSG_BUF_BYTE_C] = {0};
+
 static size_t get_subdomain_depth(
     char const * str, // Can be un-0-terminated!
     size_t strlen
@@ -191,24 +194,23 @@ rs_ret init_tls_session(
     ERR_clear_error();
     peer->tls = SSL_new(worker->tls_ctxs[0]);
     if (!peer->tls) {
-        ERR_error_string_n(ERR_get_error(), worker->tls_err_msg_buf,
+        ERR_error_string_n(ERR_get_error(), tls_err_msg_buf,
             RS_TLS_ERR_MSG_BUF_BYTE_C);
         RS_LOG(LOG_CRIT, "Unsuccessful SSL_new(worker->tls_ctxs[0]): %s",
-            worker->tls_err_msg_buf);
+            tls_err_msg_buf);
         return RS_FATAL;
     }
     if (!SSL_set_fd(peer->tls, peer->socket_fd)) {
-        ERR_error_string_n(ERR_get_error(), worker->tls_err_msg_buf,
+        ERR_error_string_n(ERR_get_error(), tls_err_msg_buf,
             RS_TLS_ERR_MSG_BUF_BYTE_C);
         RS_LOG(LOG_CRIT, "Unsuccessful SSL_set_fd(peer->tls, %d): %s",
-            peer->socket_fd, worker->tls_err_msg_buf);
+            peer->socket_fd, tls_err_msg_buf);
         return RS_FATAL;
     }
     return RS_OK;
 }
 
 static rs_ret check_tls_error(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     char const * func_str,
     size_t size,
@@ -292,17 +294,15 @@ static rs_ret check_tls_error(
 }
 
 static rs_ret shake_tls_hands(
-    char * tls_err_msg_buf,
     union rs_peer * peer
 ) {
     ERR_clear_error();
     int ret = SSL_accept(peer->tls);
     return ret == 1 ? RS_OK :
-        check_tls_error(tls_err_msg_buf, peer, "SSL_accept()", 0, ret, false);
+        check_tls_error(peer, "SSL_accept()", 0, ret, false);
 }
 
 static rs_ret write_bidirectional_tls_shutdown(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     bool * received_tls_close_notify
 ) {
@@ -327,8 +327,7 @@ static rs_ret write_bidirectional_tls_shutdown(
         // can occur if an action is needed to continue the operation for
         // non-blocking BIOs. It can also occur when not all data was read
         // using SSL_read()."
-        return check_tls_error(tls_err_msg_buf, peer, "SSL_shutdown()", 0, ret,
-            false);
+        return check_tls_error(peer, "SSL_shutdown()", 0, ret, false);
     }
 }
 
@@ -343,8 +342,8 @@ static rs_ret read_bidirectional_tls_shutdown(
     size_t rsize = 0;
     while (SSL_read_ex(peer->tls, worker->rbuf, worker->conf->worker_rbuf_size,
         &rsize));
-    return check_tls_error(worker->tls_err_msg_buf, peer,
-        "Zero-return-seeking SSL_read_ex()", rsize, 0, true);
+    return check_tls_error(peer, "Zero-return-seeking SSL_read_ex()", rsize, 0,
+        true);
 }
 
 rs_ret handle_tls_io(
@@ -353,7 +352,7 @@ rs_ret handle_tls_io(
 ) {
     switch (peer->mortality) {
     case RS_MORTALITY_LIVE:
-        switch (shake_tls_hands(worker->tls_err_msg_buf, peer)) {
+        switch (shake_tls_hands(peer)) {
         case RS_OK:
             peer->layer = RS_LAYER_HTTP;
             return RS_OK;
@@ -370,8 +369,8 @@ rs_ret handle_tls_io(
     case RS_MORTALITY_SHUTDOWN_WRITE:
         {
             bool received_tls_close_notify;
-            switch (write_bidirectional_tls_shutdown(worker->tls_err_msg_buf,
-                peer, &received_tls_close_notify)) {
+            switch (write_bidirectional_tls_shutdown(peer,
+                &received_tls_close_notify)) {
             case RS_OK:
                 if (received_tls_close_notify) {
                     goto terminate_tls;
@@ -427,20 +426,17 @@ rs_ret handle_tls_io(
 }
 
 rs_ret read_tls(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     void * rbuf,
     size_t rbuf_size,
     size_t * rsize
 ) {
     ERR_clear_error();
-    return SSL_read_ex(peer->tls, rbuf, rbuf_size, rsize) ? RS_OK :
-        check_tls_error(tls_err_msg_buf, peer, "SSL_read_ex()", *rsize, 0,
-        false);
+    return SSL_read_ex(peer->tls, rbuf, rbuf_size, rsize) ?
+        RS_OK : check_tls_error(peer, "SSL_read_ex()", *rsize, 0, false);
 }
 
 rs_ret write_tls(
-    char * tls_err_msg_buf,
     union rs_peer * peer,
     void const * wbuf,
     size_t wbuf_size
@@ -449,7 +445,6 @@ rs_ret write_tls(
     // has been written out.
     size_t wsize = 0;
     ERR_clear_error();
-    return SSL_write_ex(peer->tls, wbuf, wbuf_size, &wsize) ? RS_OK :
-        check_tls_error(tls_err_msg_buf, peer, "SSL_write_ex()", wsize, 0,
-        false);
+    return SSL_write_ex(peer->tls, wbuf, wbuf_size, &wsize) ?
+        RS_OK : check_tls_error(peer, "SSL_write_ex()", wsize, 0, false);
 }
