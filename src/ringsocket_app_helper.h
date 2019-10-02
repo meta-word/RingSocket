@@ -13,6 +13,18 @@ enum rs_data_kind { // The data kind to send as WebSocket message contents
  RS_UTF8 = 1 // UTF-8 data (AKA Text data)
 };
 
+enum rs_websocket_opcode {
+    RS_WS_OPC_NFIN_CONT = 0x00, // inbound only (rs_websocket.c)
+    RS_WS_OPC_NFIN_TEXT = 0x01, // inbound only (rs_websocket.c)
+    RS_WS_OPC_NFIN_BIN  = 0x02, // inbound only (rs_websocket.c)
+    RS_WS_OPC_FIN_CONT  = 0x80, // inbound only (rs_websocket.c)
+    RS_WS_OPC_FIN_TEXT  = 0x81, // also by rs_send() for outbound msgs
+    RS_WS_OPC_FIN_BIN   = 0x82, // also by rs_send() for outbound msgs
+    RS_WS_OPC_FIN_CLOSE = 0x88, // also by rs_close_peer() for outbound msgs
+    RS_WS_OPC_FIN_PING  = 0x89, // inbound only (rs_websocket.c)
+    RS_WS_OPC_FIN_PONG  = 0x8A  // inbound only (rs_websocket.c)
+};
+
 // API functions
 
 inline uint64_t rs_get_client_id(
@@ -216,7 +228,8 @@ inline void rs_send(
             ring->writer += 4;
         } while (--recipient_c);
     }
-    *ring->writer++ = data_kind == RS_UTF8 ? 0x81 : 0x82;
+    *ring->writer++ = data_kind == RS_UTF8 ?
+        RS_WS_OPC_FIN_TEXT : RS_WS_OPC_FIN_BIN;
     if (payload_size > UINT16_MAX) {
         *ring->writer++ = 127;
         RS_W_HTON64(ring->writer, payload_size);
@@ -478,7 +491,7 @@ inline rs_ret rs_close_peer(
     *ring->writer++ = RS_OUTBOUND_SINGLE;
     *((uint32_t *) ring->writer) = rs->inbound_peer_i;
     ring->writer += 4;
-    *ring->writer++ = 0x88; /* FIN_CLOSE */
+    *ring->writer++ = RS_WS_OPC_FIN_CLOSE;
     *ring->writer++ = 0x02; /* payload size == 2 */
     *((uint16_t *) ring->writer) = RS_HTON16(ws_close_code);
     ring->writer += 2;

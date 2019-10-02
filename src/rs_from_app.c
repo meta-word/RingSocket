@@ -55,7 +55,7 @@ static rs_ret send_newest_wmsg(
         write_tcp(peer, msg, msg_size)
     ) {
     case RS_OK:
-        if (*msg == 0x88) { // Check if this msg was a WebSocket Close Message
+        if (*msg == RS_WS_OPC_FIN_CLOSE) { // Check if this msg was a WebSocket Close Message
             peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
             // Call handle_peer_events() with MORTALITY_SHUTDOWN_WRITE (but
             // without any events) to try to perform any shutdown procedures
@@ -293,7 +293,7 @@ rs_ret send_pending_owrefs(
             write_tls(peer, ws, owref->ring_msg->size - owref->head_size) :
             write_tcp(peer, ws, owref->ring_msg->size - owref->head_size)) {
         case RS_OK:
-            if (*ws != 0x88) {
+            if (*ws != RS_WS_OPC_FIN_CLOSE) {
                 break;
             }
             // This message was a WebSocket Close message.
@@ -312,7 +312,7 @@ rs_ret send_pending_owrefs(
             return RS_AGAIN;
         case RS_CLOSE_PEER:
             peer->ws.owref_i = owref - worker->owrefs;
-            if (*ws != 0x88) {
+            if (*ws != RS_WS_OPC_FIN_CLOSE) {
                 // Only notify the app of peer closure if the message the error
                 // occurred on wasn't itself a close message sent by the app.
                 RS_GUARD(send_close_to_app(worker, peer, peer_i));

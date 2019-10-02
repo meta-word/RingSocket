@@ -10,23 +10,13 @@
 #include "rs_util.h" // get_peer_str(), move_left()
 #include "rs_websocket.h"
 
-enum ws_opc {
-    RS_OPC_NFIN_CONT = 0x00,
-    RS_OPC_NFIN_TEXT = 0x01,
-    RS_OPC_NFIN_BIN  = 0x02,
-    RS_OPC_FIN_CONT  = 0x80,
-    RS_OPC_FIN_TEXT  = 0x81,
-    RS_OPC_FIN_BIN   = 0x82,
-    RS_OPC_FIN_CLOSE = 0x88,
-    RS_OPC_FIN_PING  = 0x89,
-    RS_OPC_FIN_PONG  = 0x8A
-};
-
-#define RS_IS_CONTROL_FRAME(opc) ((opc) >= RS_OPC_FIN_CLOSE)
+#define RS_IS_CONTROL_FRAME(opc) ((opc) >= RS_WS_OPC_FIN_CLOSE)
 #define RS_6BYTE_MIN_CLIENT_HEADER_SIZE 6
 #define RS_14BYTE_MAX_CLIENT_HEADER_SIZE 14
 #define RS_2BYTE_MIN_SERVER_HEADER_SIZE 2
 #define RS_10BYTE_MAX_SERVER_HEADER_SIZE 10
+
+// enum rs_websocket_opcode is defined in ringsocket_app_helper.h
 
 enum ws_close_wmsg_i {
     RS_WS_CLOSE_EMPTY_REPLY = 0,
@@ -191,33 +181,33 @@ static rs_ret parse_ws_msg(
     for (;;) { // Each loop iteration corresponds to parsing of one whole frame.
         // The start of the current frame
         uint8_t * frame = worker->rbuf + *msg_size;
-        enum ws_opc opcode = *frame;
+        enum rs_websocket_opcode opcode = *frame;
         switch (opcode) {
-        case RS_OPC_NFIN_CONT:
-        case RS_OPC_FIN_CONT:
+        case RS_WS_OPC_NFIN_CONT:
+        case RS_WS_OPC_FIN_CONT:
             if (!peer->ws.rmsg_is_fragmented) {
                 // This frame's opcode should not have been MMWS_OPC_(N)FIN_CONT
                 // because the last frame's opcode was a final OPC_FIN_*.
                 RS_WS_RETURN_CLOSE_MSG(RS_WS_CLOSE_ERROR_PROTOCOL);
             }
             break;
-        case RS_OPC_NFIN_TEXT:
-        case RS_OPC_FIN_TEXT:
+        case RS_WS_OPC_NFIN_TEXT:
+        case RS_WS_OPC_FIN_TEXT:
             if (peer->ws.rmsg_is_fragmented) {
                 // This frame's opcode should have been the continuation kind
-                // RS_OPC_(N)FIN_CONT, becuase the previous frame's opcode
-                // was a non-final RS_OPC_NFIN_*.
+                // RS_WS_OPC_(N)FIN_CONT, becuase the previous frame's opcode
+                // was a non-final RS_WS_OPC_NFIN_*.
                 RS_WS_RETURN_CLOSE_MSG(RS_WS_CLOSE_ERROR_PROTOCOL);
             }
             // WebSocket test messages must be utf8-encoded.
             peer->ws.rmsg_is_utf8 = true;
             break;
-        case RS_OPC_NFIN_BIN:
-        case RS_OPC_FIN_BIN:
+        case RS_WS_OPC_NFIN_BIN:
+        case RS_WS_OPC_FIN_BIN:
             if (peer->ws.rmsg_is_fragmented) {
                 // This frame's opcode should have been the continuation kind
-                // RS_OPC_(N)FIN_CONT, because the previous frame's opcode
-                // was a non-final RS_OPC_NFIN_*.
+                // RS_WS_OPC_(N)FIN_CONT, because the previous frame's opcode
+                // was a non-final RS_WS_OPC_NFIN_*.
                 RS_WS_RETURN_CLOSE_MSG(RS_WS_CLOSE_ERROR_PROTOCOL);
             }
             peer->ws.rmsg_is_utf8 = false;
@@ -280,7 +270,7 @@ static rs_ret parse_ws_msg(
         // follows: if RS_AGAIN occurs before the entire payload could be
         // read, it unmasks whatever amount of the message has already been
         // accumulated; and if it's supposed to hold UTF-8 (i.e., if the first
-        // frame's opcode was RS_OPC_(N)FIN_TEXT), applies UTF-8 stream
+        // frame's opcode was RS_WS_OPC_(N)FIN_TEXT), applies UTF-8 stream
         // validation to its contents prior to returning from this function.
         //
         // A consequence of this is that the current frame may contain payload
@@ -342,23 +332,23 @@ static rs_ret parse_ws_msg(
         // deleting/overwriting the current frame's header and concatenating
         // its payload onto any previous frames' payloads.
         switch (opcode) {
-        case RS_OPC_NFIN_CONT:
+        case RS_WS_OPC_NFIN_CONT:
             // Neither the first nor the last frame of this fragmented message
             break;
-        case RS_OPC_FIN_CONT:
+        case RS_WS_OPC_FIN_CONT:
             // The last frame of a fragmented message
             move_left(frame, header_size, payload_size + unparsed_rsize);
             goto parse_success;
-        case RS_OPC_NFIN_TEXT:
+        case RS_WS_OPC_NFIN_TEXT:
             // The first frame of a fragmented UTF-8 message
             // (Already set above: peer->ws.is_utf8 = true)
-        case RS_OPC_NFIN_BIN:
+        case RS_WS_OPC_NFIN_BIN:
             // The first frame of a fragmented binary message
             break;
-        case RS_OPC_FIN_TEXT:
+        case RS_WS_OPC_FIN_TEXT:
             // The only frame of an unfragmented UTF-8 message
             // (Already set above: peer->ws.is_utf8 = true)
-        case RS_OPC_FIN_BIN:
+        case RS_WS_OPC_FIN_BIN:
             // The only frame of an unfragmented binary message
             *msg = payload;
             *msg_size = payload_size;
@@ -380,9 +370,9 @@ static rs_ret parse_ws_msg(
                 }
             }
             return RS_OK;
-        case RS_OPC_FIN_CLOSE:
+        case RS_WS_OPC_FIN_CLOSE:
             RS_WS_RETURN_CLOSE_MSG(RS_WS_CLOSE_EMPTY_REPLY);
-        case RS_OPC_FIN_PING:
+        case RS_WS_OPC_FIN_PING:
             // https://tools.ietf.org/html/rfc6455#section-5.5.3 :
             // 'A Pong frame sent in response to a Ping frame must have
             // identical "Application data" as found in the message body
@@ -391,7 +381,7 @@ static rs_ret parse_ws_msg(
             // (for now) and simply overwrite the last 2 bytes of the received
             // ping frame header with a pong response frame header and attempt
             // to write the pong directly from the rbuf.
-            payload[-2] = RS_OPC_FIN_PONG;
+            payload[-2] = RS_WS_OPC_FIN_PONG;
             payload[-1] = payload_size;
             {
                 rs_ret ret = write_ws_control_frame(peer, payload - 2);
@@ -425,7 +415,7 @@ static rs_ret parse_ws_msg(
                     return ret;
                 }
             } // fall through
-        case RS_OPC_FIN_PONG: // Responding to a pong is not neccessary.
+        case RS_WS_OPC_FIN_PONG: // Responding to a pong is not neccessary.
             // Pings and pongs are control frames that may appear anywhere
             // amidst message frames; so remove this control frame from rbuf by
             // moving the remaining unparsed read bytes left, and continue to

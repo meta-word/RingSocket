@@ -34,7 +34,7 @@ rs_ret get_websocket_key_hash(
     char const * wskey_22str,
     char * dst_27str
 ) {
-    thread_local static char token_str[] = "1234567890123456789012=="
+    char token_str[] = "1234567890123456789012=="
         "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     memcpy(token_str, wskey_22str, 22);
     if (!EVP_DigestInit_ex(worker->sha1_ctx, EVP_sha1(), NULL)) {
