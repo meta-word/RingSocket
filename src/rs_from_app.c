@@ -43,9 +43,9 @@ static rs_ret send_newest_ring_msg(
     union rs_peer * peer = worker->peers + peer_i;
     if (peer->layer != RS_LAYER_WEBSOCKET ||
         peer->mortality != RS_MORTALITY_LIVE) {
-        RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
-            "peer %" PRIu32 ", because it's not live on the WebSocket layer.",
-            msg_size, peer_i);
+        //RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
+        //    "peer %" PRIu32 ", because it's not live on the WebSocket layer.",
+        //    msg_size, peer_i);
         return RS_OK;
     }
     if (peer->continuation != RS_CONT_NONE) {
@@ -85,6 +85,7 @@ static rs_ret send_newest_ring_msg(
         RS_LOG(LOG_DEBUG, "Attempt to send newest %zu byte ws%s message from "
             "app to peer %" PRIu32 " was unsuccessfull due to RS_AGAIN.",
             msg_size, peer->is_encrypted ? "s" : "", peer_i);
+        peer->continuation = RS_CONT_SENDING;
         peer->ws.owref_c = 1;
         peer->ws.owref_i = worker->newest_owref_i;
         newest_owref->remaining_recipient_c++;
@@ -171,8 +172,7 @@ rs_ret receive_from_app(
             case RS_OUTBOUND_SINGLE:
                 head_size += 4;
                 RS_GUARD(send_newest_ring_msg(worker, newest_owref, *peer_i,
-                    ring_msg->msg + head_size,
-                    ring_msg->size - head_size));
+                    ring_msg->msg + head_size, ring_msg->size - head_size));
                 break;
             case RS_OUTBOUND_ARRAY:
                 peer_c = *peer_i++;
@@ -186,8 +186,7 @@ rs_ret receive_from_app(
             case RS_OUTBOUND_EVERY:
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
                     RS_GUARD(send_newest_ring_msg(worker, newest_owref, p_i,
-                        ring_msg->msg + head_size,
-                        ring_msg->size - head_size));
+                        ring_msg->msg + head_size, ring_msg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY_EXCEPT_SINGLE:
@@ -238,19 +237,21 @@ rs_ret receive_from_app(
             } else if (worker->newest_owref_i ==
                 worker->oldest_owref_i_by_app[app_i]) {
                 enqueue_ring_update(worker, reader, app_i, false);
-                RS_LOG(LOG_DEBUG, "Newest message from app %zu was immediately "
-                    "sent to all its peer recipients, and worker->"
-                    "newest_owref_i == worker->oldest_owref_i_by_app[%zu] "
-                    "(%zu), so outbound ring update enqueued immediately.",
-                    app_i, app_i, worker->newest_owref_i);
-                // Keep newest_owref(_i) unchanged to allow reuse on next msg
+                //RS_LOG(LOG_DEBUG, "Newest message from app %zu was "
+                //    "immediately sent to all its peer recipients, and "
+                //    "worker->newest_owref_i (%zu) == "
+                //    "worker->oldest_owref_i_by_app[%zu] (%zu), so outbound "
+                //    "ring update enqueued immediately.",
+                //    app_i, worker->newest_owref_i,
+                //    app_i, worker->newest_owref_i);
             } else {
-                RS_LOG(LOG_DEBUG, "Newest message from app %zu was immediately "
-                    "sent to all its peer recipients, but worker->"
-                    "newest_owref_i != worker->oldest_owref_i_by_app[%zu] "
-                    "(%zu), so outbound ring update cannot be enqueued yet due "
-                    "to pending older owref(s).", app_i, app_i,
-                    worker->newest_owref_i);
+                RS_LOG(LOG_DEBUG, "Newest message from app %zu was "
+                    "immediately sent to all its peer recipients, but "
+                    "worker->newest_owref_i (%zu) != "
+                    "worker->oldest_owref_i_by_app[%zu] (%zu), so outbound "
+                    "ring update cannot be enqueued yet due to pending older "
+                    "owref(s).", app_i, worker->newest_owref_i,
+                    app_i, worker->oldest_owref_i_by_app[app_i]);
                 // Keep newest_owref(_i) unchanged to allow reuse on next msg
             }
         }

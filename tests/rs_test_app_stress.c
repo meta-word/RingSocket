@@ -64,15 +64,12 @@ static void send_somewhere(
     case 1:
         switch (randrange(2 + cb_has_cur)) {
         case 0:
-            RS_LOG(LOG_DEBUG,"rs_to_every....");
             rs_to_every(rs, RS_BIN);
             break;
         case 1:
-            RS_LOG(LOG_DEBUG,"rs_to_every....");
             rs_to_single(rs, RS_BIN, get_nth_client_id(0));
             break;
         case 2:
-            RS_LOG(LOG_DEBUG,"rs_to_cur....");
             rs_to_cur(rs, RS_BIN);
         }
         break;
@@ -162,7 +159,6 @@ static void send_something(
     for (size_t i = 0; i < byte_c; i++) {
         rs_w_uint8(rs, 255 - i % 256);
     }
-    RS_LOG(LOG_DEBUG,"Written %zu bytes", byte_c);
     send_somewhere(rs, cb_has_cur);
     byte_c = RS_TEST_INCR_MSG_BYTE_C(byte_c);
     byte_c %= RS_TEST_MAX_MSG_BYTE_C;
@@ -228,7 +224,6 @@ int timer_cb(
     rs_t * rs
 ) {
     if (client_c) {
-        RS_LOG(LOG_DEBUG,"Timer timed out: let's send_something().");
         send_something(rs, false);
     }
     return 1000000;
