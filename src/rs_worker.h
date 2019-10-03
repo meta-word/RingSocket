@@ -46,7 +46,9 @@ struct rs_worker {
 
     struct rs_slots peer_slots; // See rs_slot.h
     union rs_peer * peers; // See union definition below
-    size_t peers_elem_c;
+    uint32_t peers_elem_c;
+    // Prevents looping over the entire array when targeting all connected peers
+    uint32_t highest_peer_i;
 
     uint8_t * rbuf;
 

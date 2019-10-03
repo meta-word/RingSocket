@@ -25,5 +25,5 @@ rs_ret write_bidirectional_tcp_shutdown(
 rs_ret handle_tcp_io(
     struct rs_worker * worker,
     union rs_peer * peer,
-    int peer_i
+    uint32_t peer_i
 );

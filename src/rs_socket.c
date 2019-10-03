@@ -282,6 +282,9 @@ rs_ret accept_sockets(
         }
         RS_LOG(LOG_DEBUG, "Assigning accept()ed new peer with fd=%d to peer_i "
             "%zu", socket_fd, peer_i);
+        if (peer_i > worker->highest_peer_i) {
+            worker->highest_peer_i = peer_i;
+        }
         worker->peers[peer_i].socket_fd = socket_fd;
         worker->peers[peer_i].is_encrypted = is_encrypted;
         struct epoll_event event = {

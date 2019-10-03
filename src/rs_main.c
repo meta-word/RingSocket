@@ -326,6 +326,7 @@ static rs_ret spawn_app_and_worker_threads(
     }
     
     struct rs_app_args app_args[conf->app_c];
+    memset(app_args, 0, sizeof(app_args));
     for (size_t i = 0; i < conf->app_c; i++) {
         app_args[i].conf = conf;
         app_args[i].app_io_pairs = all_io_pairs + i;
@@ -353,6 +354,7 @@ static rs_ret spawn_app_and_worker_threads(
     }
 
     struct rs_worker_args worker_args[conf->worker_c];
+    memset(worker_args, 0, sizeof(worker_args));
     for (size_t i = 0;; i++) {
         worker_args[i].conf = conf;
         RS_CALLOC(worker_args[i].io_pairs, conf->app_c);

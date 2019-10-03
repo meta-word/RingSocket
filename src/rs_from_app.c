@@ -33,8 +33,9 @@ rs_ret init_owrefs(
     return RS_OK;
 }
 
-static rs_ret send_newest_owmsg(
+static rs_ret send_newest_ring_msg(
     struct rs_worker * worker,
+    struct rs_owref * newest_owref,
     uint32_t peer_i,
     uint8_t const * msg,
     size_t msg_size
@@ -50,7 +51,7 @@ static rs_ret send_newest_owmsg(
     if (peer->continuation != RS_CONT_NONE) {
         if (!peer->ws.owref_c++) {
             peer->ws.owref_i = worker->newest_owref_i;
-            worker->owrefs[worker->newest_owref_i].remaining_recipient_c++;
+            newest_owref->remaining_recipient_c++;
         }
         RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
             "peer %" PRIu32 " yet, because its continuation state is "
@@ -86,7 +87,7 @@ static rs_ret send_newest_owmsg(
             msg_size, peer->is_encrypted ? "s" : "", peer_i);
         peer->ws.owref_c = 1;
         peer->ws.owref_i = worker->newest_owref_i;
-        worker->owrefs[worker->newest_owref_i].remaining_recipient_c++;
+        newest_owref->remaining_recipient_c++;
         return RS_OK;
     case RS_CLOSE_PEER:
         RS_LOG(LOG_NOTICE, "Attempt to send newest %zu byte ws%s message from "
@@ -99,51 +100,9 @@ static rs_ret send_newest_owmsg(
     }
 }
 
-static rs_ret create_owrefs_for_remaining_recipients(
-    struct rs_worker * worker,
-    struct rs_ring_msg * ring_msg,
-    size_t head_size,
-    size_t app_i,
-    uint8_t * reader
+static rs_ret reallocate_owrefs(
+    struct rs_worker * worker
 ) {
-    struct rs_owref * owref = worker->owrefs + worker->newest_owref_i;
-    if (!owref->remaining_recipient_c) {
-        if (worker->newest_owref_i == worker->oldest_owref_i_by_app[app_i]) {
-            enqueue_ring_update(worker, reader, app_i, false);
-            RS_LOG(LOG_DEBUG, "Newest message from app %zu was immediately "
-                "sent to all its peer recipients, and worker->newest_owref_i "
-                "== worker->oldest_owref_i_by_app[%zu] (%zu), so outbound "
-                "ring update enqueued immediately.",
-                app_i, app_i, worker->newest_owref_i);
-        } else {
-            RS_LOG(LOG_DEBUG, "Newest message from app %zu was immediately "
-                "sent to all its peer recipients, but worker->newest_owref_i "
-                "!= worker->oldest_owref_i_by_app[%zu] (%zu), so outbound "
-                "ring update cannot be enqueued yet, as older owref(s) remain.",
-                app_i, app_i, worker->newest_owref_i);
-        }
-        // Don't update newest_owref_i: the corresponding owrefs element wasn't
-        // used this time, so allow it to be used for the next message instead.
-        return RS_OK;
-    }
-    // owref->remaining_recipient_c has already been incremented as needed by
-    // send_newest_owmsg(), but remaining struct rs_owref members must be set.
-    owref->ring_msg = ring_msg;
-    owref->head_size = head_size;
-    owref->app_i = app_i;
-    RS_LOG(LOG_DEBUG, "worker->owrefs[%zu].ring_msg == %p, "
-        ".remaining_recipient_c == %" PRIu32 " , .head_size == %" PRIu16
-        ", .app_i == %" PRIu16 ".", worker->newest_owref_i, owref->ring_msg,
-        owref->remaining_recipient_c, head_size, app_i);
-
-    // Increment to get the next writable owref elem, but wrap around if needed.
-    worker->newest_owref_i++;
-    worker->newest_owref_i %= worker->owrefs_elem_c;
-
-    if (worker->newest_owref_i != worker->oldest_owref_i) {
-        return RS_OK;
-    }
-    // The worker->owrefs array is full! The write pipes must be rather clogged!
     // Reallocate larger worker->owrefs array, and move data around as needed.
     size_t new_elem_c =
         worker->conf->realloc_multiplier * worker->owrefs_elem_c;
@@ -161,7 +120,7 @@ static rs_ret create_owrefs_for_remaining_recipients(
         worker->newest_owref_i += worker->owrefs_elem_c;
         // Update every peer for which ws.owref_i corresponds to a moved index.
         for (union rs_peer * p = worker->peers;
-            p < worker->peers + worker->peers_elem_c; p++) {
+            p <= worker->peers + worker->highest_peer_i; p++) {
             if (p->ws.owref_c && p->ws.owref_i < worker->newest_owref_i) {
                 p->ws.owref_i += worker->owrefs_elem_c;
             }
@@ -177,7 +136,7 @@ static rs_ret create_owrefs_for_remaining_recipients(
         worker->newest_owref_i -= added_ref_c;
         // Update every peer for which ws.owref_i corresponds to a moved index.
         for (union rs_peer * p = worker->peers;
-            p < worker->peers + worker->peers_elem_c; p++) {
+            p <= worker->peers + worker->highest_peer_i; p++) {
             if (p->ws.owref_c) {
                 if (p->ws.owref_i < added_ref_c) {
                     p->ws.owref_i += worker->owrefs_elem_c;
@@ -200,34 +159,42 @@ rs_ret receive_from_app(
         uint8_t * reader = worker->outbound_readers[app_i];
         struct rs_ring_msg * ring_msg = NULL;
         while ((ring_msg = rs_get_ring_msg(pair, reader))) {
+            struct rs_owref * newest_owref =
+                worker->owrefs + worker->newest_owref_i;
+            // Zero the remaining recipient count in advance, so that it can be
+            // incremented as needed during each send_newest_ring_msg() call.
+            newest_owref->remaining_recipient_c = 0;
             size_t head_size = 1;
             uint32_t peer_c = 0;
             uint32_t * peer_i = (uint32_t *) (ring_msg->msg + 1);
             switch (*ring_msg->msg) {
             case RS_OUTBOUND_SINGLE:
                 head_size += 4;
-                RS_GUARD(send_newest_owmsg(worker, *peer_i,
-                    ring_msg->msg + head_size, ring_msg->size - head_size));
+                RS_GUARD(send_newest_ring_msg(worker, newest_owref, *peer_i,
+                    ring_msg->msg + head_size,
+                    ring_msg->size - head_size));
                 break;
             case RS_OUTBOUND_ARRAY:
                 peer_c = *peer_i++;
                 head_size += 4 + 4 * peer_c;
                 for (size_t i = 0; i < peer_c; i++) {
-                    RS_GUARD(send_newest_owmsg(worker, peer_i[i],
-                        ring_msg->msg + head_size, ring_msg->size - head_size));
+                    RS_GUARD(send_newest_ring_msg(worker, newest_owref,
+                        peer_i[i], ring_msg->msg + head_size,
+                        ring_msg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY:
-                for (size_t p_i = 0; p_i < worker->peers_elem_c; p_i++) {
-                    RS_GUARD(send_newest_owmsg(worker, p_i,
-                        ring_msg->msg + head_size, ring_msg->size - head_size));
+                for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
+                    RS_GUARD(send_newest_ring_msg(worker, newest_owref, p_i,
+                        ring_msg->msg + head_size,
+                        ring_msg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY_EXCEPT_SINGLE:
                 head_size += 4;
-                for (size_t p_i = 0; p_i < worker->peers_elem_c; p_i++) {
+                for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
                     if (p_i != *peer_i) {
-                        RS_GUARD(send_newest_owmsg(worker, p_i,
+                        RS_GUARD(send_newest_ring_msg(worker, newest_owref, p_i,
                             ring_msg->msg + head_size,
                             ring_msg->size - head_size));
                     }
@@ -236,11 +203,11 @@ rs_ret receive_from_app(
             case RS_OUTBOUND_EVERY_EXCEPT_ARRAY: default:
                 peer_c = *peer_i++;
                 head_size += 4 + 4 * peer_c;
-                for (size_t p_i = 0; p_i < worker->peers_elem_c; p_i++) {
+                for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
                     for (size_t i = 0; peer_i[i] != p_i; i++) {
                         if (i == peer_c) {
-                            RS_GUARD(send_newest_owmsg(worker, p_i,
-                                ring_msg->msg + head_size,
+                            RS_GUARD(send_newest_ring_msg(worker, newest_owref,
+                                p_i, ring_msg->msg + head_size,
                                 ring_msg->size - head_size));
                             break;
                         }
@@ -249,8 +216,43 @@ rs_ret receive_from_app(
             }
             worker->outbound_readers[app_i] = reader =
                 (uint8_t *) ring_msg->msg + ring_msg->size;
-            RS_GUARD(create_owrefs_for_remaining_recipients(worker, ring_msg,
-                head_size, app_i, reader));
+            if (newest_owref->remaining_recipient_c) {
+                RS_LOG(LOG_DEBUG, "worker->owrefs[%zu].ring_msg == %p, "
+                    ".remaining_recipient_c == %" PRIu32 " , .head_size == %"
+                    PRIu16 ", .app_i == %" PRIu16 ".", worker->newest_owref_i,
+                    ring_msg, newest_owref->remaining_recipient_c, head_size,
+                    app_i);
+                // rs_owref members other than .remaining_recipient_c have not
+                // been set yet, so do so now.
+                newest_owref->ring_msg = ring_msg;
+                newest_owref->head_size = head_size;
+                newest_owref->app_i = app_i;
+                // Increment to get the next writable owref element,
+                // but wrap around if needed.
+                worker->newest_owref_i++;
+                worker->newest_owref_i %= worker->owrefs_elem_c;
+                if (worker->newest_owref_i == worker->oldest_owref_i) {
+                    // The worker->owrefs array is full. (Maybe a traffic jam?)
+                    reallocate_owrefs(worker);
+                }
+            } else if (worker->newest_owref_i ==
+                worker->oldest_owref_i_by_app[app_i]) {
+                enqueue_ring_update(worker, reader, app_i, false);
+                RS_LOG(LOG_DEBUG, "Newest message from app %zu was immediately "
+                    "sent to all its peer recipients, and worker->"
+                    "newest_owref_i == worker->oldest_owref_i_by_app[%zu] "
+                    "(%zu), so outbound ring update enqueued immediately.",
+                    app_i, app_i, worker->newest_owref_i);
+                // Keep newest_owref(_i) unchanged to allow reuse on next msg
+            } else {
+                RS_LOG(LOG_DEBUG, "Newest message from app %zu was immediately "
+                    "sent to all its peer recipients, but worker->"
+                    "newest_owref_i != worker->oldest_owref_i_by_app[%zu] "
+                    "(%zu), so outbound ring update cannot be enqueued yet due "
+                    "to pending older owref(s).", app_i, app_i,
+                    worker->newest_owref_i);
+                // Keep newest_owref(_i) unchanged to allow reuse on next msg
+            }
         }
     }
     return RS_OK;
@@ -344,17 +346,27 @@ rs_ret send_pending_owrefs(
     }
     for (struct rs_owref * owref = worker->owrefs + peer->ws.owref_i;;) {
         uint8_t const * ws = owref->ring_msg->msg + owref->head_size;
+        size_t ws_size = owref->ring_msg->size - owref->head_size;
         switch (peer->is_encrypted ?
-            write_tls(peer, ws, owref->ring_msg->size - owref->head_size) :
-            write_tcp(peer, ws, owref->ring_msg->size - owref->head_size)) {
+            write_tls(peer, ws, ws_size) :
+            write_tcp(peer, ws, ws_size)) {
         case RS_OK:
             if (*ws != RS_WS_OPC_FIN_CLOSE) {
+                RS_LOG(LOG_DEBUG, "Successfully sent %zu byte ws%s %s owref "
+                    "message to peer %" PRIu32 ".", ws_size,
+                    peer->is_encrypted ? "s" : "",
+                    *ws == RS_WS_OPC_FIN_BIN ? "RS_BIN" : "RS_UTF8", peer_i);
                 break;
             }
+            RS_LOG(LOG_DEBUG, "Successfully sent %zu byte ws%s close owref "
+                "message to peer %" PRIu32 ".", ws_size,
+                peer->is_encrypted ? "s" : "", peer_i);
             // This message was a WebSocket Close message.
             peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
             // Set CONT_NONE to indicate that the ws close msg was already sent.
             peer->continuation = RS_CONT_NONE;
+            // Update peer->ws.owref_i so that remove_pending_owrefs() starts at
+            // the right index.
             peer->ws.owref_i = owref - worker->owrefs;
             remove_pending_owrefs(worker, peer, peer_i);
             // Call handle_peer_events() with MORTALITY_SHUTDOWN_WRITE (but
@@ -363,9 +375,15 @@ rs_ret send_pending_owrefs(
             // of RS_AGAIN or completion.
             return handle_peer_events(worker, peer_i, 0);
         case RS_AGAIN:
+            RS_LOG(LOG_DEBUG, "Attempt to send %zu byte ws%s owref message to "
+                "peer %" PRIu32 " was unsuccessfull due to RS_AGAIN.",
+                ws_size, peer->is_encrypted ? "s" : "", peer_i);
             peer->ws.owref_i = owref - worker->owrefs;
             return RS_AGAIN;
         case RS_CLOSE_PEER:
+            RS_LOG(LOG_DEBUG, "Attempt to send %zu byte ws%s owref message to "
+                "peer %" PRIu32 " was unsuccessfull due to RS_CLOSE_PEER.",
+                ws_size, peer->is_encrypted ? "s" : "", peer_i);
             peer->ws.owref_i = owref - worker->owrefs;
             if (*ws != RS_WS_OPC_FIN_CLOSE) {
                 // Only notify the app of peer closure if the message the error

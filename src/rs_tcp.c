@@ -119,7 +119,7 @@ static rs_ret read_bidirectional_tcp_shutdown(
 rs_ret handle_tcp_io(
     struct rs_worker * worker,
     union rs_peer * peer,
-    int peer_i
+    uint32_t peer_i
 ) {
     switch (peer->mortality) {
     case RS_MORTALITY_LIVE: // This is a new peer
@@ -170,5 +170,16 @@ rs_ret handle_tcp_io(
     // continued to trigger. (See Q&A #6 of man 7 epoll.)
     memset(peer, 0, sizeof(union rs_peer));
     free_slot(&worker->peer_slots, peer_i);
+    if (peer_i < worker->highest_peer_i) {
+        return RS_OK;
+    }
+    while (peer_i > 0) {
+        if (worker->peers[--peer_i].socket_fd) {
+            // This peer is active, so it now has the highest_peer_i.
+            worker->highest_peer_i = peer_i;
+            return RS_OK;
+        }
+    }
+    worker->highest_peer_i = 0;
     return RS_OK;
 }

@@ -106,8 +106,8 @@ static rs_ret enforce_shutdown_deadlines(
     time_t timestamp
 ) {
     uint16_t t = timestamp % 0xFFFF + 1;
-    for (union rs_peer * p = worker->peers; p < worker->peers +
-        worker->peers_elem_c; p++) {
+    for (union rs_peer * p = worker->peers; p <= worker->peers +
+        worker->highest_peer_i; p++) {
         if (p->shutdown_deadline &&
             (p->shutdown_deadline < t || p->shutdown_deadline > t + 0x7FFF)) {
             p->mortality = RS_MORTALITY_DEAD;
