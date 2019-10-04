@@ -75,10 +75,10 @@ struct rs_fd_peer_map {
     uint32_t peer_i; // Worker thread's rs_event.c peer_i (needed as epoll data)
 };
 
-thread_local struct rs_fd_peer_map * map = NULL;
+thread_local static struct rs_fd_peer_map * map = NULL;
 thread_local static size_t map_elem_c = 0;
 
-thread_local struct epoll_event * sham_events = NULL;
+thread_local static struct epoll_event * sham_events = NULL;
 thread_local static size_t sham_events_elem_c = 0;
 thread_local static int sham_event_c = 0; // Use int to match epoll signatures
 
@@ -215,6 +215,7 @@ int epoll_ctl(
 int close(
     int fd
 ) {
+    //RS_LOG(LOG_DEBUG, "[%d] close(fd=%d): ", thrd_current(), fd);
     if (map) {
         remove_mapping_if_any(fd);
     } else if (init_sham() != RS_OK) {
@@ -233,28 +234,37 @@ int epoll_wait(
         exit(4);
     }
     if (!sham_event_c) {
+        //RS_LOG(LOG_DEBUG, "[%d] epoll_wait(epoll_fd=%d, events=%p, "
+        //    "max_event_c=%d, timeout=%d): calling as-is",
+        //    thrd_current(), epoll_fd, events, max_event_c, timeout);
         return orig.epoll_wait.func(epoll_fd, events, max_event_c, timeout);
     }
+    //RS_LOG(LOG_DEBUG, "[%d] epoll_wait(epoll_fd=%d, events=%p, "
+    //    "max_event_c=%d, timeout=%d): "
+    //    "returning %d sham events without calling the actual epoll_wait()",
+    //    thrd_current(), epoll_fd, events, max_event_c, timeout, sham_event_c);
     if (sham_event_c > max_event_c) {
-        memcpy(events, sham_events, max_event_c);
+        memcpy(events, sham_events, max_event_c * sizeof(struct epoll_event));
         sham_event_c -= max_event_c;
-        memcpy(sham_events, sham_events + max_event_c, sham_event_c);
+        memcpy(sham_events, sham_events + max_event_c,
+            sham_event_c * sizeof(struct epoll_event));
         return max_event_c;
     }
-    memcpy(events, sham_events, sham_event_c);
+    memcpy(events, sham_events, sham_event_c * sizeof(struct epoll_event));
     int ret = sham_event_c;
     sham_event_c = 0;
     return ret;
 }
 
-static ssize_t generate_sham_io_byte_c(
+static size_t generate_sham_io_byte_c(
     size_t req_byte_c
 ) {
     thread_local static size_t gen_i = 99;
     gen_i++;
     gen_i %= 100;
     if (gen_i % 2 == 1 || gen_i % 5 == 4) {
-        return -1;
+        errno = EAGAIN;
+        return 0; // actually -1 when returned from read() or write()
     }
     if (gen_i % 6) {
         return req_byte_c;
@@ -272,31 +282,44 @@ ssize_t read(
     }
     uint32_t mapped_peer_i = get_mapped_peer_i(fd);
     if (mapped_peer_i == RS_MAPPED_PEER_NONE) {
+        //RS_LOG(LOG_DEBUG, "[%d] read(fd=%d, buf=%p, byte_c=%zu): "
+        //    "not mapped.", thrd_current(), fd, buf, byte_c);
         return orig.read.func(fd, buf, byte_c);
     }
     struct epoll_event * e = get_sham_events(mapped_peer_i);
-    ssize_t sham_byte_c = 0;
+    size_t sham_byte_c = 0;
     if (e) {
         if (e->events & EPOLLIN) {
+            //RS_LOG(LOG_DEBUG, "[%d] read(fd=%d, buf=%p, byte_c=%zu): "
+            //    "re-returning sham EAGAIN", thrd_current(), fd, buf, byte_c);
             errno = EAGAIN;
             return -1;
         }
         sham_byte_c = generate_sham_io_byte_c(byte_c);
-        if (sham_byte_c == -1) {
+        if (!sham_byte_c) {
+            //RS_LOG(LOG_DEBUG, "[%d] read(fd=%d, buf=%p, byte_c=%zu): "
+            //    "adding sham EAGAIN to existing sham write() EAGAIN",
+            //    thrd_current(), fd, buf, byte_c);
             e->events |= EPOLLIN;
-            errno = EAGAIN;
             return -1;
         }
     } else {
         sham_byte_c = generate_sham_io_byte_c(byte_c);
-        if (sham_byte_c == -1) {
+        if (!sham_byte_c) {
             if (add_sham_event(mapped_peer_i, EPOLLIN) != RS_OK) {
                 exit(6);
             }
-            errno = EAGAIN;
+            //RS_LOG(LOG_DEBUG, "[%d] read(fd=%d, buf=%p, byte_c=%zu): "
+            //    "returning sham EAGAIN",
+            //    thrd_current(), fd, buf, byte_c);
             return -1;
         }
     }
+    //if (sham_byte_c != byte_c) {
+    //    RS_LOG(LOG_DEBUG, "[%d] read(fd=%d, buf=%p, byte_c=%zu): "
+    //        "returning shammed read(fd=%d, buf=%p, byte_c=%zu) instead",
+    //        thrd_current(), fd, buf, byte_c, fd, buf, sham_byte_c);
+    //}
     return orig.read.func(fd, buf, sham_byte_c);
 }
 
@@ -305,35 +328,63 @@ ssize_t write(
     const void * buf,
     size_t byte_c
 ) {
+    // Slightly different from read() behavior due to the fact that RingSocket
+    // treats write()s that write fewer bytes than requested as EAGAIN.
+    // Technically, RingSocket should waste another write() system call to
+    // confirm that the cause of the partial write() is indeed (would-be)
+    // blockage, but in practice this is always the case for TCP socket file
+    // descriptors anyway, so it doesn't bother. This preloader must therefore
+    // anticipate this assumption accordingly by setting a sham EPOLLOUT event
+    // not just for -1/EAGAIN returns, but for all cases where
+    // sham_byte_c != byte_c.
     if (!map && init_sham() != RS_OK) {
         exit(7);
     }
     uint32_t mapped_peer_i = get_mapped_peer_i(fd);
     if (mapped_peer_i == RS_MAPPED_PEER_NONE) {
+        //RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
+        //    "not mapped.",
+        //    thrd_current(), fd, buf, byte_c);
         return orig.write.func(fd, buf, byte_c);
     }
     struct epoll_event * e = get_sham_events(mapped_peer_i);
-    ssize_t sham_byte_c = 0;
+    size_t sham_byte_c = 0;
     if (e) {
         if (e->events & EPOLLOUT) {
+            //RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
+            //    "re-returning sham EAGAIN",
+            //    thrd_current(), fd, buf, byte_c);
             errno = EAGAIN;
             return -1;
         }
         sham_byte_c = generate_sham_io_byte_c(byte_c);
-        if (sham_byte_c == -1) {
+        if (sham_byte_c != byte_c) {
             e->events |= EPOLLOUT;
-            errno = EAGAIN;
-            return -1;
+            if (!sham_byte_c) {
+                //RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
+                //    "adding sham EAGAIN to existing sham read() EAGAIN",
+                //    thrd_current(), fd, buf, byte_c);
+                return -1;
+            }
         }
     } else {
         sham_byte_c = generate_sham_io_byte_c(byte_c);
-        if (sham_byte_c == -1) {
+        if (sham_byte_c != byte_c) {
             if (add_sham_event(mapped_peer_i, EPOLLOUT) != RS_OK) {
                 exit(8);
             }
-            errno = EAGAIN;
-            return -1;
+            if (!sham_byte_c) {
+                //RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
+                //    "returning sham EAGAIN",
+                //    thrd_current(), fd, buf, byte_c);
+                return -1;
+            }
         }
     }
-    return orig.write.func(fd, buf, sham_byte_c);
+    if (sham_byte_c != byte_c) {
+    //    RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
+    //        "returning shammed write(fd=%d, buf=%p, byte_c=%zu) instead",
+    //        thrd_current(), fd, buf, byte_c, fd, buf, (size_t) sham_byte_c);
+    //}
+    return orig.write.func(fd, buf, (size_t) sham_byte_c);
 }
