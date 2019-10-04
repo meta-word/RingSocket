@@ -4,8 +4,16 @@
 #pragma once
 
 #include <ringsocket.h>
-
 #include <arpa/inet.h> // struct in_addr, struct in6_addr
+
+// A single struct rs_conf const pointer "conf" is shared between all worker and
+// app threads. This same pointer is returned by the app helper rs_get_conf().
+// It is therefore paramount that this struct instance and all its descendent
+// structs are treated as read-only, as the "const" implies!
+
+// Struct member naming mostly mirrors the key strings recognized by the JSON
+// configuration file, as described in README.md's Configuration section;
+// although minor differences exist.
 
 struct rs_conf {
     struct rs_conf_port * ports;

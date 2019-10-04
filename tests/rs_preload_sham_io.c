@@ -381,10 +381,10 @@ ssize_t write(
             }
         }
     }
-    if (sham_byte_c != byte_c) {
+    //if (sham_byte_c != byte_c) {
     //    RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
     //        "returning shammed write(fd=%d, buf=%p, byte_c=%zu) instead",
     //        thrd_current(), fd, buf, byte_c, fd, buf, (size_t) sham_byte_c);
     //}
-    return orig.write.func(fd, buf, (size_t) sham_byte_c);
+    return orig.write.func(fd, buf, sham_byte_c);
 }

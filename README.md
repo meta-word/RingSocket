@@ -130,10 +130,18 @@ Must be invoked exactly once at file scope with exactly 5 macro arguments, in th
 ##### RS_INIT(*init_cb*)
 
 Declaring `RS_INIT(foo_init)` will cause RingSocket to call an app-provided
-`int foo_init(void)` callback function during RingSocket startup. Useful when
-your app needs to do some initialization or resource allocation before engaging
-in WebSocket IO. See [callback return values](#app-callback-return-values) for
-valid return values.
+`int foo_init(struct rs_conf const * conf)` callback function during RingSocket
+startup. Useful when your app needs to do some initialization or resource
+allocation before engaging in WebSocket IO, or needs to know about RingSocket
+configuration values. See [callback return values](#app-callback-return-values)
+for valid return values.
+
+The `conf` argument passed to this callback points to a read-only
+`struct rs_conf` instance containing all configuration values associated with
+the current RingSocket process. See
+[ringsocket_conf.h](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_conf.h)
+for struct definitions, and the configuration section [below](#configuration)
+for descriptions of most of their members.
 
 ##### RS_OPEN(*open_cb*)
 

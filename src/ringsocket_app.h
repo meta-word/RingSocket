@@ -59,7 +59,7 @@ enum rs_app_ws_close {
     RS_APP_WS_CLOSE_UNKNOWN_CASE = 4902
 };
 
-struct rs_app_cb_args {
+struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
     struct rs_conf const * conf;
     struct rs_thread_io_pairs * io_pairs;
     struct rs_ring * outbound_rings;
@@ -220,7 +220,7 @@ RS_LOG_VARS
 // # RS_INIT #
 
 // Call init_cb...
-#define _RS_INIT(init_cb) RS_GUARD_APP(rs_guard_cb(init_cb()))
+#define _RS_INIT(init_cb) RS_GUARD_APP(rs_guard_cb(init_cb(rs.conf)))
 
 // ...or don't
 #define _RS_INIT_NONE

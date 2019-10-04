@@ -3,9 +3,9 @@
 
 #include <ringsocket.h>
 
+#define RS_TEST_MAX_READ_MSG_BYTE_C 536870912 // 512 MB
 #define RS_TEST_MAX_CLIENT_C 1000
 #define RS_TEST_INCR_MSG_BYTE_C(_cur_byte_c) (1.1 * ((_cur_byte_c) + 100))
-#define RS_TEST_MAX_MSG_BYTE_C 536870912 // 512 MB
 
 typedef enum {
     RS_TEST_FATAL = -1,
@@ -14,6 +14,7 @@ typedef enum {
     RS_TEST_BAD_MSG = 4001
 } rs_test_ret;
 
+thread_local static size_t max_msg_byte_c = 0;
 thread_local static uint64_t client_ids[RS_TEST_MAX_CLIENT_C] = {0};
 thread_local static size_t client_c = 0;
 
@@ -161,12 +162,14 @@ static void send_something(
     }
     send_somewhere(rs, cb_has_cur);
     byte_c = RS_TEST_INCR_MSG_BYTE_C(byte_c);
-    byte_c %= RS_TEST_MAX_MSG_BYTE_C;
+    byte_c %= max_msg_byte_c;
 }
 
 rs_test_ret init_cb(
-    void
-) { // Feed some quasi-crappy seed to quasi-crappy rand().
+    struct rs_conf const * conf
+) {
+    max_msg_byte_c = conf->max_ws_msg_size;
+    // Feed some quasi-crappy seed to quasi-crappy rand().
     srand((unsigned) time(NULL));
     return RS_TEST_OK;
 }
@@ -232,7 +235,7 @@ int timer_cb(
 RS_APP(
     RS_INIT(init_cb),
     RS_OPEN(open_cb),
-    RS_READ_BIN(read_cb, RS_NET_STA(uint8_t, 0, RS_TEST_MAX_MSG_BYTE_C)),
+    RS_READ_BIN(read_cb, RS_NET_STA(uint8_t, 0, RS_TEST_MAX_READ_MSG_BYTE_C)),
     RS_CLOSE(close_cb),
     RS_TIMER_WAKE(timer_cb, 1000000)
 );
