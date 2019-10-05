@@ -121,40 +121,47 @@ the [RS_APP](#rs_appm1-m2-m3-m4-m5) macro and its descendent macro arguments,
 ### RS_APP(*m1*, *m2*, *m3*, *m4*, *m5*)
 
 Must be invoked exactly once at file scope with exactly 5 macro arguments, in the following order:
-1. Either [`RS_INIT(init_cb)`](#rs_initinit_cb) or `RS_INIT_NONE`
+1. Either [`RS_INIT(init_cb[, app_data_byte_c])`](#rs_initinit_cb-app_data_byte_c)
+   or `RS_INIT_NONE`
 1. Either [`RS_OPEN(open_cb)`](#rs_openopen_cb) or `RS_OPEN_NONE`
-1. One of [`RS_READ_BIN(read_cb[, ...])`](#rs_read_binread_cb-read_m1-read_m2-), [`RS_READ_UTF8(read_cb[, ...])`](#rs_read_utf8read_cb-read_m1-read_m2-), or [`RS_READ_SWITCH(case_m1[, ...])`](#rs_read_switchcase_m1-case_m2-)
+1. One of [`RS_READ_BIN(read_cb[, ...])`](#rs_read_binread_cb-read_m1-read_m2-), [`RS_READ_UTF8(read_cb[, ...])`](#rs_read_utf8read_cb-read_m1-read_m2-), or
+   [`RS_READ_SWITCH(case_m1[, ...])`](#rs_read_switchcase_m1-case_m2-)
 1. Either [`RS_CLOSE(close_cb)`](#rs_closeclose_cb) or `RS_CLOSE_NONE`
-1. One of [`RS_TIMER_SLEEP(microseconds)`](#rs_timer_sleeptimer_cb-microsecondsrs_timer_waketimer_cb-microseconds), [`RS_TIMER_WAKE(microseconds)`](#rs_timer_sleeptimer_cb-microsecondsrs_timer_waketimer_cb-microseconds), or `RS_TIMER_NONE`
+1. One of [`RS_TIMER_SLEEP(microseconds)`](#rs_timer_sleeptimer_cb-microsecondsrs_timer_waketimer_cb-microseconds),
+   [`RS_TIMER_WAKE(microseconds)`](#rs_timer_sleeptimer_cb-microsecondsrs_timer_waketimer_cb-microseconds),
+   or `RS_TIMER_NONE`
 
-##### RS_INIT(*init_cb*)
+Every referenced app callback function must take a pointer to an opaque `rs_t`
+as its first argument. See [app helper functions](#app-helper-functions) for an
+overview of things that can be done with this pointer.
+
+##### RS_INIT(*init_cb*[, *app_data_byte_c*])
 
 Declaring `RS_INIT(foo_init)` will cause RingSocket to call an app-provided
-`int foo_init(struct rs_conf const * conf)` callback function during RingSocket
-startup. Useful when your app needs to do some initialization or resource
-allocation before engaging in WebSocket IO, or needs to know about RingSocket
-configuration values. See [callback return values](#app-callback-return-values)
-for valid return values.
+`int foo_init(rs_t * rs)` callback function during RingSocket startup. Useful
+when your app needs to do some initialization or resource allocation before
+engaging in WebSocket IO, or needs to know about RingSocket configuration
+values. See [callback return values](#app-callback-return-values) for valid
+return values. Note that [helper functions](#app-helper-functions) that involve
+WebSocket IO are not yet available when this callback function is called.
 
-The `conf` argument passed to this callback points to a read-only
-`struct rs_conf` instance containing all configuration values associated with
-the current RingSocket process. See
-[ringsocket_conf.h](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_conf.h)
-for struct definitions, and the configuration section [below](#configuration)
-for descriptions of most of their members.
+If a 2nd *app_data_byte_c* size argument is included, a region of memory of
+that size is reserved on the app thread's stack. Access to this data can be
+obtained in any callback function through the `rs_get_app_data()` helper
+function. This provides apps with an alternative means of managing state
+compared to using variables with static storage duration. (Owing to compiler
+inlining, usage of this `app_data` API is likely to result in bytecode without
+any overhead compared to accessing ordinary stack variables with automatic
+storage duration).
 
 ##### RS_OPEN(*open_cb*)
 
 Declaring `RS_OPEN(foo_open)` will cause RingSocket to call an app-provided
 `int foo_open(rs_t * rs)` callback function whenever a WebSocket client
 completes its HTTP Upgrade handshake with a RingSocket worker thread, thus
-becoming available for WebSocket IO.
-
-See [app helper functions](#app-helper-functions) for an overview of things that
-can be done with use of the received opaque `rs_t` pointer. For example, if
-WebSocket clients of this app always first need to receive some data from the
-server in order to get started, such data can be sent immediately from this
-callback function—without waiting for the client to make a request for it.
+becoming available for WebSocket IO. For example, it is perfectly fine to send
+any WebSock message to the corresponding new client from this callback, without
+waiting for that client to first send its first WebSocket message to the app.
 
 ##### RS_READ_BIN(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])
 
@@ -368,6 +375,26 @@ For apps with multiple [configured endpoint urls](#endpoint-configuration),
 this function allows the app to determine through which of those the WebSocket
 client established its connection. Note that calling this function from an
 `RS_TIMER_...()` callback will result in a fatal error.
+
+```C
+inline struct rs_conf const * rs_get_conf(rs_t * rs);
+```
+
+Returns a pointer to a read-only `struct rs_conf` instance containing all
+configuration values associated with the current RingSocket process. See
+[ringsocket_conf.h](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_conf.h)
+for struct definitions, and the configuration section [below](#configuration)
+for descriptions of most of their members.
+
+```C
+inline void * rs_get_app_data(rs_t * rs);
+```
+
+If a 2nd *app_data_byte_c* size argument was passed to
+[`RS_INIT(init_cb[, app_data_byte_c])`](#rs_initinit_cb-app_data_byte_c), a
+region of memory of that size is reserved on the app thread's stack. This helper
+function returns a void pointer to the 1st byte of this app data, or NULL if
+said *app_data_byte_c* argument was omitted.
 
 ```C
 void rs_w_p(rs_t * rs, void const * src, size_t size);

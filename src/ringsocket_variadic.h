@@ -7,13 +7,14 @@
 // different child macros depending on the number of __VA_ARGS__ they are called
 // with.
 
-// Even though these 5 macros do exactly the same thing, they need to be defined
+// Even though these 6 macros do exactly the same thing, they need to be defined
 // separately, because they may need to be expanded inside the expansion of any
 // of its sibling definitions (e.g., as is this case for RS_APP()); but, alas,
 // the C preprocessor does not allow recursive expansion -- otherwise this file
 // would be a _lot_ shorter.
 #define RS_MACRIFY_SWITCH(identifier, ...) identifier(__VA_ARGS__)
 #define RS_MACRIFY_SWITCH2(identifier, ...) identifier(__VA_ARGS__)
+#define RS_MACRIFY_INIT(identifier, ...) identifier(__VA_ARGS__)
 #define RS_MACRIFY_ARGC(identifier, ...) identifier(__VA_ARGS__)
 #define RS_MACRIFY_TYPE(identifier, ...) identifier(__VA_ARGS__)
 #define RS_MACRIFY_LOG(identifier, ...) identifier(__VA_ARGS__)

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "rs_slot.h" // struct rs_slots
-
+#define RS_EXCLUDE_APP_HELPER_HEADER
 #include <ringsocket.h>
+
 #include <openssl/ssl.h>
 
 // It may seem like the rs_worker_args and rs_worker structs could be replaced
@@ -44,7 +44,12 @@ struct rs_worker {
     struct rs_ring_update_queue ring_update_queue; // See ringsocket_ring.h
     struct rs_ring * inbound_rings; // See ringsocket.h (for use in rs_to_app.c)
 
-    struct rs_slots peer_slots; // See rs_slot.h
+    struct rs_slots { // For rs_slot.[c|h] usage only
+        uint8_t * bytes; // Each bit signifies availability of 1 slot
+        uint8_t * byte_over; // Pointer out of bounds if >= byte_over
+        size_t i; // The lowest slot index that _could_ be empty
+    } peer_slots;
+
     union rs_peer * peers; // See union definition below
     uint32_t peers_elem_c;
     // Prevents looping over the entire array when targeting all connected peers

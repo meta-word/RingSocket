@@ -3,13 +3,7 @@
 
 #pragma once
 
-#include <ringsocket.h> // rs_ret
-
-struct rs_slots {
-    uint8_t * bytes; // Array in which each bit signifies availability of 1 slot
-    uint8_t * byte_over; // If pointer >= byte_over: pointer is out of bounds
-    size_t i; // The lowest slot index that _could_ be empty
-};
+#include "rs_worker.h" // struct rs_slots, rs_ret
 
 rs_ret init_slots(
     size_t slot_c, // Elem_c of a constant-length arr requiring slot bookkeeping

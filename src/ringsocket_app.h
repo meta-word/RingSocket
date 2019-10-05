@@ -39,10 +39,11 @@ enum rs_outbound_kind {
 };
 
 enum rs_callback {
-    RS_CALLBACK_OPEN = 0,
-    RS_CALLBACK_READ = 1,
-    RS_CALLBACK_CLOSE = 2,
-    RS_CALLBACK_TIMER = 3
+    RS_CB_INIT  = 0x01,
+    RS_CB_OPEN  = 0x02,
+    RS_CB_READ  = 0x04,
+    RS_CB_CLOSE = 0x08,
+    RS_CB_TIMER = 0x10
 };
 
 // All peer closures originating in an rs app use the 4xxx range exclusively:
@@ -59,7 +60,20 @@ enum rs_app_ws_close {
     RS_APP_WS_CLOSE_UNKNOWN_CASE = 4902
 };
 
+enum rs_websocket_opcode {
+    RS_WS_OPC_NFIN_CONT = 0x00, // inbound only (rs_websocket.c)
+    RS_WS_OPC_NFIN_TEXT = 0x01, // inbound only (rs_websocket.c)
+    RS_WS_OPC_NFIN_BIN  = 0x02, // inbound only (rs_websocket.c)
+    RS_WS_OPC_FIN_CONT  = 0x80, // inbound only (rs_websocket.c)
+    RS_WS_OPC_FIN_TEXT  = 0x81, // also by rs_send() for outbound msgs
+    RS_WS_OPC_FIN_BIN   = 0x82, // also by rs_send() for outbound msgs
+    RS_WS_OPC_FIN_CLOSE = 0x88, // also by rs_close_peer() for outbound msgs
+    RS_WS_OPC_FIN_PING  = 0x89, // inbound only (rs_websocket.c)
+    RS_WS_OPC_FIN_PONG  = 0x8A  // inbound only (rs_websocket.c)
+};
+
 struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
+    void * app_data;
     struct rs_conf const * conf;
     struct rs_thread_io_pairs * io_pairs;
     struct rs_ring * outbound_rings;
@@ -85,7 +99,9 @@ struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
 int _rs_log_max = LOG_NOTICE; \
 thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 
+#ifndef RS_EXCLUDE_APP_HELPER_HEADER // Defined by rs_conf.h and rs_worker.h
 #include <ringsocket_app_helper.h>
+#endif
 
 // ##########
 // # RS_APP #
@@ -167,7 +183,7 @@ rs_ret ringsocket_app( \
                 /* of which differ somewhat between RS_TIMER_NONE, */ \
                 /* RS_TIMER_SLEEP, and RS_TIMER_WAKE. */ \
                 RS_LOG(LOG_DEBUG, "Going to sleep..."); \
-                rs.cb = RS_CALLBACK_TIMER; \
+                rs.cb = RS_CB_TIMER; \
                 _WAIT_##timer_macro; /* _WAIT_RS_TIMER_[NONE|SLEEP|WAKE] */ \
                 RS_LOG(LOG_DEBUG, "Awoken by a worker thread."); \
                 idle_c = 0; \
@@ -190,11 +206,11 @@ rs_ret ringsocket_app( \
                 sizeof(struct rs_inbound_msg_header); \
             switch (header->kind) { \
             case RS_INBOUND_OPEN: \
-                rs.cb = RS_CALLBACK_OPEN; \
+                rs.cb = RS_CB_OPEN; \
                 _##open_macro; /* Should expand _RS_OPEN[_NONE] */ \
                 break; \
             case RS_INBOUND_READ: \
-                rs.cb = RS_CALLBACK_READ; \
+                rs.cb = RS_CB_READ; \
                 _##read_macro; /* Should expand _RS_READ_... */ \
                 break; \
             case RS_INBOUND_CLOSE: default: \
@@ -203,7 +219,7 @@ rs_ret ringsocket_app( \
         } while ((ring_msg = rs_get_ring_msg(inbound_pair, reader))); \
         inbound_readers[rs.inbound_worker_i] = reader; \
         \
-        rs.cb = RS_CALLBACK_TIMER; \
+        rs.cb = RS_CB_TIMER; \
         _CHECK_##timer_macro; /* _CHECK_RS_TIMER_[NONE|SLEEP|WAKE] */ \
     } \
 } \
@@ -220,9 +236,29 @@ RS_LOG_VARS
 // # RS_INIT #
 
 // Call init_cb...
-#define _RS_INIT(init_cb) RS_GUARD_APP(rs_guard_cb(init_cb(rs.conf)))
+#define _RS_INIT(...) \
+RS_MACRIFY_INIT( \
+    RS_256_2( \
+        _RS_INIT_WITHOUT_APP_DATA, \
+        _RS_INIT_WITH_APP_DATA, \
+        __VA_ARGS__ \
+    ), \
+    __VA_ARGS__ \
+)
 
-// ...or don't
+#define _RS_INIT_WITHOUT_APP_DATA(init_cb) \
+do { \
+    rs.cb = RS_CB_INIT; \
+    RS_GUARD_APP(rs_guard_cb(init_cb(&rs))); \
+} while (0)
+
+#define _RS_INIT_WITH_APP_DATA(init_cb, app_data_byte_c) \
+    /* Omit do {} while loop to keep app_data array in function scope */ \
+    uint8_t app_data[app_data_byte_c] = {0}; \
+    rs.app_data = app_data; \
+    _RS_INIT_WITHOUT_APP_DATA(init_cb) \
+
+// ...or don't call init_cb at all
 #define _RS_INIT_NONE
 
 // ############
@@ -331,7 +367,7 @@ RS_LOG_VARS
 #define _RS_CLOSE(close_cb) do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     call_close_cb: \
-    rs.cb = RS_CALLBACK_CLOSE; \
+    rs.cb = RS_CB_CLOSE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
 } while (0)
 

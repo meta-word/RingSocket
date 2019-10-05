@@ -5,37 +5,22 @@
 
 #include <ringsocket.h>
 
-// Inline functions allowing apps to only include a single
-// #include <ringsocket.h>, while avoiding function call overhead.
+//##############################################################################
+//## RingSocket helper API functions ###########################################
 
-enum rs_data_kind { // The data kind to send as WebSocket message contents
+// All WebSocket message sending helper functions take this enum as a parameter
+// to determine whether to send the message as binary data or as text data.
+enum rs_data_kind {
  RS_BIN = 0, // Binary data
  RS_UTF8 = 1 // UTF-8 data (AKA Text data)
 };
 
-enum rs_websocket_opcode {
-    RS_WS_OPC_NFIN_CONT = 0x00, // inbound only (rs_websocket.c)
-    RS_WS_OPC_NFIN_TEXT = 0x01, // inbound only (rs_websocket.c)
-    RS_WS_OPC_NFIN_BIN  = 0x02, // inbound only (rs_websocket.c)
-    RS_WS_OPC_FIN_CONT  = 0x80, // inbound only (rs_websocket.c)
-    RS_WS_OPC_FIN_TEXT  = 0x81, // also by rs_send() for outbound msgs
-    RS_WS_OPC_FIN_BIN   = 0x82, // also by rs_send() for outbound msgs
-    RS_WS_OPC_FIN_CLOSE = 0x88, // also by rs_close_peer() for outbound msgs
-    RS_WS_OPC_FIN_PING  = 0x89, // inbound only (rs_websocket.c)
-    RS_WS_OPC_FIN_PONG  = 0x8A  // inbound only (rs_websocket.c)
-};
-
-// API functions
-
 inline uint64_t rs_get_client_id(
     rs_t * rs
 ) {
-    if (rs->cb == RS_CALLBACK_TIMER) {
-        RS_LOG(LOG_ERR, "Shutting down: rs_get_client_id() should not be "
-            "called from a timer callback function.");
-        RS_APP_FATAL;
-    }
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE); 
     return *((uint64_t *) (uint32_t []){
+        // Offset worker index by 1 to prevent ever returning an ID value of 0.
         rs->inbound_worker_i + 1,
         rs->inbound_peer_i
     });
@@ -44,26 +29,20 @@ inline uint64_t rs_get_client_id(
 inline uint64_t rs_get_endpoint_id(
     rs_t * rs
 ) {
-    if (rs->cb == RS_CALLBACK_TIMER) {
-        RS_LOG(LOG_ERR, "Shutting down: rs_get_endpoint_id() should not be "
-            "called from a timer callback function.");
-        RS_APP_FATAL;
-    }
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE); 
     return rs->inbound_endpoint_id;
 }
 
-inline rs_ret rs_check_app_wsize(
-    rs_t * rs,
-    size_t incr_size
+inline struct rs_conf const * rs_get_conf(
+    rs_t * rs
 ) {
-    if (!rs->wbuf) {
-        RS_CALLOC(rs->wbuf, rs->wbuf_size);
-    }
-    if (rs->wbuf_i + incr_size >= rs->wbuf_size) {
-        rs->wbuf_size = rs->conf->realloc_multiplier * (rs->wbuf_i + incr_size);
-        RS_REALLOC(rs->wbuf, rs->wbuf_size);
-    }
-    return RS_OK;
+    return rs->conf;
+}
+
+inline void * rs_get_app_data(
+    rs_t * rs
+) {
+    return rs->app_data;
 }
 
 inline void rs_w_p(
@@ -71,6 +50,7 @@ inline void rs_w_p(
     void const * src,
     size_t size
 ) {
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
     RS_GUARD_APP(rs_check_app_wsize(rs, size));
     memcpy(rs->wbuf + rs->wbuf_i, src, size);
     rs->wbuf_i += size;
@@ -87,6 +67,7 @@ inline void rs_w_uint8(
     rs_t * rs,
     uint8_t u8
 ) {
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
     RS_GUARD_APP(rs_check_app_wsize(rs, 1));
     rs->wbuf[rs->wbuf_i++] = u8;
 }
@@ -95,6 +76,7 @@ inline void rs_w_uint16(
     rs_t * rs,
     uint16_t u16
 ) {
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
     RS_GUARD_APP(rs_check_app_wsize(rs, 2));
     *((uint16_t *) (rs->wbuf + rs->wbuf_i)) = u16;
     rs->wbuf_i += 2;
@@ -104,6 +86,7 @@ inline void rs_w_uint32(
     rs_t * rs,
     uint32_t u32
 ) {
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
     RS_GUARD_APP(rs_check_app_wsize(rs, 4));
     *((uint32_t *) (rs->wbuf + rs->wbuf_i)) = u32;
     rs->wbuf_i += 4;
@@ -113,6 +96,7 @@ inline void rs_w_uint64(
     rs_t * rs,
     uint32_t u64
 ) {
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
     RS_GUARD_APP(rs_check_app_wsize(rs, 8));
     *((uint64_t *) (rs->wbuf + rs->wbuf_i)) = u64;
     rs->wbuf_i += 8;
@@ -188,68 +172,6 @@ inline void rs_w_int64_hton(
     rs_w_uint64_hton(rs, i64);
 }
 
-inline void rs_send(
-    rs_t * rs,
-    size_t worker_i,
-    enum rs_outbound_kind outbound_kind,
-    uint32_t const * recipients,
-    uint32_t recipient_c,
-    enum rs_data_kind data_kind
-) {
-    size_t payload_size = rs->wbuf_i;
-    if (payload_size > rs->conf->max_ws_msg_size) {
-        RS_LOG(LOG_ERR, "Payload of size %zu exceeds the configured "
-            "max_ws_msg_size %zu. Shutting down to avert further trouble...",
-            payload_size, rs->conf->max_ws_msg_size);
-        RS_APP_FATAL;
-    }
-    size_t msg_size =
-        1 + // uint8_t outbound_kind
-        4 * (recipient_c > 1) + // if (recipient_c > 1): uint32_t recipient_c
-        4 * recipient_c + // uint32_t array of recipients (peer_i elements)
-        2; // uint8_t WebSocket opcode + uint8_t WebSocket size indicator byte
-    if (payload_size > UINT16_MAX) {
-        msg_size += 8; // uint64_t WebSocket payload size (after '127' byte)
-    } else if (payload_size > 125) {
-        msg_size += 2; // uint16_t payload size (after '126' byte)
-    }
-    msg_size += payload_size;
-    struct rs_ring * ring = rs->outbound_rings + worker_i;
-    RS_GUARD_APP(rs_prepare_ring_write(&rs->io_pairs[worker_i].outbound,
-        ring, msg_size));
-    *ring->writer++ = (uint8_t) outbound_kind;
-    if (recipient_c) {
-        if (recipient_c > 1) {
-            *((uint32_t *) ring->writer) = recipient_c;
-            ring->writer += 4;
-        }
-        do {
-            *((uint32_t *) ring->writer) = *recipients++;
-            ring->writer += 4;
-        } while (--recipient_c);
-    }
-    *ring->writer++ = data_kind == RS_UTF8 ?
-        RS_WS_OPC_FIN_TEXT : RS_WS_OPC_FIN_BIN;
-    if (payload_size > UINT16_MAX) {
-        *ring->writer++ = 127;
-        RS_W_HTON64(ring->writer, payload_size);
-        ring->writer += 8;
-    } else if (payload_size > 125) {
-        *ring->writer++ = 126;
-        RS_W_HTON16(ring->writer, payload_size);
-        ring->writer += 2;
-    } else {
-        *ring->writer++ = payload_size;
-    }
-    if (rs->wbuf_i) {
-        memcpy(ring->writer, rs->wbuf, rs->wbuf_i);
-        ring->writer += rs->wbuf_i;
-    }
-    RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
-        rs->worker_sleep_states, rs->worker_eventfds, ring->writer, worker_i,
-        true));
-}
-
 inline void rs_to_single(
     rs_t * rs,
     enum rs_data_kind data_kind,
@@ -294,16 +216,7 @@ inline void rs_to_cur(
     rs_t * rs,
     enum rs_data_kind data_kind
 ) {
-    if (rs->cb == RS_CALLBACK_CLOSE) {
-        RS_LOG(LOG_ERR, "Shutting down: rs_to_cur() should not be called from "
-            "an RS_CLOSE() callback function.");
-        RS_APP_FATAL;
-    }
-    if (rs->cb == RS_CALLBACK_TIMER) {
-        RS_LOG(LOG_ERR, "Shutting down: rs_to_cur() should not be "
-            "called from a timer callback function.");
-        RS_APP_FATAL;
-    }
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ); 
     rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
         (uint32_t []){rs->inbound_peer_i}, 1, data_kind);
     rs->wbuf_i = 0;
@@ -372,16 +285,7 @@ inline void rs_to_every_except_cur(
     rs_t * rs,
     enum rs_data_kind data_kind
 ) {
-    if (rs->cb == RS_CALLBACK_CLOSE) {
-        RS_LOG(LOG_ERR, "Shutting down: rs_to_every_except_cur() should not be "
-            "called from an RS_CLOSE() callback function.");
-        RS_APP_FATAL;
-    }
-    if (rs->cb == RS_CALLBACK_TIMER) {
-        RS_LOG(LOG_ERR, "Shutting down: rs_to_every_except_cur() should not be "
-            "called from a timer callback function.");
-        RS_APP_FATAL;
-    }
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ); 
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
@@ -393,7 +297,97 @@ inline void rs_to_every_except_cur(
     rs->wbuf_i = 0;
 }
 
-// Non-API functions
+//##############################################################################
+//## Internal definitions (don't call these functions directly from app code) ##
+
+#define RS_GUARD_CB(allowed_cb_mask) \
+do { \
+    if (!(rs->cb & allowed_cb_mask)) { \
+        RS_LOG(LOG_ERR, "%s must not be called from an RS_%s() " \
+            "callback function: shutting down...", __func__, \
+            (char *[]){"", /*0x01*/"INIT", /*0x02*/"OPEN", "", \
+                /*0x04*/"READ...", "", "", "", /*0x08*/"CLOSE", "", "", "", \
+                "", "", "", "", /*0x10*/"TIMER..."}[rs->cb]); \
+        RS_APP_FATAL; \
+    } \
+} while (0)
+
+inline rs_ret rs_check_app_wsize(
+    rs_t * rs,
+    size_t incr_size
+) {
+    if (!rs->wbuf) {
+        RS_CALLOC(rs->wbuf, rs->wbuf_size);
+    }
+    if (rs->wbuf_i + incr_size >= rs->wbuf_size) {
+        rs->wbuf_size = rs->conf->realloc_multiplier * (rs->wbuf_i + incr_size);
+        RS_REALLOC(rs->wbuf, rs->wbuf_size);
+    }
+    return RS_OK;
+}
+
+inline void rs_send(
+    rs_t * rs,
+    size_t worker_i,
+    enum rs_outbound_kind outbound_kind,
+    uint32_t const * recipients,
+    uint32_t recipient_c,
+    enum rs_data_kind data_kind
+) {
+    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
+    size_t payload_size = rs->wbuf_i;
+    if (payload_size > rs->conf->max_ws_msg_size) {
+        RS_LOG(LOG_ERR, "Payload of size %zu exceeds the configured "
+            "max_ws_msg_size %zu. Shutting down to avert further trouble...",
+            payload_size, rs->conf->max_ws_msg_size);
+        RS_APP_FATAL;
+    }
+    size_t msg_size =
+        1 + // uint8_t outbound_kind
+        4 * (recipient_c > 1) + // if (recipient_c > 1): uint32_t recipient_c
+        4 * recipient_c + // uint32_t array of recipients (peer_i elements)
+        2; // uint8_t WebSocket opcode + uint8_t WebSocket size indicator byte
+    if (payload_size > UINT16_MAX) {
+        msg_size += 8; // uint64_t WebSocket payload size (after '127' byte)
+    } else if (payload_size > 125) {
+        msg_size += 2; // uint16_t payload size (after '126' byte)
+    }
+    msg_size += payload_size;
+    struct rs_ring * ring = rs->outbound_rings + worker_i;
+    RS_GUARD_APP(rs_prepare_ring_write(&rs->io_pairs[worker_i].outbound,
+        ring, msg_size));
+    *ring->writer++ = (uint8_t) outbound_kind;
+    if (recipient_c) {
+        if (recipient_c > 1) {
+            *((uint32_t *) ring->writer) = recipient_c;
+            ring->writer += 4;
+        }
+        do {
+            *((uint32_t *) ring->writer) = *recipients++;
+            ring->writer += 4;
+        } while (--recipient_c);
+    }
+    *ring->writer++ = data_kind == RS_UTF8 ?
+        RS_WS_OPC_FIN_TEXT : RS_WS_OPC_FIN_BIN;
+    if (payload_size > UINT16_MAX) {
+        *ring->writer++ = 127;
+        RS_W_HTON64(ring->writer, payload_size);
+        ring->writer += 8;
+    } else if (payload_size > 125) {
+        *ring->writer++ = 126;
+        RS_W_HTON16(ring->writer, payload_size);
+        ring->writer += 2;
+    } else {
+        *ring->writer++ = payload_size;
+    }
+    if (rs->wbuf_i) {
+        memcpy(ring->writer, rs->wbuf, rs->wbuf_i);
+        ring->writer += rs->wbuf_i;
+    }
+    RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_update_queue, rs->io_pairs,
+        rs->worker_sleep_states, rs->worker_eventfds, ring->writer, worker_i,
+        true));
+}
 
 inline rs_ret rs_init_outbound_rings(
     rs_t * rs
@@ -573,7 +567,8 @@ inline rs_ret rs_guard_timer_cb(
 #define RS_INLINE_PROTOTYPES_APP \
 extern inline uint64_t rs_get_client_id(rs_t *); \
 extern inline uint64_t rs_get_endpoint_id(rs_t *); \
-extern inline rs_ret rs_check_app_wsize(rs_t *, size_t); \
+extern inline struct rs_conf const * rs_get_conf(rs_t *); \
+extern inline void * rs_get_app_data(rs_t *); \
 extern inline void rs_w_p(rs_t *, void const *, size_t); \
 extern inline void rs_w_str(rs_t *, char const *); \
 extern inline void rs_w_uint8(rs_t *, uint8_t); \
@@ -590,8 +585,6 @@ extern inline void rs_w_int64(rs_t *, int64_t); \
 extern inline void rs_w_int16_hton(rs_t *, int16_t); \
 extern inline void rs_w_int32_hton(rs_t *, int32_t); \
 extern inline void rs_w_int64_hton(rs_t *, int64_t); \
-extern inline void rs_send(rs_t *, size_t, enum rs_outbound_kind, \
-    uint32_t const *, uint32_t, enum rs_data_kind); \
 extern inline void rs_to_single(rs_t *, enum rs_data_kind, uint64_t); \
 extern inline void rs_to_multi(rs_t *, enum rs_data_kind, uint64_t const *, \
     size_t); \
@@ -602,6 +595,10 @@ extern inline void rs_to_every_except_single(rs_t *, enum rs_data_kind, \
 extern inline void rs_to_every_except_multi(rs_t *, enum rs_data_kind, \
     uint64_t const *, size_t); \
 extern inline void rs_to_every_except_cur(rs_t *, enum rs_data_kind); \
+\
+extern inline rs_ret rs_check_app_wsize(rs_t *, size_t); \
+extern inline void rs_send(rs_t *, size_t, enum rs_outbound_kind, \
+    uint32_t const *, uint32_t, enum rs_data_kind); \
 extern inline rs_ret rs_init_outbound_rings(rs_t *); \
 extern inline rs_ret rs_init_app_cb_args(struct rs_app_args *, rs_t *); \
 extern inline rs_ret rs_get_readers_upon_inbound_rings_init( \
