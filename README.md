@@ -377,7 +377,7 @@ client established its connection. Note that calling this function from an
 `RS_TIMER_...()` callback will result in a fatal error.
 
 ```C
-inline struct rs_conf const * rs_get_conf(rs_t * rs);
+struct rs_conf const * rs_get_conf(rs_t * rs);
 ```
 
 Returns a pointer to a read-only `struct rs_conf` instance containing all
@@ -387,7 +387,7 @@ for struct definitions, and the configuration section [below](#configuration)
 for descriptions of most of their members.
 
 ```C
-inline void * rs_get_app_data(rs_t * rs);
+void * rs_get_app_data(rs_t * rs);
 ```
 
 If a 2nd *app_data_byte_c* size argument was passed to
