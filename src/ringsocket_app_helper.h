@@ -5,6 +5,18 @@
 
 #include <ringsocket.h>
 
+#define RS_GUARD_CB(allowed_cb_mask) \
+do { \
+    if (!(rs->cb & allowed_cb_mask)) { \
+        RS_LOG(LOG_ERR, "%s must not be called from an RS_%s() " \
+            "callback function: shutting down...", __func__, \
+            (char *[]){"", /*0x01*/"INIT", /*0x02*/"OPEN", "", \
+                /*0x04*/"READ...", "", "", "", /*0x08*/"CLOSE", "", "", "", \
+                "", "", "", "", /*0x10*/"TIMER..."}[rs->cb]); \
+        RS_APP_FATAL; \
+    } \
+} while (0)
+
 //##############################################################################
 //## RingSocket helper API functions ###########################################
 
@@ -299,18 +311,6 @@ inline void rs_to_every_except_cur(
 
 //##############################################################################
 //## Internal definitions (don't call these functions directly from app code) ##
-
-#define RS_GUARD_CB(allowed_cb_mask) \
-do { \
-    if (!(rs->cb & allowed_cb_mask)) { \
-        RS_LOG(LOG_ERR, "%s must not be called from an RS_%s() " \
-            "callback function: shutting down...", __func__, \
-            (char *[]){"", /*0x01*/"INIT", /*0x02*/"OPEN", "", \
-                /*0x04*/"READ...", "", "", "", /*0x08*/"CLOSE", "", "", "", \
-                "", "", "", "", /*0x10*/"TIMER..."}[rs->cb]); \
-        RS_APP_FATAL; \
-    } \
-} while (0)
 
 inline rs_ret rs_check_app_wsize(
     rs_t * rs,

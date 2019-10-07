@@ -5,7 +5,6 @@
 
 #define RS_TEST_MAX_READ_MSG_BYTE_C 536870912 // 512 MB
 #define RS_TEST_MAX_CLIENT_C 1000
-#define RS_TEST_INCR_MSG_BYTE_C(_cur_byte_c) (1.1 * ((_cur_byte_c) + 100))
 
 typedef enum {
     RS_TEST_FATAL = -1,
@@ -16,7 +15,9 @@ typedef enum {
 
 struct rs_stress {
     size_t max_msg_byte_c;
+    size_t msg_byte_c;
     size_t client_c;
+    int interval;
     uint64_t client_ids[RS_TEST_MAX_CLIENT_C];
 };
 
@@ -70,50 +71,65 @@ static void send_somewhere(
         switch (randrange(2 + cb_has_cur)) {
         case 0:
             rs_to_every(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every()", s->msg_byte_c);
             break;
         case 1:
             rs_to_single(rs, RS_BIN, get_nth_client_id(s, 0));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_single()", s->msg_byte_c);
             break;
         case 2:
             rs_to_cur(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_cur()", s->msg_byte_c);
         }
         break;
     case 2:
         switch (randrange(6 + 2 * cb_has_cur)) {
         case 0:
             rs_to_every(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every()", s->msg_byte_c);
             break;
         case 1:
             rs_to_single(rs, RS_BIN, get_nth_client_id(s, 0));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to client #0", s->msg_byte_c);
             break;
         case 2:
             rs_to_single(rs, RS_BIN, get_nth_client_id(s, 1));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to client #1", s->msg_byte_c);
             break;
         case 3:
             rs_to_multi(rs, RS_BIN, (uint64_t []){get_nth_client_id(s, 0),
                 get_nth_client_id(s, 1)}, 2);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to both clients",
+                s->msg_byte_c);
             break;
         case 4:
             rs_to_every_except_single(rs, RS_BIN, get_nth_client_id(s, 0));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to client !#0", s->msg_byte_c);
             break;
         case 5:
             rs_to_every_except_single(rs, RS_BIN, get_nth_client_id(s, 1));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to client !#1", s->msg_byte_c);
             break;
         case 6:
             rs_to_cur(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_cur()", s->msg_byte_c);
             break;
         case 7:
             rs_to_every_except_cur(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every_except_cur()",
+                s->msg_byte_c);
         }
         break;
     default:
         switch (randrange(6 + 2 * cb_has_cur)) {
         case 0:
             rs_to_every(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every()", s->msg_byte_c);
             break;
         case 1:
             rs_to_single(rs, RS_BIN,
                 get_nth_client_id(s, randrange(s->client_c)));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_single()", s->msg_byte_c);
             break;
         case 2:
             {
@@ -122,6 +138,8 @@ static void send_somewhere(
                 rs_to_multi(rs, RS_BIN, (uint64_t []){
                     get_nth_client_id(s, r[0]),
                     get_nth_client_id(s, r[1])}, 2);
+                RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every_multi() client "
+                    "#%zu and #%zu", s->msg_byte_c, r[0], r[1]);
             }
             break;
         case 3:
@@ -131,11 +149,15 @@ static void send_somewhere(
                 rs_to_multi(rs, RS_BIN, (uint64_t []){
                     get_nth_client_id(s, r[0]), get_nth_client_id(s, r[1]),
                     get_nth_client_id(s, r[2])}, 3);
+                RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every_multi() client "
+                    "#%zu, #%zu and #%zu", s->msg_byte_c, r[0], r[1], r[2]);
             }
             break;
         case 4:
             rs_to_every_except_single(rs, RS_BIN,
                 get_nth_client_id(s, randrange(s->client_c)));
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every_except_single()",
+                s->msg_byte_c);
             break;
         case 5:
             {
@@ -143,13 +165,18 @@ static void send_somewhere(
                 randrange_twice(s->client_c, r);
                 rs_to_every_except_multi(rs, RS_BIN, (uint64_t []){
                     get_nth_client_id(s, r[0]), get_nth_client_id(s, r[1])}, 2);
+                RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every_except() client "
+                    "#%zu and #%zu", s->msg_byte_c, r[0], r[1]);
             }
             break;
         case 6:
             rs_to_cur(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_cur()", s->msg_byte_c);
             break;
         case 7:
             rs_to_every_except_cur(rs, RS_BIN);
+            RS_LOG(LOG_DEBUG, "Sending %zu bytes to_every_except_cur()",
+                s->msg_byte_c);
         }
     }
 }
@@ -159,26 +186,28 @@ static void send_something(
     struct rs_stress * s,
     bool cb_has_cur
 ) {
-    thread_local static size_t byte_c = 1;
     // Write a cheap dumb predictable sequence of data that should nonetheless
     // function as an okay-ish signal. In other words, in the event that bytes
     // in this stream become corrupt due to a bug, they are fairly likely to
     // be distinguishable from the expected sequence. (No, I can't be bothered
     // to include checksum integrity checks. Maybe some other day.)
-    for (size_t i = 0; i < byte_c; i++) {
+    for (size_t i = 0; i < s->msg_byte_c; i++) {
         rs_w_uint8(rs, 255 - i % 256);
     }
     send_somewhere(rs, s, cb_has_cur);
-    byte_c = RS_TEST_INCR_MSG_BYTE_C(byte_c);
-    byte_c %= s->max_msg_byte_c;
 }
 
 rs_test_ret init_cb(
     rs_t * rs
 ) {
-    struct rs_conf const * conf = rs_get_conf(rs);
+    //struct rs_conf const * conf = rs_get_conf(rs);
     struct rs_stress * s = rs_get_app_data(rs);
-    s->max_msg_byte_c = conf->max_ws_msg_size;
+    s->max_msg_byte_c = 5000;
+    s->msg_byte_c = 1;
+    s->interval = 100000; // 0.1 sec
+    RS_LOG(LOG_DEBUG, "[init_cb] s->interval: %d, s->msg_byte_c: %zu, "
+        "s->max_msg_byte_c: %zu",
+        s->interval, s->msg_byte_c, s->max_msg_byte_c);
     // Feed some quasi-crappy seed to quasi-crappy rand().
     srand((unsigned) time(NULL));
     return RS_TEST_OK;
@@ -193,6 +222,7 @@ rs_test_ret open_cb(
         if (!*cid) {
             *cid = rs_get_client_id(rs);
             s->client_c++;
+            RS_LOG(LOG_DEBUG, "s->client_c: %zu", s->client_c);
             return RS_TEST_OK;
         }
     }
@@ -214,7 +244,8 @@ int read_cb(
             return RS_TEST_BAD_MSG;
         }
     }
-    RS_LOG(LOG_DEBUG,"Validated a %zu byte message from a client.");
+    RS_LOG(LOG_DEBUG, "Validated a %zu byte message from a client.",
+        msg_byte_c);
     return RS_TEST_OK;
 }
 
@@ -239,10 +270,17 @@ int timer_cb(
     rs_t * rs
 ) {
     struct rs_stress * s = rs_get_app_data(rs);
-    if (s->client_c) {
-        send_something(rs, s, false);
+    if (!s->client_c) {
+        return s->interval;
     }
-    return 1000000;
+    send_something(rs, s, false);
+    if (s->msg_byte_c < s->max_msg_byte_c) {
+        s->msg_byte_c++;
+        return s->interval = RS_MAX(100000 /* 0.1 sec */, s->interval * 9 / 10);
+    }
+    // Give RingSocket some time to cool down and process accumulated owrefs.
+    s->msg_byte_c = 1;
+    return s->interval = 200000; // 0.2 sec
 }
 
 RS_APP(
@@ -250,5 +288,5 @@ RS_APP(
     RS_OPEN(open_cb),
     RS_READ_BIN(read_cb, RS_NET_STA(uint8_t, 0, RS_TEST_MAX_READ_MSG_BYTE_C)),
     RS_CLOSE(close_cb),
-    RS_TIMER_WAKE(timer_cb, 1000000)
+    RS_TIMER_WAKE(timer_cb, 1000000 /* 1 sec */)
 );

@@ -118,6 +118,7 @@ rsSpawn.addEventListener('click', function () {
     }
     rsLog.log(wsNum, 'Validated a ' + ev.data.byteLength +
       ' byte message from RingSocket: echoing the same message back.', '', '');
+    ws.send(ev.data);
   }
 });
 

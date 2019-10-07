@@ -475,9 +475,9 @@ rs_ret handle_ws_io(
             size_t msg_size = 0;
             switch (parse_ws_msg(worker, peer, &msg, &msg_size)) {
             case RS_OK:
-                RS_LOG_CHBUF(LOG_INFO,
-                    "Received a chunked WebSocket message from %s",
-                    msg, msg_size, get_peer_str(peer));
+                //RS_LOG_CHBUF(LOG_INFO,
+                //    "Received a chunked WebSocket message from %s",
+                //    msg, msg_size, get_peer_str(peer));
                 RS_GUARD(send_read_to_app(worker, peer, peer_i, msg, msg_size));
                 break;
             case RS_AGAIN:
@@ -519,8 +519,9 @@ rs_ret handle_ws_io(
             size_t msg_size = 0;
             switch (parse_ws_msg(worker, peer, &msg, &msg_size)) {
             case RS_OK:
-                RS_LOG_CHBUF(LOG_DEBUG, "Received a WebSocket message from %s",
-                    msg, msg_size, get_peer_str(peer));
+                //RS_LOG_CHBUF(LOG_DEBUG,
+                //    "Received a WebSocket message in one go from %s",
+                //    msg, msg_size, get_peer_str(peer));
                 RS_GUARD(send_read_to_app(worker, peer, peer_i, msg, msg_size));
                 break;
             case RS_AGAIN:

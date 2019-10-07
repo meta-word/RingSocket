@@ -69,7 +69,6 @@ struct rs_worker {
     struct rs_owref * owrefs; // See struct definition below
     size_t owrefs_elem_c;
     size_t newest_owref_i;
-    size_t oldest_owref_i;
     size_t * oldest_owref_i_by_app;
 };
 
