@@ -5,7 +5,7 @@
 
 #include "rs_worker.h"
 
-rs_ret init_inbound_rings(
+rs_ret init_inbound_producers(
     struct rs_worker * worker
 );
 

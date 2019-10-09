@@ -3,386 +3,225 @@
 
 #pragma once
 
-#include <ringsocket.h>
-
-#include <linux/futex.h>
-#include <sys/syscall.h>
-#include <unistd.h> // write()
-
-// This header file implements ring-buffer-based lockless single-producer
-// single-consumer inter-thread IO intended for use between worker threads and
-// app threads. Each app <-> worker combination uses a single shared
-// rs_thread_io_pairs struct, which in turn consists of an inbound and
-// outbound rs_thread_pair reader and writer corresponding to an inbound
-// ring buffer and outbound ring buffer respectively. The worker thread controls
-// inbound.writer and outbound.reader, whereas the app thread controls
-// inbound.reader and outbound.writer. 
-
-// Atomic loads and stores with a memory_order other than memory_order_relaxed
-// are known to be a bit expensive because of their de-pipelining effects.
+// Due to their dependency relationships, all RingSocket system headers other
+// than ringsocket_conf.h and ringsocket_variadic.h each include one other
+// RingSocket system header, forming a chain in the following order:
 //
-// Instead of allowing the CPU to stall for such memory synchronization, rs
-// instead stores ring buffer pointer updates in a rs_ring_update_queue struct
-// of a constant (but configurable) size, and only performs the actual write to
-// the corresponding shared atomic variable once a number of enqueue calls equal
-// to its length causes it to be dequeued. To ensure that no update becomes
-// stuck in a sleeping thread, calls to epoll_wait() and futex_wait() are
-// doubled: 1st with a timeout of 0, then all pending updates are flushed (which
-// is safe against memory reordering due to being done across the systemcalls
-// involved in epol_wait() and futex_wait()), and then finally a 2nd time with
-// the timeout actually intended (if any).
+//       <ringsocket.h>: RingSocket helper function API
+//       <ringsocket_app.h>: Definition of RS_APP() and its descendent macros
+//       <ringsocket_queue.h>: Struct rs_ring_queue and queuing/waking functions
+// ----> <ringsocket_ring.h>: Single producer single consumer ring buffer API
+#include <ringsocket_api.h> // Basic RingSocket API macros and typedefs
+//       <ringsocket_variadic.h>: Arity-based macro expansion helper macros
 //
-// The small delay in receiving notification of any progress made in other
-// threads that occurs as a consequence of this approach does not pose any
-// problem provided the ring buffers are of sufficient initial size.
+// Their contents are therefore easier to understand when read in reverse order.
 
-#define RS_PREVENT_COMPILER_REORDERING __asm__ volatile("" ::: "memory")
+#include <ringsocket_conf.h> // struct rs_conf
+#include <stdbool.h> // bool
 
-// memory_order_relaxed for ring buffer updates should be safe enough provided
-// that every update queue is long enough to defer updates long enough for ring
-// buffer IO to have been completed even if worst case CPU memory reordering
-// occurs. Appropriate sizes may differ significantly between CPU architectures;
-// as well as between inbound writes, inbound reads, outbound writes, and
-// outbound reads -- due to factors such as each code locations frequency of
-// updates and expensive operations such as function calls. The same is true in
-// reverse for app futexes: the app must set its sleep state well in advance of
-// calling futex_wait().
+// RingSocket's atomic interface to its single producer single consumer ring
+// buffers, as shared between its threads.
+struct rs_ring_atomic { // C11 atomic types with C11 alignas
+    // Atomic pointer to where the producing thread will write new data next,
+    // which is interpreted by the consuming thread to mean that it can safely
+    // read all ring buffer bytes up to (but not through) w.
+    alignas(RS_CACHE_LINE_SIZE) atomic_uintptr_t w;
 
-#define RS_ATOMIC_STORE_RELAXED(store, val) \
-do { \
-    /* Don't let the compiler move atomic_store_explicit() to earlier code */ \
-    RS_PREVENT_COMPILER_REORDERING; \
-    atomic_store_explicit((store), (val), memory_order_relaxed); \
-    /* Don't let the compiler move atomic_store_explicit() to later code */ \
-    RS_PREVENT_COMPILER_REORDERING; \
-} while (0)
-
-#define RS_ATOMIC_LOAD_RELAXED(store, val) \
-    RS_ATOMIC_LOAD_RELAXED_CASTED(store, val,)
-
-#define RS_ATOMIC_LOAD_RELAXED_CASTED(store, val, cast) \
-do { \
-    /* Don't let the compiler move atomic_load_explicit() to earlier code */ \
-    RS_PREVENT_COMPILER_REORDERING; \
-    (val) = cast atomic_load_explicit((store), memory_order_relaxed); \
-    /* Don't let the compiler move atomic_load_explicit() to later code */ \
-    RS_PREVENT_COMPILER_REORDERING; \
-} while (0)
-
-struct rs_thread_pair { // C11 atomic types with C11 alignas
-    alignas(RS_CACHELINE_SIZE) atomic_uintptr_t writer;
-    alignas(RS_CACHELINE_SIZE) atomic_uintptr_t reader;
+    // Atomic pointer to where the consuming thread will read data next,
+    // which is interpreted by the producing thread to mean that it can safely
+    // write new data to the ring buffer up to (but not through) r.
+    alignas(RS_CACHE_LINE_SIZE) atomic_uintptr_t r;
 };
 
-struct rs_thread_io_pairs {
-    struct rs_thread_pair inbound;
-    struct rs_thread_pair outbound;
+// Every worker thread <-> app thread pair shares a single unique instance of
+// this rs_ring_pair struct through which all their communication takes place.
+struct rs_ring_pair {
+    struct rs_ring_atomic inbound_ring; // producing worker --> consuming app
+    struct rs_ring_atomic outbound_ring; // producing app --> consuming worker
 };
 
-struct rs_thread_sleep_state {
-    // is_asleep is a boolean flag, but implemented as an atomic uint32_t for
-    // compatibility with futex syscalls -- as used by app_sleepiness.is_asleep.
-    alignas(RS_CACHELINE_SIZE) atomic_uint_least32_t is_asleep; // boolean
+// RingSocket's producer-only interface to a RingSocket ring buffer: not shared
+// with the thread at the consumer side.
+struct rs_ring_producer {
+    // The start of the current heap-allocated ring buffer, as produced by the
+    // producer thread managing an instance of this struct.
+    uint8_t * ring;
+
+    // This pointer has the same semantics as the shared "w" of struct
+    // rs_ring_atomic, except that this "w" contains the actual real-time
+    // up-to-date write poiner, whereas the "w" of rs_ring_atomic will generally
+    // be a slightly delayed version thereof.
+    //
+    // Why? Well, RingSocket loads and stores the atomic pointers in struct
+    // rs_ring_atomic with memory_order_relaxed for max speed without any locks
+    // or fences. To nonetheless guard itself against CPU memory reordering,
+    // RingSocket briefly queues ring buffer read and write updates before
+    // publicizing them in struct rs_ring_atomic: see ringsocket_queue.h.
+    uint8_t * w;
+
+    // In the event that the write pointer "w" speeds ahead of the consumer
+    // thread's read pointer "r" by a "whole ring buffer lap", the ring buffer
+    // is considered to be "full" (because carrying on obliviously would expose
+    // the consumer thread to erroneous overwrites of yet to be read data).
+    //
+    // When that happens, the ring producer allocates a larger new ring buffer
+    // to which it writes any excess new data. However, it can only free() the
+    // old ring buffer once it knows that the consumer too has transitioned to
+    // the new ring buffer (see rs_produce_ring_msg()). A reference to the old
+    // buffer is kept as a "prev_ring" member until that time to free() arrives.
+    uint8_t * prev_ring;
+
+    // The size in bytes of the current heap-allocated ring buffer
+    size_t ring_size;
 };
 
-#define RS_RING_RESERVED_TAIL_SIZE ( \
-    sizeof(uint32_t) + /* Reserved for msg_size 0 of an un-appendable msg */ \
-    sizeof(uint8_t *) /* Reserved for a pointer to an un-appendable msg */ \
-)
+// RingSocket's consumer-only interface to a RingSocket ring buffer: not shared
+// with the thread at the producer side.
+struct rs_ring_consumer {
+    // From a utilitarian point of view, structs with only one member are
+    // stupid. Here it's done anyway to clarify the separation of concerns
+    // between the ring buffer producer and ring buffer consumer: the producer
+    // is responsible for all buffer management, while the consumer just needs
+    // to "follow the trail" and update its "r" along the way.
 
-struct rs_ring {
-    uint8_t * buf;
-    uint8_t * old_buf;
-    uint8_t * writer;
-    size_t buf_size;
-    double alloc_multiplier;
+    // This pointer has the same semantics as the shared "r" of struct
+    // rs_ring_atomic, except that this "r" contains the actual real-time
+    // up-to-date read poiner, whereas the "r" of rs_ring_atomic will generally
+    // be a slightly delayed version thereof -- for the same reasons as
+    // mentioned in struct rs_ring_producer.
+
+    // Regarding const-ness: RingSocket consumers never directly alter any ring
+    // buffer contents, as doing so would often lead to unneccessary false
+    // sharing with the producer thread on the other end.
+    uint8_t const * r;
 };
 
-struct rs_ring_msg {
-    uint32_t size;
-    uint8_t const msg[];
+// rs_consume_ring_msg() casts any ring buffer message pointer it returns to
+// this struct to clarify the message format to the caller.
+struct rs_consumer_msg {
+    uint32_t const size; // The size of msg in bytes.
+    uint8_t const msg[]; // const: see comment in struct rs_ring_consumer above
 };
 
-struct rs_ring_update {
-    uint8_t * ring_position;
-    uint32_t thread_i;
-    uint32_t is_write; // bool
-};
+// Every ring message is preceded by an uint32_t holding its size in bytes
+#define RS_RING_HEAD_SIZE sizeof(uint32_t) // I.e., 4.
 
-struct rs_ring_update_queue {
-    struct rs_ring_update * queue;
-    size_t size;
-    size_t oldest_i;
-};
+// Every ring message must reserve the following size as a tail beyond the
+// message itself; to allow a route instruction to be inserted upon the
+// next ring write attempt, in the event that there is insufficient space inside
+// the current ring buffer to append the next message contiguously.
+//
+// A route instruction is one uint32_t with a value of 0 (where the size
+// uint32_t would be if the next message was appended contiguously), followed by
+// a uint8_t pointer to the start of a new producer-allocated ring buffer.
+#define RS_RING_ROUTE_SIZE (RS_RING_HEAD_SIZE + sizeof(uint8_t *))
 
-// Inline functions allowing apps to only include a single
-// #include <ringsocket.h>, while avoiding function call overhead.
-
-inline rs_ret rs_prepare_ring_write(
-    struct rs_thread_pair * pair,
-    struct rs_ring * ring,
+#ifdef RS_INCLUDE_PRODUCE_RING_MSG
+inline bool rs_would_clobber(
+    uint8_t const * unwritable,
+    uint8_t const * w,
     uint32_t msg_size
 ) {
-    uint8_t * reader = NULL;
-    RS_ATOMIC_LOAD_RELAXED(&pair->reader, reader);
+    return w + RS_RING_HEAD_SIZE + msg_size + RS_RING_ROUTE_SIZE > unwritable;
+}
 
-    if (reader >= ring->buf && reader < ring->buf + ring->buf_size) {
-        // Reader and writer are currently processing the same ring->buf.
-        if (ring->old_buf) {
-            // Which means any previously used ring buffer can be free()d now.
-            RS_FREE(ring->old_buf);
+// Ensure that the calling producer thread can safely write msg_size message
+// bytes to prod->w once/if RS_OK is returned. This will update the members of
+// the "prod" struct where necessary in order to make said guarantee (including
+// prod->w itself).
+inline rs_ret rs_produce_ring_msg(
+    struct rs_conf const * conf,
+    struct rs_ring_atomic const * atomic,
+    struct rs_ring_producer * prod,
+    uint32_t msg_size
+) {
+    uint8_t const * r = NULL;
+    RS_CASTED_ATOMIC_LOAD_RELAXED(&atomic->r, r, (uint8_t const *));
+    if (r >= prod->ring && r < prod->ring + prod->ring_size) {
+        // r and w are currently both within bounds of the same prod->ring.
+        if (prod->prev_ring) {
+            // This means any previously used ring buffer can be free()d now.
+            RS_FREE(prod->prev_ring);
         }
-        if (ring->writer < reader) {
-            // The writer is "one lap" ahead of the reader on this ring
-            if (ring->writer + 4 + msg_size + RS_RING_RESERVED_TAIL_SIZE >
-                reader) {
-                goto allocate_new_ring_buf;
+        if (prod->w < r) {
+            // The w position has wrapped from the end of the ring back to the
+            // front, while r has not reached the end of the same ring yet.
+            if (rs_would_clobber(r, prod->w, msg_size)) {
+                // prod->ring is "full": writing the msg as-is would clobber r.
+                goto route_to_new_ring;
             }
-        } else if (ring->writer + 4 + msg_size + RS_RING_RESERVED_TAIL_SIZE >
-            ring->buf + ring->buf_size) {
-            if (ring->buf + 4 + msg_size + RS_RING_RESERVED_TAIL_SIZE >
-                reader) {
-                allocate_new_ring_buf: // Allocate a bigger one.
-                // Hold on to the existing buffer as old_buf, until the writer
-                // has verified that the reader has reached the new buffer.
-                ring->old_buf = ring->buf;
-                ring->buf_size *= ring->alloc_multiplier;
+        } else if (rs_would_clobber(prod->ring + prod->ring_size, prod->w,
+            msg_size)) {
+            // Writing the message as-is would mean overshooting the end of the
+            // ring buffer: try to wrap the whole message around to the start
+            // of the ring buffer instead.
+            if (rs_would_clobber(r, prod->ring, msg_size)) {
+                // Can't wrap the message to the start of the ring buffer
+                // either: doing so would clobber r.
+                route_to_new_ring: // Allocate a new larger ring buffer instead.
+                // Hold on to the existing buffer as prev_ring, until the
+                // producer thread has verified that the reader has reached the
+                // new buffer.
+                prod->prev_ring = prod->ring;
+                prod->ring = NULL;
+                prod->ring_size *= conf->realloc_multiplier;
                 // Use RS_CACHE_ALIGNED_CALLOC() to eliminate possibility of
                 // false sharing with preceding or trailing heap bytes.
-                ring->buf = NULL; // As required by RS_CACHE_ALIGNED_CALLOC()
-                RS_CACHE_ALIGNED_CALLOC(ring->buf, ring->buf_size);
+                RS_CACHE_ALIGNED_CALLOC(prod->ring, prod->ring_size);
                 RS_LOG(LOG_NOTICE, "Allocated a new ring buffer with size %zu",
-                    ring->buf_size);
+                    prod->ring_size);
             }
-            *((uint8_t * *) ring->writer) = ring->buf;
-            ring->writer = ring->buf;
+            // Write a "route instruction": a value of 0 instead of msg_size,
+            // to tell the consumer thread that the bytes following it should be
+            // interpreted as a pointer to the next ring buffer location.
+            *((uint32_t *) prod->w) = 0;
+            prod->w += sizeof(uint32_t);
+            // Set either a pointer to the start of the same ring to indicate
+            // wrapping, or a pointer to a new ring buffer (route_to_new_ring).
+            *((uint8_t * *) prod->w) = prod->ring;
+            prod->w = prod->ring;
         }
-    } else if (ring->writer + 4 + msg_size + RS_RING_RESERVED_TAIL_SIZE >
-        ring->buf + ring->buf_size) {
-        // The reader is still reading ring->old_buf and hasn't moved over to
-        // ring->buf yet, even though ring->buf is already completely full.
-        RS_LOG(LOG_CRIT, "FATAL CONDITION: Reader thread and writer thread "
-            "are further out of sync than the entire ring buffer size %zu "
-            "between them.", ring->buf_size);
-            return RS_FATAL;
+    } else if (rs_would_clobber(prod->ring + prod->ring_size, prod->w,
+        msg_size)) {
+        // Even though w has already filled up the entire prod->ring, r is still
+        // on prod->prev_ring: consider this lagging by r excessive, and abort.
+        RS_LOG(LOG_CRIT, "FATAL CONDITION: Producer and consumer are further "
+            "out of sync than the entire ring buffer size %zu between them.",
+            prod->ring_size);
+        return RS_FATAL;
     }
-    *((uint32_t *) ring->writer) = msg_size;
-    ring->writer += 4;
+    *((uint32_t *) prod->w) = msg_size;
+    prod->w += sizeof(uint32_t);
+    // Note that the message itself has not been writtin yet. Instead, this
+    // function returns RS_OK to indicate that the calling producer thread can
+    // now safely write msg_size message bytes starting from prod->w. 
     return RS_OK;
 }
+#endif
 
-inline struct rs_ring_msg * rs_get_ring_msg(
-    struct rs_thread_pair * pair,
-    uint8_t const * reader // 1st msg ? ring->buf : prevref->msg + prevref->size
+#ifdef RS_INCLUDE_CONSUME_RING_MSG
+// Obtain a consumer_msg pointer from a ring consumer interface, or return NULL
+// if no new ring buffer message is avalailable yet.
+struct rs_consumer_msg * rs_consume_ring_msg(
+    struct rs_ring_atomic const * atomic,
+    struct rs_ring_consumer const * cons
 ) {
-    uint8_t * writer = NULL;
-    RS_ATOMIC_LOAD_RELAXED(&pair->writer, writer);
-    if (reader == writer) {
-        // The reader has already caught up with the writer (i.e., the writer
-        // hasn't published any new message yet).
+    uint8_t * w = NULL;
+    RS_CASTED_ATOMIC_LOAD_RELAXED(&atomic->w, w, (uint8_t *));
+    if (cons->r == w) {
+        // The consumer has already caught up with the producer (i.e., the
+        // producer hasn't publicized any new message yet).
         return NULL;
     }
-    struct rs_ring_msg * ring_msg = (struct rs_ring_msg *) reader;
-    if (!ring_msg->size) {
-        // A size of 0 means the message was too large to be appended at the
-        // current location. Instead, a pointer to its actual location should
-        // be retrieved from the current location.
-        ring_msg = *((struct rs_ring_msg * *) reader);
+    struct rs_consumer_msg * cmsg = (struct rs_consumer_msg *) cons->r;
+    if (!cmsg->size) {
+        // This is a "route instruction" (see rs_produce_ring_msg()): a value of
+        // 0 means the message was too large to be appended at the current
+        // location. Instead, a pointer to its actual location should be
+        // retrieved from the current location.
+        uint8_t const * r = *((uint8_t const * *) &cmsg->msg);
+        cmsg = (struct rs_consumer_msg *) r;
     }
-    return ring_msg;
+    return cmsg;
 }
-
-
-inline rs_ret rs_wake_up_app(
-    struct rs_thread_sleep_state * app_sleep_state
-) {
-    bool app_is_asleep = false;
-    RS_ATOMIC_LOAD_RELAXED(&app_sleep_state->is_asleep, app_is_asleep);
-    if (app_is_asleep) {
-        RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false);
-        if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAKE_PRIVATE,
-            1, NULL, NULL, 0) == -1) {
-            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, %d, "
-                "FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0)",
-                app_sleep_state->is_asleep);
-            return RS_FATAL;
-        }
-    }
-    return RS_OK;
-}
-
-inline rs_ret rs_wake_up_worker(
-    struct rs_thread_sleep_state * worker_sleep_state,
-    int worker_eventfd
-) {
-    bool worker_is_asleep = false;
-    RS_ATOMIC_LOAD_RELAXED(&worker_sleep_state->is_asleep, worker_is_asleep);
-    if (worker_is_asleep) {
-        RS_ATOMIC_STORE_RELAXED(&worker_sleep_state->is_asleep, false);
-        if (write(worker_eventfd, (uint64_t []){1}, 8) != 8) {
-            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful write(worker_eventfd, ...)");
-            return RS_FATAL;
-        }
-    }
-    return RS_OK;
-}
-
-#define RS_TIME_INF UINT64_MAX
-
-inline rs_ret rs_wait_for_worker(
-    struct rs_thread_sleep_state * app_sleep_state,
-    uint64_t timeout_microsec
-) {
-    struct timespec const * timeout = timeout_microsec == RS_TIME_INF ?
-        NULL :
-        &(struct timespec){
-            .tv_sec = timeout_microsec / 1000000,
-            .tv_nsec = 1000 * (timeout_microsec % 1000000)
-        };
-    if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAIT_PRIVATE,
-        true, timeout, NULL, 0) != -1 || errno == EAGAIN) {
-        // May return immediately with errno == EAGAIN when a worker thread
-        // already tried to wake this app thread up with rs_wake_up_app()
-        // (which is possible because app_sleep_state->is_asleep was set to
-        // true in advance of this function call). This is not a problem:
-        // just try to do some more work.
-        return RS_OK;
-    }
-    if (errno == ETIMEDOUT) {
-        return RS_AGAIN; // Indicate that this function should be called again
-        // to go back to sleep, because there was no worker thread activity.
-    }
-    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, &%d, "
-        "FUTEX_WAIT_PRIVATE, 1, timeout, NULL, 0)", app_sleep_state->is_asleep);
-    return RS_FATAL;
-}
-
-inline rs_ret rs_enqueue_ring_update(
-    struct rs_ring_update_queue * updates,
-    struct rs_thread_io_pairs * io_pairs,
-    struct rs_thread_sleep_state * sleep_states,
-    int const * eventfds,
-    uint8_t const * new_ring_position,
-    size_t thread_i,
-    bool is_write
-) {
-    struct rs_ring_update * u = updates->queue + updates->oldest_i++;
-    updates->oldest_i %= updates->size;
-    // If an update exists at the oldest index, carry out dequeue procedures.
-    if (u->ring_position) {
-        if (eventfds) { // This function was called by an app thread.
-            if (u->is_write) {
-                RS_ATOMIC_STORE_RELAXED(
-                    &io_pairs[u->thread_i].outbound.writer,
-                    (atomic_uintptr_t) u->ring_position
-                );
-                RS_GUARD(rs_wake_up_worker(sleep_states + u->thread_i,
-                    eventfds[u->thread_i]));
-            } else {
-                RS_ATOMIC_STORE_RELAXED(
-                    &io_pairs[u->thread_i].inbound.reader,
-                    (atomic_uintptr_t) u->ring_position
-                );
-            }
-        } else { // This function was called by a worker thread.
-            if (u->is_write) {
-                RS_ATOMIC_STORE_RELAXED(
-                    &io_pairs[u->thread_i].inbound.writer,
-                    (atomic_uintptr_t) u->ring_position
-                );
-                RS_GUARD(rs_wake_up_app(sleep_states + u->thread_i));
-            } else {
-                RS_ATOMIC_STORE_RELAXED(
-                    &io_pairs[u->thread_i].outbound.reader,
-                    (atomic_uintptr_t) u->ring_position
-                );
-            }
-        }
-    }
-    // Enqueue the new update at the oldest index, which is now the newest index
-    u->ring_position = new_ring_position;
-    u->thread_i = thread_i;
-    u->is_write = is_write;
-    return RS_OK;
-}
-
-inline rs_ret rs_flush_ring_updates(
-    struct rs_ring_update_queue * updates,
-    struct rs_thread_io_pairs * io_pairs,
-    struct rs_thread_sleep_state * sleep_states,
-    int const * eventfds,
-    size_t dest_thread_c
-) {
-    for (size_t i = 0; i < dest_thread_c; i++) {
-        bool updated_to_newer_r = false;
-        bool updated_to_newer_w = false;
-        size_t const newest_i = (updates->oldest_i + updates->size - 1)
-            % updates->size;
-        size_t j = newest_i;
-        do {
-            struct rs_ring_update * u = updates->queue + j;
-            if (u->ring_position && u->thread_i == i) {
-                if (eventfds) { // This function was called by an app thread.
-                    if (u->is_write) {
-                        if (!updated_to_newer_w) {
-                            RS_ATOMIC_STORE_RELAXED(
-                                &io_pairs[u->thread_i].outbound.writer,
-                                (atomic_uintptr_t) u->ring_position
-                            );
-                            RS_GUARD(rs_wake_up_worker(sleep_states +
-                                u->thread_i, eventfds[u->thread_i]));
-                            updated_to_newer_w = true;
-                        }
-                    } else if (!updated_to_newer_r) {
-                        RS_ATOMIC_STORE_RELAXED(
-                            &io_pairs[u->thread_i].inbound.reader,
-                            (atomic_uintptr_t) u->ring_position
-                        );
-                        updated_to_newer_r = true;
-                    }
-                } else { // This function was called by a worker thread.
-                    if (u->is_write) {
-                        if (!updated_to_newer_w) {
-                            RS_ATOMIC_STORE_RELAXED(
-                                &io_pairs[u->thread_i].inbound.writer,
-                                (atomic_uintptr_t) u->ring_position
-                            );
-                            RS_GUARD(rs_wake_up_app(sleep_states +
-                                u->thread_i));
-                            updated_to_newer_w = true;
-                        }
-                    } else if (!updated_to_newer_r) {
-                        RS_ATOMIC_STORE_RELAXED(
-                            &io_pairs[u->thread_i].outbound.reader,
-                            (atomic_uintptr_t) u->ring_position
-                        );
-                        updated_to_newer_r = true;
-                    }
-                }
-                u->ring_position = NULL;
-                u->thread_i = 0;
-                u->is_write = false;
-            }
-            j += updates->size - 1;
-            j %= updates->size;
-        } while (j != newest_i);
-    }
-    return RS_OK;
-}
-
-// See the comment at the bottom of RS_APP() in ringsocket_app.h for explanation
-#define RS_INLINE_PROTOTYPES_RING \
-extern inline rs_ret rs_prepare_ring_write(struct rs_thread_pair * pair, \
-    struct rs_ring * ring, uint32_t msg_size); \
-extern inline struct rs_ring_msg * rs_get_ring_msg(struct rs_thread_pair *, \
-    uint8_t const *); \
-extern inline rs_ret rs_wake_up_app(struct rs_thread_sleep_state *); \
-extern inline rs_ret rs_wake_up_worker(struct rs_thread_sleep_state *, int); \
-extern inline rs_ret rs_wait_for_worker(struct rs_thread_sleep_state *, \
-    uint64_t); \
-extern inline rs_ret rs_enqueue_ring_update(struct rs_ring_update_queue *, \
-    struct rs_thread_io_pairs *, struct rs_thread_sleep_state *, int const *, \
-    uint8_t const *, size_t, bool); \
-extern inline rs_ret rs_flush_ring_updates(struct rs_ring_update_queue *, \
-    struct rs_thread_io_pairs *, struct rs_thread_sleep_state *, int const *, \
-    size_t)
+#endif

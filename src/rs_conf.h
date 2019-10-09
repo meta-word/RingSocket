@@ -3,8 +3,8 @@
 
 #pragma once
 
-#define RS_EXCLUDE_APP_HELPER_HEADER
-#include <ringsocket.h>
+#include <ringsocket_api.h> // rs_ret
+#include <ringsocket_conf.h> // struct rs_conf
 
 // struct rs_conf is defined in ringsocket_conf.h instead of here, because of
 // its shared usage with RingSocket apps.

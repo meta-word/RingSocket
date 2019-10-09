@@ -3,10 +3,9 @@
 
 #pragma once
 
-#define RS_EXCLUDE_APP_HELPER_HEADER
-#include <ringsocket.h>
-
+#include <assert.h> // C11: static_assert()
 #include <openssl/ssl.h>
+#include <ringsocket_app.h>
 
 // It may seem like the rs_worker_args and rs_worker structs could be replaced
 // by a single struct, but their differentation is due to false sharing
@@ -22,12 +21,12 @@ struct rs_worker_args {
     struct rs_conf const * conf; // See ringsocket_conf.h
     
     // app_c length array of io_pair arrays allocated by each app respectively
-    struct rs_thread_io_pairs * * io_pairs; // See ringsocket_ring.h
+    struct rs_ring_pair * * ring_pairs; // See ringsocket_ring.h
     
     // app_c length array of each app's sleep state
-    struct rs_thread_sleep_state * app_sleep_states; // See ringsocket_ring.h
-    struct rs_thread_sleep_state * worker_sleep_state; // See ringsocket_ring.h
-    int worker_eventfd;
+    struct rs_sleep_state * app_sleep_states; // See ringsocket_queue.h
+    struct rs_sleep_state * sleep_state; // See ringsocket_queue.h
+    int eventfd;
     
     size_t worker_i;
 };
@@ -35,14 +34,14 @@ struct rs_worker_args {
 struct rs_worker {
     // These 6 members remain indentical to the ones in struct rs_worker_args.
     struct rs_conf const * const conf;
-    struct rs_thread_io_pairs * * const io_pairs;
-    struct rs_thread_sleep_state * const sleep_state; // == worker_sleep_state
-    struct rs_thread_sleep_state * const app_sleep_states;
-    int const eventfd; // == worker_eventfd
+    struct rs_ring_pair * * const ring_pairs;
+    struct rs_sleep_state * const sleep_state;
+    struct rs_sleep_state * const app_sleep_states;
+    int const eventfd;
     size_t worker_i;
 
-    struct rs_ring_update_queue ring_update_queue; // See ringsocket_ring.h
-    struct rs_ring * inbound_rings; // See ringsocket.h (for use in rs_to_app.c)
+    struct rs_ring_queue ring_queue; // See ringsocket_queue.h
+    struct rs_ring_producer * inbound_producers; // See ringsocket_ring.h
 
     struct rs_slots { // For rs_slot.[c|h] usage only
         uint8_t * bytes; // Each bit signifies availability of 1 slot
@@ -65,7 +64,7 @@ struct rs_worker {
     SSL_CTX * * tls_ctxs; // Used exclusively by rs_tls.c
 
     // The remaining members are used exclusively by rs_from_app.c
-    uint8_t * * outbound_readers;
+    struct rs_ring_consumer * outbound_consumers;
     struct rs_owref * owrefs; // See struct definition below
     size_t owrefs_elem_c;
     size_t newest_owref_i;
@@ -198,7 +197,7 @@ enum rs_continuation {
 // Reference") keeps track of peer recipients for which said message has not
 // been (fully) sent yet. (Only applicable when peer layer == LAYER_WEBSOCKET.)
 struct rs_owref {
-    struct rs_ring_msg * ring_msg;
+    struct rs_consumer_msg * cmsg;
     uint32_t remaining_recipient_c;
     uint16_t head_size;
     uint16_t app_i;

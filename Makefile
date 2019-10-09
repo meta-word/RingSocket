@@ -10,14 +10,14 @@ BIN_DIR = /usr/bin
 INCLUDE_DIR = /usr/include
 WORK_DIR = /srv/ws
 
-RS_CACHELINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
-ifeq ($(RS_CACHELINE_SIZE), 0)
-	RS_CACHELINE_SIZE = 64
+RS_CACHE_LINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
+ifeq ($(RS_CACHE_LINE_SIZE), 0)
+	RS_CACHE_LINE_SIZE = 64
 endif
 
 CC = gcc
 CFLAGS = -Wall -Wextra -Wpedantic -Wshadow -std=c11 -isystem src \
-	-DRS_CACHELINE_SIZE=$(RS_CACHELINE_SIZE)
+	-DRS_CACHE_LINE_SIZE=$(RS_CACHE_LINE_SIZE)
 CFLAGS_OPTIM = -O3 -flto -fuse-linker-plugin
 LFLAGS_OPTIM = -flto -fuse-linker-plugin -fuse-ld=gold
 LFLAGS_LIB = -lcap -lcrypto -ldl -ljgrandson -lssl -pthread

@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include <ringsocket.h>
 #include <arpa/inet.h> // struct in_addr, struct in6_addr
+#include <stdint.h> // (u)int[8|16|32|64]_t, size_t, etc
 
 // A single struct rs_conf const pointer "conf" is shared between all worker and
 // app threads. This same pointer is returned by the app helper rs_get_conf().

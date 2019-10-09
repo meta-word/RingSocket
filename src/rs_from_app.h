@@ -5,7 +5,7 @@
 
 #include "rs_worker.h"
 
-rs_ret get_outbound_readers(
+rs_ret get_outbound_consumers_from_producers(
     struct rs_worker * worker
 );
 

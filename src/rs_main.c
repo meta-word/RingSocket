@@ -285,24 +285,24 @@ static rs_ret spawn_app_and_worker_threads(
     int (* * app_cbs)(void *)
 ) {
     // Each (app thread <-> worker thread) pair needs access to one allocated
-    // rs_thread_io_pairs struct.
+    // rs_ring_pair struct.
     //
     // However, the current (and at this point only) thread will soon become the
-    // last worker thread, which means allocating the rs_tread_io_pairs structs
+    // last worker thread, which means allocating the rs_ring_pair structs
     // directly here should be avoided because that might cause the array to
     // linger in one of this thread's cache lines, in which case any stores
     // between an app and a different worker thread would cause false sharing
     // with this thread.
     //
     // That scenario is prevented through a layer of indirection: the elements
-    // of the all_io_pairs array are not the io_pairs structs themselves, but
-    // pointers to said structs that will only change once: when the threads
-    // corresponding to their write ends allocate them.
-    struct rs_thread_io_pairs * all_io_pairs[conf->app_c];
-    memset(all_io_pairs, 0, sizeof(all_io_pairs));
+    // of the all_ring_pairs array are not the rs_ring_pair structs themselves,
+    // but pointers to said structs that will only change once: when the threads
+    // on their producer ends allocate them.
+    struct rs_ring_pair * all_ring_pairs[conf->app_c];
+    memset(all_ring_pairs, 0, sizeof(all_ring_pairs));
 
-    struct rs_thread_sleep_state * app_sleep_states = NULL;
-    struct rs_thread_sleep_state * worker_sleep_states = NULL;
+    struct rs_sleep_state * app_sleep_states = NULL;
+    struct rs_sleep_state * worker_sleep_states = NULL;
     // The current thread will become a worker thread, which means
     // app_sleep_states can be initialized here, because all worker threads need
     // to know all app sleep states anyway ("true sharing"); but
@@ -329,8 +329,8 @@ static rs_ret spawn_app_and_worker_threads(
     memset(app_args, 0, sizeof(app_args));
     for (size_t i = 0; i < conf->app_c; i++) {
         app_args[i].conf = conf;
-        app_args[i].app_io_pairs = all_io_pairs + i;
-        app_args[i].app_sleep_state = app_sleep_states + i;
+        app_args[i].ring_pairs = all_ring_pairs + i;
+        app_args[i].sleep_state = app_sleep_states + i;
         app_args[i].worker_sleep_states = &worker_sleep_states;
         app_args[i].worker_eventfds = worker_eventfds;
         app_args[i].app_i = i;
@@ -357,13 +357,13 @@ static rs_ret spawn_app_and_worker_threads(
     memset(worker_args, 0, sizeof(worker_args));
     for (size_t i = 0;; i++) {
         worker_args[i].conf = conf;
-        RS_CALLOC(worker_args[i].io_pairs, conf->app_c);
+        RS_CALLOC(worker_args[i].ring_pairs, conf->app_c);
         for (size_t j = 0; j < conf->app_c; j++) {
-            worker_args[i].io_pairs[j] = all_io_pairs[j] + i;
+            worker_args[i].ring_pairs[j] = all_ring_pairs[j] + i;
         }
         worker_args[i].app_sleep_states = app_sleep_states;
-        worker_args[i].worker_sleep_state = worker_sleep_states + i;
-        worker_args[i].worker_eventfd = worker_eventfds[i];
+        worker_args[i].sleep_state = worker_sleep_states + i;
+        worker_args[i].eventfd = worker_eventfds[i];
         worker_args[i].worker_i = i;
         if (i + 1 >= conf->worker_c) {
             // All apps and workers have been spawned, except for the last

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2019 William Budd
 
+#define RS_INCLUDE_QUEUE_FUNCTIONS // See ringsocket_queue.h
+
 #include "rs_event.h" // loop_over_events()
 #include "rs_from_app.h" // get_outbound_readers(), init_owrefs()
 #include "rs_hash.h" // init_hash_state()
@@ -12,8 +14,8 @@
 static rs_ret init_ring_update_queue(
     struct rs_worker * worker
 ) {
-    worker->ring_update_queue.size = worker->conf->update_queue_size;
-    RS_CALLOC(worker->ring_update_queue.queue, worker->ring_update_queue.size);
+    worker->ring_queue.size = worker->conf->update_queue_size;
+    RS_CALLOC(worker->ring_queue.queue, worker->ring_queue.size);
     return RS_OK;
 }
 
@@ -45,13 +47,13 @@ static rs_ret _work(
     // Thread ID used as prefix by RS_LOG -- see conf.c and ringsocket_util.h
     sprintf(_rs_thread_id_str, "Worker#%zu: ", worker->worker_i + 1);
 
-    RS_GUARD(init_inbound_rings(worker)); // rs_to_app.c
+    RS_GUARD(init_inbound_producers(worker)); // rs_to_app.c
     RS_GUARD(init_ring_update_queue(worker));
     RS_GUARD(init_peers_array(worker));
     RS_GUARD(init_rbuf(worker));
     RS_GUARD(init_hash_state(worker)); // rs_hash.c
     RS_GUARD(create_tls_contexts(worker)); // rs_tls.c
-    RS_GUARD(get_outbound_readers(worker)); // rs_from_app.c
+    RS_GUARD(get_outbound_consumers_from_producers(worker)); // rs_from_app.c
     RS_GUARD(init_owrefs(worker)); // rs_from_app.c
 
     return loop_over_events(worker); // rs_event.c
@@ -63,10 +65,10 @@ int work(
     // See rs_worker.h for the difference between rs_worker_args and rs_worker.
     struct rs_worker worker = {
         .conf = worker_args->conf,
-        .io_pairs = worker_args->io_pairs,
-        .sleep_state = worker_args->worker_sleep_state,
+        .ring_pairs = worker_args->ring_pairs,
+        .sleep_state = worker_args->sleep_state,
         .app_sleep_states = worker_args->app_sleep_states,
-        .eventfd = worker_args->worker_eventfd,
+        .eventfd = worker_args->eventfd,
         .worker_i = worker_args->worker_i
         // Instantiate the remaining members from _work().
     };
@@ -82,7 +84,7 @@ rs_ret enqueue_ring_update(
     size_t app_thread_i,
     bool is_write
 ) {
-    return rs_enqueue_ring_update(&worker->ring_update_queue, *worker->io_pairs,
+    return rs_enqueue_ring_update(&worker->ring_queue, *worker->ring_pairs,
         worker->app_sleep_states, NULL, new_ring_position, app_thread_i,
         is_write);
 }
@@ -90,6 +92,6 @@ rs_ret enqueue_ring_update(
 rs_ret flush_ring_updates(
     struct rs_worker * worker
 ) {
-    return rs_flush_ring_updates(&worker->ring_update_queue, *worker->io_pairs,
+    return rs_flush_ring_updates(&worker->ring_queue, *worker->ring_pairs,
         worker->app_sleep_states, NULL, worker->conf->app_c);
 }

@@ -3,14 +3,25 @@
 
 #pragma once
 
-#include <ringsocket.h>
+// Due to their dependency relationships, all RingSocket system headers other
+// than ringsocket_conf.h and ringsocket_variadic.h each include one other
+// RingSocket system header, forming a chain in the following order:
+//
+//       <ringsocket.h>: RingSocket helper function API
+// ----> <ringsocket_app.h>: Definition of RS_APP() and its descendent macros
+#include <ringsocket_queue.h> // Struct rs_ring_queue and queuing/waking funcs
+//       <ringsocket_ring.h>: Single producer single consumer ring buffer API
+//       <ringsocket_api.h>: Basic RingSocket API macros and typedefs
+//       <ringsocket_variadic.h>: Arity-based macro expansion helper macros
+//
+// Their contents are therefore easier to understand when read in reverse order.
 
 struct rs_app_args {
     struct rs_conf const * conf;
-    // Worker_c length io_pair array to be allocated by the called app
-    struct rs_thread_io_pairs * * app_io_pairs;
-    struct rs_thread_sleep_state * app_sleep_state; // This app's sleep state
-    struct rs_thread_sleep_state * * worker_sleep_states;
+    // Worker_c length ring_pair array to be allocated by the called app
+    struct rs_ring_pair * * ring_pairs;
+    struct rs_sleep_state * sleep_state; // This app's sleep state
+    struct rs_sleep_state * * worker_sleep_states;
     int const * worker_eventfds;
     size_t app_i;
     int log_max;
@@ -75,10 +86,10 @@ enum rs_websocket_opcode {
 struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
     void * app_data;
     struct rs_conf const * conf;
-    struct rs_thread_io_pairs * io_pairs;
-    struct rs_ring * outbound_rings;
-    struct rs_ring_update_queue * ring_update_queue;
-    struct rs_thread_sleep_state * worker_sleep_states;
+    struct rs_ring_pair * ring_pairs;
+    struct rs_ring_producer * outbound_producers;
+    struct rs_ring_queue * ring_queue;
+    struct rs_sleep_state * worker_sleep_states;
     int const * worker_eventfds;
     uint8_t * wbuf;
     size_t wbuf_size;
@@ -95,18 +106,22 @@ struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
 
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
-#define RS_LOG_VARS \
-int _rs_log_max = LOG_NOTICE; \
-thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
+#define RS_GUARD_CB(allowed_cb_mask) \
+do { \
+    if (!(rs->cb & allowed_cb_mask)) { \
+        RS_LOG(LOG_ERR, "%s must not be called from an RS_%s() " \
+            "callback function: shutting down...", __func__, \
+            (char *[]){"", /*0x01*/"INIT", /*0x02*/"OPEN", "", \
+                /*0x04*/"READ...", "", "", "", /*0x08*/"CLOSE", "", "", "", \
+                "", "", "", "", /*0x10*/"TIMER..."}[rs->cb]); \
+        RS_APP_FATAL; \
+    } \
+} while (0)
 
-#ifndef RS_EXCLUDE_APP_HELPER_HEADER // Defined by rs_conf.h and rs_worker.h
-#include <ringsocket_app_helper.h>
-#endif
+// #############################################################################
+// # RS_APP ####################################################################
 
-// ##########
-// # RS_APP #
-
-#define _RS_APP(init_macro, open_macro, read_macro, close_macro, \
+#define RS_APP(init_macro, open_macro, read_macro, close_macro, \
     timer_macro) \
 \
 rs_ret ringsocket_app( \
@@ -117,7 +132,7 @@ rs_ret ringsocket_app( \
         app_args->conf->apps[app_args->app_i].name); \
     \
     struct rs_app_cb_args rs = { \
-        .ring_update_queue = &(struct rs_ring_update_queue){0} \
+        .ring_queue = &(struct rs_ring_queue){0} \
     }; \
     RS_GUARD_APP(rs_init_app_cb_args(app_args, &rs)); \
     \
@@ -126,25 +141,25 @@ rs_ret ringsocket_app( \
     /* because RS_INIT[_NONE] isn't defined, whereas _RS_INIT[_NONE] is). */ \
     _##init_macro; /* Should expand _RS_INIT[_NONE] */ \
     \
-    struct rs_thread_sleep_state * app_sleep_state = \
-        app_args->app_sleep_state; \
-    RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, true); \
-    uint8_t const * * inbound_readers = NULL; \
-    RS_GUARD_APP( \
-        rs_get_readers_upon_inbound_rings_init(&rs, &inbound_readers)); \
-    RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false); \
+    struct rs_sleep_state * sleep_state = app_args->sleep_state; \
+    RS_ATOMIC_STORE_RELAXED(&sleep_state->is_asleep, true); \
+    struct rs_ring_consumer inbound_consumers[rs.conf->worker_c]; \
+    RS_GUARD_APP(rs_get_inbound_consumers_from_producers(&rs, \
+        inbound_consumers)); \
+    RS_ATOMIC_STORE_RELAXED(&sleep_state->is_asleep, false); \
     \
     _INIT_##timer_macro; /* Should expand _INIT_RS_TIMER_[NONE|SLEEP|WAKE] */ \
     \
-    RS_LOG(LOG_DEBUG, "Entering app main loop..."); \
-    \
+    RS_LOG(LOG_DEBUG, "Entering main loop..."); \
     size_t idle_c = 0; \
     for (;; rs.inbound_worker_i++, rs.inbound_worker_i %= rs.conf->worker_c) { \
-        struct rs_thread_pair * inbound_pair = \
-            &rs.io_pairs[rs.inbound_worker_i].inbound; \
-        uint8_t const * reader = inbound_readers[rs.inbound_worker_i]; \
-        struct rs_ring_msg *ring_msg = rs_get_ring_msg(inbound_pair, reader); \
-        if (!ring_msg) { \
+        struct rs_ring_atomic * inbound_ring = \
+            &rs.ring_pairs[rs.inbound_worker_i].inbound_ring; \
+        struct rs_ring_consumer * cons = \
+            inbound_consumers + rs.inbound_worker_i; \
+        struct rs_consumer_msg * cmsg = \
+            rs_consume_ring_msg(inbound_ring, cons); \
+        if (!cmsg) { \
             if (++idle_c == 2 * RS_MAX(4, rs.conf->worker_c)) { \
                 /* Announce sleep prematurely in order to err on the side */ \
                 /* of caution against deadlocking: in the likely event that */ \
@@ -156,7 +171,7 @@ rs_ret ringsocket_app( \
                 /* of workers potentially wasting a few clock cycles */ \
                 /* calling FUTEX_WAKE on a still/already awake app during */ \
                 /* this short window of time. */ \
-                RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, true); \
+                RS_ATOMIC_STORE_RELAXED(&sleep_state->is_asleep, true); \
                 \
                 /* The 1st FUTEX_WAIT should timeout immediately to obtain */ \
                 /* an opportunity to flush ring updates safely. I.e., the */ \
@@ -166,7 +181,7 @@ rs_ret ringsocket_app( \
                 /* syscall acting as a memory fence. (And the purpose of */ \
                 /* said flushing is to not have unshared pending IO left */ \
                 /* in the event that this thread does actually sleep soon.) */ \
-                switch (rs_wait_for_worker(app_sleep_state, 0)) { \
+                switch (rs_wait_for_worker(sleep_state, 0)) { \
                 case RS_OK: /* immediately awoken by a worker thread */ \
                     idle_c = 0; \
                     break; \
@@ -175,8 +190,8 @@ rs_ret ringsocket_app( \
                 default: \
                     RS_APP_FATAL; \
                 } \
-                RS_GUARD_APP(rs_flush_ring_updates(rs.ring_update_queue, \
-                    rs.io_pairs, rs.worker_sleep_states, rs.worker_eventfds, \
+                RS_GUARD_APP(rs_flush_ring_updates(rs.ring_queue, \
+                    rs.ring_pairs, rs.worker_sleep_states, rs.worker_eventfds, \
                     rs.conf->worker_c)); \
             } else if (idle_c == 3 * RS_MAX(4, rs.conf->worker_c)) { \
                 /* Actually go to sleep this time; the procedural details */ \
@@ -192,17 +207,17 @@ rs_ret ringsocket_app( \
         } \
         if (idle_c) { \
             /* Went to bed, but couln't fall asleep? Then get back to work! */ \
-            RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false); \
+            RS_ATOMIC_STORE_RELAXED(&sleep_state->is_asleep, false); \
             idle_c = 0; \
         } \
         do { \
-            reader = ring_msg->msg + ring_msg->size; \
-            struct rs_inbound_msg_header *header = \
-                ((struct rs_inbound_msg_header *) ring_msg->msg); \
+            cons->r = cmsg->msg + cmsg->size; \
+            struct rs_inbound_msg_header * header = \
+                ((struct rs_inbound_msg_header *) cmsg->msg); \
             rs.inbound_peer_i = header->peer_i; \
             rs.inbound_socket_fd = header->socket_fd; \
             rs.inbound_endpoint_id = header->endpoint_id; \
-            uint8_t const * payload = ring_msg->msg + \
+            uint8_t const * payload = cmsg->msg + \
                 sizeof(struct rs_inbound_msg_header); \
             switch (header->kind) { \
             case RS_INBOUND_OPEN: \
@@ -216,24 +231,18 @@ rs_ret ringsocket_app( \
             case RS_INBOUND_CLOSE: default: \
                 _##close_macro; /* Should expand _RS_CLOSE[_NONE] */ \
             } \
-        } while ((ring_msg = rs_get_ring_msg(inbound_pair, reader))); \
-        inbound_readers[rs.inbound_worker_i] = reader; \
+        } while ((cmsg = rs_consume_ring_msg(inbound_ring, cons))); \
         \
         rs.cb = RS_CB_TIMER; \
         _CHECK_##timer_macro; /* _CHECK_RS_TIMER_[NONE|SLEEP|WAKE] */ \
     } \
 } \
 \
-/* Unlike C++ and older versions of C, C99 and C11 requires instantiating */ \
-/* inline functions in at least one compilation unit in order to emit */ \
-/* their generation, hence the need to expand these the RS_APP() macro. */ \
-RS_INLINE_PROTOTYPES_RING; \
-RS_INLINE_PROTOTYPES_APP; \
 /* Required by RS_LOG (see above) */ \
 RS_LOG_VARS
 
-// ###########
-// # RS_INIT #
+// #############################################################################
+// # RS_INIT() #################################################################
 
 // Call init_cb...
 #define _RS_INIT(...) \
@@ -261,8 +270,8 @@ do { \
 // ...or don't call init_cb at all
 #define _RS_INIT_NONE
 
-// ############
-// # RS_TIMER #
+// #############################################################################
+// # RS_TIMER_...() ############################################################
 
 // _INIT_RS_TIMER_[NONE|SLEEP|WAKE]
 
@@ -280,7 +289,8 @@ do { \
 
 // Check if the timer interval has elapsed; and if so, call timer_cb...
 #define _CHECK_RS_TIMER_SLEEP(t_cb, t_i) _CHECK_RS_TIMER_WAKE(t_cb, t_i)
-#define _CHECK_RS_TIMER_WAKE(timer_cb, _) do { \
+#define _CHECK_RS_TIMER_WAKE(timer_cb, _) \
+do { \
     uint64_t new_timestamp_microsec = 0; \
     RS_GUARD_APP(rs_get_cur_time_microsec(&new_timestamp_microsec)); \
     if (new_timestamp_microsec >= timestamp_microsec + interval_microsec) { \
@@ -302,12 +312,12 @@ do { \
 
 #define _WAIT_RS_TIMER_NONE _RS_FUTEX_WAIT_WITHOUT_TIMEOUT
 
-#define RS_TIMER_WAIT(timer_cb, futex_macro) do { \
-    /* First try to honor the remainder of the current timer_cb interval */ \
+#define RS_TIMER_WAIT(timer_cb, futex_macro) \
+do { /* First try to honor the remainder of the current timer_cb interval */ \
     uint64_t new_timestamp_microsec = 0; \
     RS_GUARD_APP(rs_get_cur_time_microsec(&new_timestamp_microsec)); \
     if (new_timestamp_microsec < timestamp_microsec + interval_microsec) { \
-        switch (rs_wait_for_worker(app_sleep_state, timestamp_microsec + \
+        switch (rs_wait_for_worker(sleep_state, timestamp_microsec + \
             interval_microsec - new_timestamp_microsec)) { \
         case RS_OK: /* a worker thread already woke this thread up */ \
             break; \
@@ -329,11 +339,12 @@ do { \
 } while (0)
 
 #define _RS_FUTEX_WAIT_WITHOUT_TIMEOUT \
-    RS_GUARD_APP(rs_wait_for_worker(app_sleep_state, RS_TIME_INF))
+    RS_GUARD_APP(rs_wait_for_worker(sleep_state, RS_TIME_INF))
 
-#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb) do { \
+#define _RS_FUTEX_WAIT_WITH_TIMEOUT(timer_cb) \
+do { \
     for (;;) { \
-        switch (rs_wait_for_worker(app_sleep_state, interval_microsec)) { \
+        switch (rs_wait_for_worker(sleep_state, interval_microsec)) { \
         case RS_OK: /* a worker thread woke this thread up */ \
             break; \
         case RS_AGAIN: /* futex timed out: assume timing was accurate-ish */ \
@@ -351,20 +362,22 @@ do { \
     } \
 } while (0)
 
-// ###########
-// # RS_OPEN #
+// #############################################################################
+// # RS_OPEN() #################################################################
 
-#define _RS_OPEN(open_cb) do { \
+#define _RS_OPEN(open_cb) \
+do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs))); \
 } while (0)
 
 #define _RS_OPEN_NONE
 
-// ############
-// # RS_CLOSE #
+// #############################################################################
+// # RS_CLOSE() ################################################################
 
-#define _RS_CLOSE(close_cb) do { \
+#define _RS_CLOSE(close_cb) \
+do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     call_close_cb: \
     rs.cb = RS_CB_CLOSE; \
@@ -373,10 +386,11 @@ do { \
 
 #define _RS_CLOSE_NONE
 
-// ###########
-// # RS_READ #
+// #############################################################################
+// # RS_READ_...() #############################################################
 
-#define _RS_READ_SWITCH(...) do { \
+#define _RS_READ_SWITCH(...) \
+do { \
     RS_READ_CHECK(1); \
     switch (*payload++) { \
     RS_PREFIX_EACH(_, __VA_ARGS__); \
@@ -386,7 +400,8 @@ do { \
 } while (0)
 
 // todo: implement and test nested READ_SWITCH:
-/*#define _RS_READ_SWITCH2(...) do { \
+/*#define _RS_READ_SWITCH2(...) \
+ * do { \
     RS_READ_CHECK(1); \
     switch (*payload++) { \
     RS_PREFIX_EACH(_, __VA_ARGS__); \
@@ -409,14 +424,16 @@ do { \
         } \
         break
 
-#define _RS_READ_BIN(...) do { \
+#define _RS_READ_BIN(...) \
+do { \
     if (header->is_utf8) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_DATA_TYPE); \
     } \
     RS_READ_PROCEED(__VA_ARGS__); \
 } while (0)
 
-#define _RS_READ_UTF8(...) do { \
+#define _RS_READ_UTF8(...) \
+do { \
     if (!header->is_utf8) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_DATA_TYPE); \
     } \
@@ -436,11 +453,12 @@ do { \
     )
 
 #define RS_ENQUEUE_APP_READ_UPDATE \
-    RS_GUARD_APP(rs_enqueue_ring_update(rs.ring_update_queue, rs.io_pairs, \
-        rs.worker_sleep_states, rs.worker_eventfds, reader, \
+    RS_GUARD_APP(rs_enqueue_ring_update(rs.ring_queue, rs.ring_pairs, \
+        rs.worker_sleep_states, rs.worker_eventfds, (uint8_t *) cons->r, \
         rs.inbound_worker_i, false)) \
 
-#define RS_READ_ABORT(ws_close_code) do { \
+#define RS_READ_ABORT(ws_close_code) \
+do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_close_peer(&rs, (ws_close_code))); \
     goto call_close_cb; \
@@ -606,14 +624,16 @@ do { \
         __VA_ARGS__ \
     )
 
-#define RS_READ_CHECK(size) do { \
-    if (payload + (size) > reader) { \
+#define RS_READ_CHECK(size) \
+do { \
+    if (payload + (size) > cons->r) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_SIZE); \
     } \
 } while (0)
 
-#define RS_READ_CHECK_EXACT do { \
-    if (payload != reader) { \
+#define RS_READ_CHECK_EXACT \
+do { \
+    if (payload != cons->r) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_SIZE); \
     } \
 } while (0)
@@ -623,7 +643,7 @@ do { \
 // "do while (0)"
 
 #define RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c) \
-    size_t elem_c = reader - payload; \
+    size_t elem_c = cons->r - payload; \
     if (elem_c % sizeof(type)) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_SIZE); \
     } \
