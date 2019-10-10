@@ -3,8 +3,25 @@
 
 #pragma once
 
+#include <ringsocket_api.h>
+// <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
+//   |
+//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//                        |
+//   [YOU ARE HERE]       |
+// <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
+//   |
+//   \---> <ringsocket_ring.h> # Single producer single consumer ring buffer API
+//                         |
+// <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
+//   |
+//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//                          |
+// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   |
+//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
+
 #include <arpa/inet.h> // struct in_addr, struct in6_addr
-#include <stdint.h> // (u)int[8|16|32|64]_t, size_t, etc
 
 // A single struct rs_conf const pointer "conf" is shared between all worker and
 // app threads. This same pointer is returned by the app helper rs_get_conf().

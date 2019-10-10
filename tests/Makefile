@@ -10,9 +10,6 @@ APP_SRC = $(APP_NAME).c
 APP_SONAME = $(APP_NAME).so
 
 RS_CACHE_LINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
-ifeq ($(RS_CACHE_LINE_SIZE), 0)
-	RS_CACHE_LINE_SIZE = 64
-endif
 
 CC = gcc
 FLAGS = -Wall -Wextra -Wpedantic -std=c11 -O3 -fpic -shared \

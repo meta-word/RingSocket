@@ -5,6 +5,10 @@
 
 #include <assert.h> // C11: static_assert()
 #include <openssl/ssl.h>
+
+// Including <ringsocket.h> here would include app helper functions contained in
+// <ringsocket.h> and <ringsocket_helper.h> that are of no use to worker
+// threads. Instead, commence the RingSocket "include chain" "2 steps up" at:
 #include <ringsocket_app.h>
 
 // It may seem like the rs_worker_args and rs_worker structs could be replaced

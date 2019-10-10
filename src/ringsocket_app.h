@@ -3,18 +3,26 @@
 
 #pragma once
 
-// Due to their dependency relationships, all RingSocket system headers other
-// than ringsocket_conf.h and ringsocket_variadic.h each include one other
-// RingSocket system header, forming a chain in the following order:
-//
-//       <ringsocket.h>: RingSocket helper function API
-// ----> <ringsocket_app.h>: Definition of RS_APP() and its descendent macros
-#include <ringsocket_queue.h> // Struct rs_ring_queue and queuing/waking funcs
-//       <ringsocket_ring.h>: Single producer single consumer ring buffer API
-//       <ringsocket_api.h>: Basic RingSocket API macros and typedefs
-//       <ringsocket_variadic.h>: Arity-based macro expansion helper macros
-//
-// Their contents are therefore easier to understand when read in reverse order.
+#include <ringsocket_queue.h>
+// <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
+//   |
+//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//                        |
+// <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
+//   |
+//   \---> <ringsocket_ring.h> # Single producer single consumer ring buffer API
+//                         |
+// <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
+//   |
+//   |         [YOU ARE HERE]
+//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//                          |
+// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   |
+//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
+
+// #############################################################################
+// # Initial Arguments app threads receive when spawned ########################
 
 struct rs_app_args {
     struct rs_conf const * conf;
@@ -27,12 +35,21 @@ struct rs_app_args {
     int log_max;
 };
 
+// #############################################################################
+// # Inbound (i.e., worker --> app) ring buffer message format #################
+
+// Every message on an inbound ring buffer consists of an rs_consumer_msg struct
+// instance (see ringsocket_ring.h), of which the cons->msg member consists of
+// the following header, which if RS_INBOUND_READ is then followed by a complete
+// WebSocket message payload. (Therefore: cons->size ==
+// sizeof(struct rs_inbound_msg_header) + any payload size).
+
 struct rs_inbound_msg_header {
     uint32_t peer_i;
     uint32_t socket_fd;
     uint16_t endpoint_id;
     uint8_t is_utf8;
-    uint8_t kind; // enum rs_inbound_kind
+    uint8_t kind; // A single byte version of enum rs_inbound_kind below
 };
 
 enum rs_inbound_kind {
@@ -41,23 +58,48 @@ enum rs_inbound_kind {
     RS_INBOUND_CLOSE = 2
 };
 
-enum rs_outbound_kind {
-    RS_OUTBOUND_SINGLE = 0,
-    RS_OUTBOUND_ARRAY = 1,
-    RS_OUTBOUND_EVERY = 2,
-    RS_OUTBOUND_EVERY_EXCEPT_SINGLE = 3,
-    RS_OUTBOUND_EVERY_EXCEPT_ARRAY = 4
+// #############################################################################
+// # Outbound (i.e., app --> worker) ring buffer message format ################
+
+// Every message on an outbound ring buffer consists of an rs_consumer_msg
+// struct instance (see ringsocket_ring.h), of which the cons->msg member starts
+// with the following enum, packed into a single uint8_t:
+
+enum rs_outbound_kind { // The outbound message format depends on the enum value
+    RS_OUTBOUND_SINGLE = 0, // uint8_t kind, uint32_t peer_i
+    RS_OUTBOUND_ARRAY = 1, // uint8_t kind, uint32_t peer_c, uint32_t peer_i[]
+    RS_OUTBOUND_EVERY = 2, // uint8_t kind
+    RS_OUTBOUND_EVERY_EXCEPT_SINGLE = 3, // Same format as RS_OUTBOUND_SINGLE
+    RS_OUTBOUND_EVERY_EXCEPT_ARRAY = 4 // Same format as RS_OUTBOUND_ARRAY
 };
 
-enum rs_callback {
-    RS_CB_INIT  = 0x01,
-    RS_CB_OPEN  = 0x02,
-    RS_CB_READ  = 0x04,
-    RS_CB_CLOSE = 0x08,
-    RS_CB_TIMER = 0x10
+// Following the enum byte and any uint32_t peer_c/peer_i sequence; every
+// outbound message ends with a full WebSocket message that will be sent as-is
+// to every peer_i it's addressed to (see rs_send() in ringsocket_helper.h).
+// This allows worker threads to treat the outbound ring buffers as read-only
+// write buffers, because they never have to alter the contents of the messages
+// they relay.
+
+// For any outbound ring buffer WebSocket message arriving from an app, worker
+// threads determine whether to keep or shut down the peer(s) it's addressed to
+// simply by checking whether its WebSocket opcode is a RS_WS_OPC_FIN_CLOSE.
+enum rs_websocket_opcode {
+    RS_WS_OPC_NFIN_CONT = 0x00, // Only used by worker threads: rs_websocket.c
+    RS_WS_OPC_NFIN_TEXT = 0x01, // Only used by worker threads: rs_websocket.c
+    RS_WS_OPC_NFIN_BIN  = 0x02, // Only used by worker threads: rs_websocket.c
+    RS_WS_OPC_FIN_CONT  = 0x80, // Only used by worker threads: rs_websocket.c
+    RS_WS_OPC_FIN_TEXT  = 0x81, // Also applicable to outbound msgs: rs_send()
+    RS_WS_OPC_FIN_BIN   = 0x82, // Also applicable to outbound msgs: rs_send()
+    RS_WS_OPC_FIN_CLOSE = 0x88, // Also applicable to outbound: rs_close_peer()
+    RS_WS_OPC_FIN_PING  = 0x89, // Only used by worker threads: rs_websocket.c
+    RS_WS_OPC_FIN_PONG  = 0x8A  // Only used by worker threads: rs_websocket.c
 };
 
-// All peer closures originating in an rs app use the 4xxx range exclusively:
+// When an incoming message fails to pass an internal check performed by the
+// RS_APP() macro below (as stipulated by the arguments passed to said macro),
+// it will place a WebSocket close message with one of the following WebSocket
+// status codes on an outbound ring without calling any app callback function:
+//
 // "Status codes in the range 4000-4999 are reserved for private use and thus
 // can't be registered.  Such codes can be used by prior agreements between
 // WebSocket applications.  The interpretation of these codes is undefined by
@@ -70,20 +112,21 @@ enum rs_app_ws_close {
     // RS_READ_SWITCH received a 1st byte not matching any of its case labels
     RS_APP_WS_CLOSE_UNKNOWN_CASE = 4902
 };
+// In contrast, RingSocket prescribes that app callback functions may only
+// trigger peer closures with a status code in the range 4000-4899.
 
-enum rs_websocket_opcode {
-    RS_WS_OPC_NFIN_CONT = 0x00, // inbound only (rs_websocket.c)
-    RS_WS_OPC_NFIN_TEXT = 0x01, // inbound only (rs_websocket.c)
-    RS_WS_OPC_NFIN_BIN  = 0x02, // inbound only (rs_websocket.c)
-    RS_WS_OPC_FIN_CONT  = 0x80, // inbound only (rs_websocket.c)
-    RS_WS_OPC_FIN_TEXT  = 0x81, // also by rs_send() for outbound msgs
-    RS_WS_OPC_FIN_BIN   = 0x82, // also by rs_send() for outbound msgs
-    RS_WS_OPC_FIN_CLOSE = 0x88, // also by rs_close_peer() for outbound msgs
-    RS_WS_OPC_FIN_PING  = 0x89, // inbound only (rs_websocket.c)
-    RS_WS_OPC_FIN_PONG  = 0x8A  // inbound only (rs_websocket.c)
+// #############################################################################
+// # rs_t: internal RingSocket app callback arguments ##########################
+
+enum rs_callback {
+    RS_CB_INIT  = 0x01,
+    RS_CB_OPEN  = 0x02,
+    RS_CB_READ  = 0x04,
+    RS_CB_CLOSE = 0x08,
+    RS_CB_TIMER = 0x10
 };
 
-struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
+struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket_api.h
     void * app_data;
     struct rs_conf const * conf;
     struct rs_ring_pair * ring_pairs;
@@ -101,7 +144,10 @@ struct rs_app_cb_args { // typedef-ed as rs_t by ringsocket.h
     uint16_t inbound_worker_i;
 };
 
-// todo: This should probably be replaced with something less dumb...
+// #############################################################################
+// # Fatal app error handling ##################################################
+
+// todo: This should probably be replaced with something less dumb.
 #define RS_APP_FATAL exit(EXIT_FAILURE)
 
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
@@ -119,10 +165,9 @@ do { \
 } while (0)
 
 // #############################################################################
-// # RS_APP ####################################################################
+// # RS_APP() ##################################################################
 
-#define RS_APP(init_macro, open_macro, read_macro, close_macro, \
-    timer_macro) \
+#define RS_APP(init_macro, open_macro, read_macro, close_macro, timer_macro) \
 \
 rs_ret ringsocket_app( \
     struct rs_app_args * app_args \
@@ -238,8 +283,7 @@ rs_ret ringsocket_app( \
     } \
 } \
 \
-/* Required by RS_LOG (see above) */ \
-RS_LOG_VARS
+RS_LOG_VARS // See the RS_LOG() section in ringsocket_api.h for explanation.
 
 // #############################################################################
 // # RS_INIT() #################################################################
@@ -400,15 +444,15 @@ do { \
 } while (0)
 
 // todo: implement and test nested READ_SWITCH:
-/*#define _RS_READ_SWITCH2(...) \
- * do { \
-    RS_READ_CHECK(1); \
-    switch (*payload++) { \
-    RS_PREFIX_EACH(_, __VA_ARGS__); \
-    default: \
-        TR_READ_ABORT(RS_APP_WS_CLOSE_UNKNOWN_CASE); \
-    } \
-} while (0)*/
+//#define _RS_READ_SWITCH2(...) \
+//do { \
+//    RS_READ_CHECK(1); \
+//    switch (*payload++) { \
+//    RS_PREFIX_EACH(_, __VA_ARGS__); \
+//    default: \
+//        RS_READ_ABORT(RS_APP_WS_CLOSE_UNKNOWN_CASE); \
+//    } \
+//} while (0)
 
 #define _RS_CASE_BIN(cb_i, ...) \
     case cb_i: \
@@ -464,102 +508,131 @@ do { \
     goto call_close_cb; \
 } while (0)
 
-#define RS_A00(cb) do { \
+#define RS_A00(cb) \
+do { \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs))); \
 } while (0)
-#define RS_A01(cb, a01) do { \
+
+#define RS_A01(cb, a01) \
+do { \
     _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v1 __##a01))); \
 } while (0)
-#define RS_A02(cb, a02, a01) do { \
+
+#define RS_A02(cb, a02, a01) \
+do { \
     _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v2, v1 __##a01))); \
 } while (0)
-#define RS_A03(cb, a03, a02, a01) do { \
+
+#define RS_A03(cb, a03, a02, a01) \
+do { \
     _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A04(cb, a04, a03, a02, a01) do { \
+
+#define RS_A04(cb, a04, a03, a02, a01) \
+do { \
     _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v4, v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A05(cb, a05, a04, a03, a02, a01) do { \
+
+#define RS_A05(cb, a05, a04, a03, a02, a01) \
+do { \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A06(cb, a06, a05, a04, a03, a02, a01) do { \
+
+#define RS_A06(cb, a06, a05, a04, a03, a02, a01) \
+do { \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
-#define RS_A07(cb, a07, a06, a05, a04, a03, a02, a01) do { \
+
+#define RS_A07(cb, a07, a06, a05, a04, a03, a02, a01) \
+do { \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v7, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
-#define RS_A08(cb, a08, a07, a06, a05, a04, a03, a02, a01) do { \
+
+#define RS_A08(cb, a08, a07, a06, a05, a04, a03, a02, a01) \
+do { \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v8, v7, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
-#define RS_A09(cb, a09, a08, a07, a06, a05, a04, a03, a02, a01) do { \
+
+#define RS_A09(cb, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
+do { \
     _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; \
     _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v9, v8, v7, v6, v5, v4, v3, v2, \
         v1 __##a01))); \
 } while (0)
-#define RS_A10(cb, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) do { \
+
+#define RS_A10(cb, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
+do { \
     _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; \
     _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v10, v9, v8, v7, v6, v5, v4, \
         v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A11(cb, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, \
-    a01) do { \
+
+#define RS_A11(cb, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
+do { \
     _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; \
     _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v11, v10, v9, v8, v7, v6, v5, \
         v4, v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A12(cb, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, \
-    a01) do { \
+
+#define RS_A12(cb, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
+do { \
     _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v12, v11, v10, v9, v8, v7, v6, \
         v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A13(cb, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, \
-    a02, a01) do { \
+
+#define RS_A13(cb, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, \
+    a01) \
+do { \
     _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v13, v12, v11, v10, v9, v8, v7, \
         v6, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
-#define RS_A14(cb, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, \
-    a03, a02, a01) do { \
+
+#define RS_A14(cb, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, \
+    a02, a01) \
+do { \
     _14##a14, _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v14, v13, v12, v11, v10, v9, \
         v8, v7, v6, v5, v4, v3 v2, v1 __##a01))); \
 } while (0)
-#define RS_A15(cb, a15, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, \
-    a04, a03, a02, a01) do { \
+
+#define RS_A15(cb, a15, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, \
+    a03, a02, a01) \
+do { \
     _15##a15, _14##a14, _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \

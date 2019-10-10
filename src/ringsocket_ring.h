@@ -3,20 +3,24 @@
 
 #pragma once
 
-// Due to their dependency relationships, all RingSocket system headers other
-// than ringsocket_conf.h and ringsocket_variadic.h each include one other
-// RingSocket system header, forming a chain in the following order:
-//
-//       <ringsocket.h>: RingSocket helper function API
-//       <ringsocket_app.h>: Definition of RS_APP() and its descendent macros
-//       <ringsocket_queue.h>: Struct rs_ring_queue and queuing/waking functions
-// ----> <ringsocket_ring.h>: Single producer single consumer ring buffer API
-#include <ringsocket_api.h> // Basic RingSocket API macros and typedefs
-//       <ringsocket_variadic.h>: Arity-based macro expansion helper macros
-//
-// Their contents are therefore easier to understand when read in reverse order.
+#include <ringsocket_conf.h>
+// <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
+//   |
+//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//                        |
+// <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
+//   |
+//   |       [YOU ARE HERE]
+//   \---> <ringsocket_ring.h> # Single producer single consumer ring buffer API
+//                         |
+// <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
+//   |
+//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//                          |
+// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   |
+//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
 
-#include <ringsocket_conf.h> // struct rs_conf
 #include <stdbool.h> // bool
 
 // RingSocket's atomic interface to its single producer single consumer ring
@@ -117,7 +121,7 @@ struct rs_consumer_msg {
 #define RS_RING_ROUTE_SIZE (RS_RING_HEAD_SIZE + sizeof(uint8_t *))
 
 #ifdef RS_INCLUDE_PRODUCE_RING_MSG
-inline bool rs_would_clobber(
+static bool rs_would_clobber(
     uint8_t const * unwritable,
     uint8_t const * w,
     uint32_t msg_size
@@ -129,10 +133,10 @@ inline bool rs_would_clobber(
 // bytes to prod->w once/if RS_OK is returned. This will update the members of
 // the "prod" struct where necessary in order to make said guarantee (including
 // prod->w itself).
-inline rs_ret rs_produce_ring_msg(
-    struct rs_conf const * conf,
+static rs_ret rs_produce_ring_msg(
     struct rs_ring_atomic const * atomic,
     struct rs_ring_producer * prod,
+    double alloc_multiplier, // If allocated, how big should a new ring buf be?
     uint32_t msg_size
 ) {
     uint8_t const * r = NULL;
@@ -164,7 +168,7 @@ inline rs_ret rs_produce_ring_msg(
                 // new buffer.
                 prod->prev_ring = prod->ring;
                 prod->ring = NULL;
-                prod->ring_size *= conf->realloc_multiplier;
+                prod->ring_size *= alloc_multiplier;
                 // Use RS_CACHE_ALIGNED_CALLOC() to eliminate possibility of
                 // false sharing with preceding or trailing heap bytes.
                 RS_CACHE_ALIGNED_CALLOC(prod->ring, prod->ring_size);
@@ -199,10 +203,10 @@ inline rs_ret rs_produce_ring_msg(
 }
 #endif
 
-#ifdef RS_INCLUDE_CONSUME_RING_MSG
 // Obtain a consumer_msg pointer from a ring consumer interface, or return NULL
 // if no new ring buffer message is avalailable yet.
-struct rs_consumer_msg * rs_consume_ring_msg(
+#ifdef RS_INCLUDE_CONSUME_RING_MSG
+static struct rs_consumer_msg * rs_consume_ring_msg(
     struct rs_ring_atomic const * atomic,
     struct rs_ring_consumer const * cons
 ) {

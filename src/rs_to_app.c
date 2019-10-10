@@ -41,9 +41,8 @@ static rs_ret send_msg_to_app(
         .is_utf8 = peer->ws.rmsg_is_utf8,
         .kind = kind
     };
-    RS_GUARD(rs_produce_ring_msg(worker->conf,
-        &worker->ring_pairs[peer->app_i]->inbound_ring, prod,
-        sizeof(header) + msg_size));
+    RS_GUARD(rs_produce_ring_msg(&worker->ring_pairs[peer->app_i]->inbound_ring,
+        prod, worker->conf->realloc_multiplier, sizeof(header) + msg_size));
     memcpy(prod->w, &header, sizeof(header));
     prod->w += sizeof(header);
     if (msg_size) {

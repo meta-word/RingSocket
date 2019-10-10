@@ -3,6 +3,23 @@
 
 #pragma once
 
+//     [YOU ARE HERE]
+// <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
+//   |
+//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//                        |
+// <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
+//   |
+//   \---> <ringsocket_ring.h> # Single producer single consumer ring buffer API
+//                         |
+// <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
+//   |
+//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//                          |
+// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   |
+//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
+
 // This header file contains helper macros that enable macros to expand into
 // different child macros depending on the number of __VA_ARGS__ they are called
 // with.

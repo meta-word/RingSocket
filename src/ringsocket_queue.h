@@ -3,18 +3,23 @@
 
 #pragma once
 
-// Due to their dependency relationships, all RingSocket system headers other
-// than ringsocket_conf.h and ringsocket_variadic.h each include one other
-// RingSocket system header, forming a chain in the following order:
-//
-//       <ringsocket.h>: RingSocket helper function API
-//       <ringsocket_app.h>: Definition of RS_APP() and its descendent macros
-// ----> <ringsocket_queue.h>: Struct rs_ring_queue and queuing/waking functions
-#include <ringsocket_ring.h> // Single producer single consumer ring buffer API
-//       <ringsocket_api.h>: Basic RingSocket API macros and typedefs
-//       <ringsocket_variadic.h>: Arity-based macro expansion helper macros
-//
-// Their contents are therefore easier to understand when read in reverse order.
+#include <ringsocket_ring.h>
+// <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
+//   |
+//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//                        |
+// <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
+//   |
+//   \---> <ringsocket_ring.h> # Single producer single consumer ring buffer API
+//                         |
+//    [YOU ARE HERE]       |
+// <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
+//   |
+//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//                          |
+// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   |
+//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
 
 #define _GNU_SOURCE // syscall()
 #include <linux/futex.h> // FUTEX_WAKE_PRIVATE
@@ -88,7 +93,7 @@ struct rs_ring_queue {
 
 #ifdef RS_INCLUDE_QUEUE_FUNCTIONS
 
-inline rs_ret rs_wake_up_app(
+static rs_ret rs_wake_up_app(
     struct rs_sleep_state * app_sleep_state
 ) {
     bool app_is_asleep = false;
@@ -106,7 +111,7 @@ inline rs_ret rs_wake_up_app(
     return RS_OK;
 }
 
-inline rs_ret rs_wake_up_worker(
+static rs_ret rs_wake_up_worker(
     struct rs_sleep_state * worker_sleep_state,
     int worker_eventfd
 ) {
@@ -124,7 +129,7 @@ inline rs_ret rs_wake_up_worker(
 
 #define RS_TIME_INF UINT64_MAX
 
-inline rs_ret rs_wait_for_worker(
+static rs_ret rs_wait_for_worker(
     struct rs_sleep_state * app_sleep_state,
     uint64_t timeout_microsec
 ) {
@@ -152,7 +157,7 @@ inline rs_ret rs_wait_for_worker(
     return RS_FATAL;
 }
 
-inline rs_ret rs_enqueue_ring_update(
+static rs_ret rs_enqueue_ring_update(
     struct rs_ring_queue * ring_queue,
     struct rs_ring_pair * ring_pairs,
     struct rs_sleep_state * sleep_states,
@@ -201,7 +206,7 @@ inline rs_ret rs_enqueue_ring_update(
     return RS_OK;
 }
 
-inline rs_ret rs_flush_ring_updates(
+static rs_ret rs_flush_ring_updates(
     struct rs_ring_queue * ring_queue,
     struct rs_ring_pair * ring_pairs,
     struct rs_sleep_state * sleep_states,

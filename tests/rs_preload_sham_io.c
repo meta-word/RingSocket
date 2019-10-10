@@ -40,9 +40,7 @@
 
 #define RS_MAPPED_PEER_NONE UINT32_MAX // Returned by get_mapped_peer_i() below
 
-// RS_LOG() requires these two variables to be defined at the file level.
-// (which RS_APP() takes care of internally when writing an app).
-RS_LOG_VARS;
+RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.
 
 // A struct holding references to all wrapped original library functions.
 thread_local static struct {

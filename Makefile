@@ -11,9 +11,6 @@ INCLUDE_DIR = /usr/include
 WORK_DIR = /srv/ws
 
 RS_CACHE_LINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
-ifeq ($(RS_CACHE_LINE_SIZE), 0)
-	RS_CACHE_LINE_SIZE = 64
-endif
 
 CC = gcc
 CFLAGS = -Wall -Wextra -Wpedantic -Wshadow -std=c11 -isystem src \

@@ -230,7 +230,7 @@ rs_test_ret open_cb(
     return RS_TEST_TOO_MANY_CLIENTS;
 }
 
-int read_cb(
+rs_test_ret read_cb(
     rs_t * rs,
     uint8_t * msg,
     size_t msg_byte_c
@@ -249,7 +249,7 @@ int read_cb(
     return RS_TEST_OK;
 }
 
-int close_cb(
+rs_test_ret close_cb(
     rs_t * rs
 ) {
     struct rs_stress * s = rs_get_app_data(rs);
@@ -266,7 +266,7 @@ int close_cb(
     return RS_TEST_FATAL;
 }
 
-int timer_cb(
+rs_test_ret timer_cb(
     rs_t * rs
 ) {
     struct rs_stress * s = rs_get_app_data(rs);

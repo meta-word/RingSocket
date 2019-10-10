@@ -3,23 +3,29 @@
 
 #pragma once
 
-// Due to their dependency relationships, all RingSocket system headers other
-// than ringsocket_conf.h and ringsocket_variadic.h each include one other
-// RingSocket system header, forming a chain in the following order:
-//
-//       <ringsocket.h>: RingSocket helper function API
-//       <ringsocket_app.h>: Definition of RS_APP() and its descendent macros
-//       <ringsocket_queue.h>: Struct rs_ring_queue and queuing/waking functions
-//       <ringsocket_ring.h>: Single producer single consumer ring buffer API
-// ----> <ringsocket_api.h>: Basic RingSocket API macros and typedefs
-#include <ringsocket_variadic.h> // Arity-based macro expansion helper macros
-//
-// Their contents are therefore easier to understand when read in reverse order.
+#include <ringsocket_variadic.h>
+// <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
+//   |
+//   |       [YOU ARE HERE]
+//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//                        |
+// <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
+//   |
+//   \---> <ringsocket_ring.h> # Single producer single consumer ring buffer API
+//                         |
+// <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
+//   |
+//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//                          |
+// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   |
+//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
 
 #include <errno.h> // errno for RS_LOG_ERRNO()
 #include <stdalign.h> // C11: aligned_alloc() for RS_CACHE_ALIGNED_CALLOC()
 #include <stdatomic.h> // C11: atomic_[load|store]_explicit()
 #include <stddef.h> // size_t and NULL for heap memory macros below
+#include <stdint.h> // (u)int[8|16|32|64]_t, size_t, etc
 #include <stdlib.h> // calloc(), realloc(), free() for heap memory macros below
 #include <string.h> // memset() for RS_CACHE_ALIGNED_CALLOC()
 #include <syslog.h> // syslog() for RS_LOG()
@@ -80,6 +86,14 @@ do { \
 } while (0)
 
 // #############################################################################
+// # WebSocket message data kind: 2nd argument to rs_to_...() app helpers ######
+
+enum rs_data_kind {
+ RS_BIN = 0, // Binary data
+ RS_UTF8 = 1 // UTF-8 data (AKA Text data)
+};
+
+// #############################################################################
 // # Miscellaneous macros ######################################################
 
 // While not essential, the following macros are made available for use by apps.
@@ -122,7 +136,7 @@ do { \
 #define RS_W_HTON64(ptr, uint64) *((uint64_t *) (ptr)) = RS_HTON64(uint64)
 
 // #############################################################################
-// # RS_LOG & Co. ##############################################################
+// # RS_LOG() & Co. ############################################################
 
 // These macros are syslog() wrappers that prepend the translation unit's
 // filename, function name, and line_number of the location where the macro is
@@ -154,6 +168,46 @@ RS_MACRIFY_LOG( \
     __VA_ARGS__ \
 )
 
+// Same as RS_LOG, except that the 3rd arg is expected to be a non-0-terminated
+// string buffer, of which the size is expected to be the 4th arg.
+#define RS_LOG_CHBUF(lvl, fmt, chbuf, ...) \
+RS_MACRIFY_LOG( \
+    RS_256_2( \
+        _RS_LOG_CHBUF_1, \
+        _RS_LOG_CHBUF_MORE, \
+        __VA_ARGS__ \
+    ), \
+    lvl, \
+    fmt, \
+    chbuf, \
+    __VA_ARGS__ \
+)
+
+// RingSocket's only two variables with external linkage:
+
+// Used instead of setlogmask() in order to optimize out the overhead of calling
+// syslog() and evaluating its arguments for each logging statement beyond the
+// runtime-determined JSON configuration directive "log_level" mask (e.g.,
+// LOG_DEBUG).
+extern int _rs_log_max;
+
+// Unique thread_local logging prefix string with the following format:
+// * During RingSocket startup: unused (i.e., an empty "").
+// * Worker threads: "Worker #%u: " with a %u of (worker_i + 1).
+// * App threads: "App %s: " with %s matching the app conf's JSON "name" keyval.
+extern thread_local char _rs_thread_id_str[];
+#define RS_APP_NAME_MAX_STRLEN 32
+#define RS_THREAD_ID_MAX_STRLEN (RS_APP_NAME_MAX_STRLEN + RS_CONST_STRLEN(": "))
+
+// Accordingly, the following macro must be invoked in exactly one translation
+// unit, in order to declare the two variables above. In the case of apps, this
+// is taken care of during RS_APP() macro expansion; whereas RingSocket itself
+// invokes this macro in rs_conf.c.
+#define RS_LOG_VARS \
+int _rs_log_max = LOG_NOTICE; \
+thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
+
+// The log wrapper core:
 #define _RS_SYSLOG(lvl, ...) \
 do { \
     if ((lvl) <= _rs_log_max) { \
@@ -178,21 +232,6 @@ do { \
     _RS_SYSLOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
         __VA_ARGS__, strerror(errno))
 
-// Same as RS_LOG, except that the 3rd arg is expected to be a non-0-terminated
-// string buffer, of which the size is expected to be the 4th arg.
-#define RS_LOG_CHBUF(lvl, fmt, chbuf, ...) \
-RS_MACRIFY_LOG( \
-    RS_256_2( \
-        _RS_LOG_CHBUF_1, \
-        _RS_LOG_CHBUF_MORE, \
-        __VA_ARGS__ \
-    ), \
-    lvl, \
-    fmt, \
-    chbuf, \
-    __VA_ARGS__ \
-)
-
 #define _RS_LOG_CHBUF_VLA(chbuf, size) \
     char str[(size) + 1]; \
     memcpy(str, chbuf, size); \
@@ -209,27 +248,6 @@ do { \
     _RS_LOG_CHBUF_VLA(chbuf, size); \
     _RS_LOG_MORE((lvl), fmt ": %s", __VA_ARGS__, (str)); \
 } while (0)
-
-// The only two variables with external linkage in rs:
-
-// Used instead of setlogmask() in order to optimize out the overhead of calling
-// syslog() and evaluating its arguments for each logging statement beyond the
-// run-time-determined mask level (e.g., LOG_DEBUG).
-extern int _rs_log_max;
-
-// Unique thread_local string such as "Worker #7: " or "App Foo: ".
-// Its value is an empty "" during the early single-threaded startup phase.
-extern thread_local char _rs_thread_id_str[];
-
-#define RS_APP_NAME_MAX_STRLEN 32
-#define RS_THREAD_ID_MAX_STRLEN (RS_APP_NAME_MAX_STRLEN + RS_CONST_STRLEN(": "))
-
-// The following macro must be invoked in exactly one translation unit, in order
-// to define the two variables above. In the case of apps, this is taken care of
-// by the RS_APP() macro.
-#define RS_LOG_VARS \
-int _rs_log_max = LOG_NOTICE; \
-thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 
 // #############################################################################
 // # Heap memory management macros #############################################

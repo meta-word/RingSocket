@@ -8,6 +8,8 @@
 #include <jgrandson.h> // JSON conf file parsing: https://github/wbudd/jgrandson
 #include <net/if.h> // IF_NAMESIZE
 
+RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.
+
 #define RS_GUARD_JG(_jg_ret) do { \
     if ((_jg_ret) != JG_OK) { \
         RS_LOG(LOG_ERR, "Error parsing configuration file: %s", \
@@ -49,17 +51,6 @@
 #define RS_DEFAULT_SHUTDOWN_WAIT_WS 30
 
 static char const default_conf_path[] = "/etc/ringsocket.json";
-
-// The only 2 vars with external linkage in RingSocket -- see ringsocket_util.h
-
-// Configurable at run-time with the top-level "log_level" option -- see below
-int _rs_log_max = LOG_NOTICE;
-
-// Worker threads set this to "Worker #%u: " with (worker_i + 1) as the %u arg.
-// App threads set this to "App %s: " were %s is the app "name" string
-// as defined in the configuration file -- see below. RS_APP_NAME_MAX_STRLEN
-// and RS_THREAD_ID_MAX_STRLEN are defined in ringsocket_util.h.
-thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0};
 
 static bool ipv4_address_is_duplicate(
     struct in_addr const * new_addr,
