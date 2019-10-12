@@ -21,6 +21,8 @@ rs_ret get_outbound_consumers_from_producers(
     for (size_t i = 0; i < worker->conf->app_c; i++) {
         RS_CASTED_ATOMIC_LOAD_RELAXED(&worker->ring_pairs[i]->outbound_ring.r,
             worker->outbound_consumers[i].r, (uint8_t *));
+        RS_LOG(LOG_DEBUG, "Received outbound_consumers[%zu].r: %p",
+            i, worker->outbound_consumers[i].r);
     }
     return RS_OK;
 }
@@ -91,7 +93,7 @@ static rs_ret send_newest_cmsg(
         return RS_OK;
     case RS_AGAIN:
         RS_LOG(LOG_DEBUG, "Attempt to send newest %zu byte ws%s message from "
-            "app to peer %" PRIu32 " was unsuccessfull due to RS_AGAIN.",
+            "app to peer %" PRIu32 " was unsuccessful due to RS_AGAIN.",
             msg_size, peer->is_encrypted ? "s" : "", peer_i);
         peer->continuation = RS_CONT_SENDING;
         peer->ws.owref_c = 1;
@@ -100,7 +102,7 @@ static rs_ret send_newest_cmsg(
         return RS_OK;
     case RS_CLOSE_PEER:
         RS_LOG(LOG_WARNING, "Attempt to send newest %zu byte ws%s message from "
-            "app to peer %" PRIu32 " was unsuccessfull due to RS_CLOSE_PEER.",
+            "app to peer %" PRIu32 " was unsuccessful due to RS_CLOSE_PEER.",
             msg_size, peer->is_encrypted ? "s" : "", peer_i);
         close_peer:
         if (*msg != RS_WS_OPC_FIN_CLOSE) {
@@ -226,7 +228,6 @@ rs_ret receive_from_app(
                     }
                 }
             }
-            cons->r = cmsg->msg + cmsg->size;
             if (remaining_recipient_c) {
                 struct rs_owref * new = worker->owrefs + worker->newest_owref_i;
                 RS_LOG(LOG_DEBUG, "worker->owrefs[%zu].cmsg == %p, "
@@ -430,12 +431,12 @@ rs_ret send_pending_owrefs(
             return handle_peer_events(worker, peer_i, 0);
         case RS_AGAIN:
             RS_LOG(LOG_DEBUG, "Attempt to send %zu byte ws%s owref message to "
-                "peer %" PRIu32 " was unsuccessfull due to RS_AGAIN.",
+                "peer %" PRIu32 " was unsuccessful due to RS_AGAIN.",
                 ws_size, peer->is_encrypted ? "s" : "", peer_i);
             return RS_AGAIN;
         case RS_CLOSE_PEER:
             RS_LOG(LOG_DEBUG, "Attempt to send %zu byte ws%s owref message to "
-                "peer %" PRIu32 " was unsuccessfull due to RS_CLOSE_PEER.",
+                "peer %" PRIu32 " was unsuccessful due to RS_CLOSE_PEER.",
                 ws_size, peer->is_encrypted ? "s" : "", peer_i);
             if (*ws != RS_WS_OPC_FIN_CLOSE) {
                 // Only notify the app of peer closure if the message the error

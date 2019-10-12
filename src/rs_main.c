@@ -35,7 +35,7 @@ static rs_ret get_ringsocket_credentials(
     // that's OK.
     struct passwd * pw = getpwnam("ringsock");
     if (!pw) {
-        RS_LOG_ERRNO(LOG_CRIT, "Unsuccesful getpwnam(\"ringsock\"). "
+        RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful getpwnam(\"ringsock\"). "
             "RingSocket requires the existence of a system user named "
             "\"ringsock\". Please make sure that such a user has been "
             "created.");
@@ -344,9 +344,10 @@ static rs_ret spawn_app_and_worker_threads(
         }
     }
 
-    // Wait for all apps to sleep on futex_wait(), to ensure that all io_pairs
-    // and worker_sleep_states have been allocated, and worker threads get
-    // up-to-date thread_io_pairs pointers and worker_sleep_state pointers.
+    // Wait for all apps to set their sleep state to true, indicating that
+    // worker_sleep_states and all ring_pairs have been allocated; which ensures
+    // that worker threads are assigned up-to-date ring_pair and sleep_state
+    // pointers. (See also rs_init_app_schedule() of ringsocket_helper.h).
     for (size_t i = 0; i < conf->app_c; i++) {
         while (!app_sleep_states[i].is_asleep) {
             thrd_sleep(&(struct timespec){ .tv_nsec = 1000000 }, NULL); // 1 ms

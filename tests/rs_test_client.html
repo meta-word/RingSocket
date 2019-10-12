@@ -93,9 +93,8 @@ rsSpawn.addEventListener('click', function () {
   ws.binaryType = 'arraybuffer';
   ws.onclose = function (ev) {
     if (ev.code === 1006) {
-      rsLog.err(wsNum,
-        'Connection failed: please check your browser&apos;s developer console.'
-      );
+      rsLog.err(wsNum, 'Connection failed: your browser&apos;s developer ' +
+                       'console might show some more information.');
     } else {
       rsLog.warn(wsNum, 'WebSocket close code: ' + ev.code);
     }

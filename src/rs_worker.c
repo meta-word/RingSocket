@@ -15,7 +15,7 @@ static rs_ret init_ring_update_queue(
     struct rs_worker * worker
 ) {
     worker->ring_queue.size = worker->conf->update_queue_size;
-    RS_CALLOC(worker->ring_queue.queue, worker->ring_queue.size);
+    RS_CALLOC(worker->ring_queue.updates, worker->ring_queue.size);
     return RS_OK;
 }
 

@@ -6,7 +6,7 @@
 #include <ringsocket_ring.h>
 // <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
 //   |
-//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//   \---> <ringsocket_api.h>                            # RingSocket's core API
 //                        |
 // <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
 //   |
@@ -15,13 +15,21 @@
 //    [YOU ARE HERE]       |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
+//                          | |
+//                          | |
+//                          | \--> [ Worker translation units: see rs_worker.h ]
+//                          |
 //                          |
 // <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
 //   |
 //   \--> <ringsocket.h>             # Definitions of app helper functions (API)
+//                   |
+//                   |
+//                   \----------------> [ Any RingSocket app translation units ]
 
 #define _GNU_SOURCE // syscall()
+#include <inttypes.h> // PRI print format of stdint.h types
 #include <linux/futex.h> // FUTEX_WAKE_PRIVATE
 #include <sys/syscall.h> // SYS_futex
 #include <unistd.h> // syscall()
@@ -82,19 +90,20 @@ struct rs_sleep_state { // Indicates whether or not a certain thread is dormant.
 struct rs_ring_update {
     uint8_t * ring_position;
     uint32_t thread_i;
-    uint32_t is_write; // semantically boolean
+    bool is_write;
 };
 
 struct rs_ring_queue {
-    struct rs_ring_update * queue;
+    struct rs_ring_update * updates;
     size_t size;
     size_t oldest_i;
 };
 
 #ifdef RS_INCLUDE_QUEUE_FUNCTIONS
 
-static rs_ret rs_wake_up_app(
-    struct rs_sleep_state * app_sleep_state
+static inline rs_ret rs_wake_up_app(
+    struct rs_sleep_state * app_sleep_state,
+    uint32_t app_i
 ) {
     bool app_is_asleep = false;
     RS_ATOMIC_LOAD_RELAXED(&app_sleep_state->is_asleep, app_is_asleep);
@@ -103,62 +112,45 @@ static rs_ret rs_wake_up_app(
         if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAKE_PRIVATE,
             1, NULL, NULL, 0) == -1) {
             RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, %d, "
-                "FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0)",
-                app_sleep_state->is_asleep);
+                "FUTEX_WAKE_PRIVATE, ...) for app_i %" PRIu32,
+                app_sleep_state->is_asleep, app_i);
             return RS_FATAL;
         }
+        RS_LOG(LOG_DEBUG, "Called syscall(SYS_futex, %d, FUTEX_WAKE_PRIVATE, "
+            "...) for app_i %" PRIu32, app_sleep_state->is_asleep, app_i);
+    } else {
+        RS_LOG(LOG_DEBUG, "Not making a FUTEX_WAKE_PRIVATE syscall() for "
+            "app_i %" PRIu32 ", because app_is_asleep seem to be false", app_i);
     }
     return RS_OK;
 }
 
-static rs_ret rs_wake_up_worker(
+static inline rs_ret rs_wake_up_worker(
     struct rs_sleep_state * worker_sleep_state,
-    int worker_eventfd
+    int worker_eventfd,
+    uint32_t worker_i
 ) {
     bool worker_is_asleep = false;
     RS_ATOMIC_LOAD_RELAXED(&worker_sleep_state->is_asleep, worker_is_asleep);
     if (worker_is_asleep) {
         RS_ATOMIC_STORE_RELAXED(&worker_sleep_state->is_asleep, false);
         if (write(worker_eventfd, (uint64_t []){1}, 8) != 8) {
-            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful write(worker_eventfd, ...)");
+            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful write(worker_eventfd, ...) to "
+                "worker #%" PRIu32, worker_i + 1);
             return RS_FATAL;
         }
+        RS_LOG(LOG_DEBUG, "Successful write(worker_eventfd, ...) to worker #%"
+            PRIu32, worker_i + 1);
+    } else {
+        RS_LOG(LOG_DEBUG, "Not calling write(worker_eventfd, ...) for worker #%"
+            PRIu32 ", because worker_is_asleep seems to be false",
+            worker_i + 1);
     }
     return RS_OK;
 }
 
-#define RS_TIME_INF UINT64_MAX
-
-static rs_ret rs_wait_for_worker(
-    struct rs_sleep_state * app_sleep_state,
-    uint64_t timeout_microsec
-) {
-    struct timespec const * timeout = timeout_microsec == RS_TIME_INF ?
-        NULL :
-        &(struct timespec){
-            .tv_sec = timeout_microsec / 1000000,
-            .tv_nsec = 1000 * (timeout_microsec % 1000000)
-        };
-    if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAIT_PRIVATE,
-        true, timeout, NULL, 0) != -1 || errno == EAGAIN) {
-        // May return immediately with errno == EAGAIN when a worker thread
-        // already tried to wake this app thread up with rs_wake_up_app()
-        // (which is possible because app_sleep_state->is_asleep was set to
-        // true in advance of this function call). This is not a problem:
-        // just try to do some more work.
-        return RS_OK;
-    }
-    if (errno == ETIMEDOUT) {
-        return RS_AGAIN; // Indicate that this function should be called again
-        // to go back to sleep, because there was no worker thread activity.
-    }
-    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, &%d, "
-        "FUTEX_WAIT_PRIVATE, 1, timeout, NULL, 0)", app_sleep_state->is_asleep);
-    return RS_FATAL;
-}
-
-static rs_ret rs_enqueue_ring_update(
-    struct rs_ring_queue * ring_queue,
+static inline rs_ret rs_enqueue_ring_update(
+    struct rs_ring_queue * queue,
     struct rs_ring_pair * ring_pairs,
     struct rs_sleep_state * sleep_states,
     int const * eventfds,
@@ -166,8 +158,8 @@ static rs_ret rs_enqueue_ring_update(
     size_t thread_i,
     bool is_write
 ) {
-    struct rs_ring_update * update = ring_queue->queue + ring_queue->oldest_i++;
-    ring_queue->oldest_i %= ring_queue->size;
+    struct rs_ring_update * update = queue->updates + queue->oldest_i++;
+    queue->oldest_i %= queue->size;
     // If an update exists at the oldest index, carry out dequeue procedures.
     if (update->ring_position) {
         if (eventfds) { // This function was called by an app thread.
@@ -177,7 +169,7 @@ static rs_ret rs_enqueue_ring_update(
                     (atomic_uintptr_t) update->ring_position
                 );
                 RS_GUARD(rs_wake_up_worker(sleep_states + update->thread_i,
-                    eventfds[update->thread_i]));
+                    eventfds[update->thread_i], update->thread_i));
             } else {
                 RS_ATOMIC_STORE_RELAXED(
                     &ring_pairs[update->thread_i].inbound_ring.r,
@@ -190,7 +182,8 @@ static rs_ret rs_enqueue_ring_update(
                     &ring_pairs[update->thread_i].inbound_ring.w,
                     (atomic_uintptr_t) update->ring_position
                 );
-                RS_GUARD(rs_wake_up_app(sleep_states + update->thread_i));
+                RS_GUARD(rs_wake_up_app(sleep_states + update->thread_i,
+                    update->thread_i));
             } else {
                 RS_ATOMIC_STORE_RELAXED(
                     &ring_pairs[update->thread_i].outbound_ring.r,
@@ -206,21 +199,27 @@ static rs_ret rs_enqueue_ring_update(
     return RS_OK;
 }
 
-static rs_ret rs_flush_ring_updates(
-    struct rs_ring_queue * ring_queue,
+static inline rs_ret rs_flush_ring_updates(
+    struct rs_ring_queue * queue,
     struct rs_ring_pair * ring_pairs,
     struct rs_sleep_state * sleep_states,
     int const * eventfds,
     size_t dest_thread_c
 ) {
+    size_t const newest_i = (queue->oldest_i + queue->size - 1) % queue->size;
+    //RS_LOG(LOG_DEBUG, "oldest_i: %zu", queue->oldest_i);
+    //RS_LOG(LOG_DEBUG, "newest_i: %zu", newest_i);
     for (size_t i = 0; i < dest_thread_c; i++) {
         bool updated_to_newer_r = false;
         bool updated_to_newer_w = false;
-        size_t const newest_i = (ring_queue->oldest_i + ring_queue->size - 1)
-            % ring_queue->size;
-        size_t j = newest_i;
+        size_t j = newest_i; 
         do {
-            struct rs_ring_update * update = ring_queue->queue + j;
+            struct rs_ring_update * update = queue->updates + j;
+            //RS_LOG(LOG_DEBUG, "rq->queue[%zu]: .ring_position: %p, "
+            //    ".thread_i: %" PRIu32 ", .is_write: %d "
+            //    "(updated_to_newer_r: %d, updated_to_newer_w: %d)",
+            //    j, update->ring_position, update->thread_i, update->is_write,
+            //    updated_to_newer_r, updated_to_newer_w);
             if (update->ring_position && update->thread_i == i) {
                 if (eventfds) { // This function was called by an app thread.
                     if (update->is_write) {
@@ -230,7 +229,8 @@ static rs_ret rs_flush_ring_updates(
                                 (atomic_uintptr_t) update->ring_position
                             );
                             RS_GUARD(rs_wake_up_worker(sleep_states +
-                                update->thread_i, eventfds[update->thread_i]));
+                                update->thread_i, eventfds[update->thread_i],
+                                update->thread_i));
                             updated_to_newer_w = true;
                         }
                     } else if (!updated_to_newer_r) {
@@ -248,7 +248,7 @@ static rs_ret rs_flush_ring_updates(
                                 (atomic_uintptr_t) update->ring_position
                             );
                             RS_GUARD(rs_wake_up_app(sleep_states +
-                                update->thread_i));
+                                update->thread_i, update->thread_i));
                             updated_to_newer_w = true;
                         }
                     } else if (!updated_to_newer_r) {
@@ -263,8 +263,8 @@ static rs_ret rs_flush_ring_updates(
                 update->thread_i = 0;
                 update->is_write = false;
             }
-            j += ring_queue->size - 1;
-            j %= ring_queue->size;
+            j += queue->size - 1;
+            j %= queue->size;
         } while (j != newest_i);
     }
     return RS_OK;

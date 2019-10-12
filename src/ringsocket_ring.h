@@ -6,7 +6,7 @@
 #include <ringsocket_conf.h>
 // <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
 //   |
-//   \---> <ringsocket_api.h>   # RingSocket API other than app helper functions
+//   \---> <ringsocket_api.h>                            # RingSocket's core API
 //                        |
 // <ringsocket_conf.h> <--/   # Definition of struct rs_conf and its descendents
 //   |
@@ -15,11 +15,18 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-----> <ringsocket_app.h>   # Definition of RS_APP() and descendent macros
+//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
+//                          | |
+//                          | |
+//                          | \--> [ Worker translation units: see rs_worker.h ]
+//                          |
 //                          |
 // <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
 //   |
 //   \--> <ringsocket.h>             # Definitions of app helper functions (API)
+//                   |
+//                   |
+//                   \----------------> [ Any RingSocket app translation units ]
 
 #include <stdbool.h> // bool
 
@@ -82,11 +89,11 @@ struct rs_ring_producer {
 // RingSocket's consumer-only interface to a RingSocket ring buffer: not shared
 // with the thread at the producer side.
 struct rs_ring_consumer {
-    // From a utilitarian point of view, structs with only one member are
-    // stupid. Here it's done anyway to clarify the separation of concerns
-    // between the ring buffer producer and ring buffer consumer: the producer
-    // is responsible for all buffer management, while the consumer just needs
-    // to "follow the trail" and update its "r" along the way.
+    // From a utilitarian point of view, defining a struct with only one member
+    // may seem dumb. Here it's done anyway to clarify the separation of
+    // concerns between the ring buffer producer and ring buffer consumer: the
+    // producer is responsible for all buffer management, while the consumer
+    // just needs to "follow the trail" and update its "r" along the way.
 
     // This pointer has the same semantics as the shared "r" of struct
     // rs_ring_atomic, except that this "r" contains the actual real-time
@@ -108,7 +115,7 @@ struct rs_consumer_msg {
 };
 
 // Every ring message is preceded by an uint32_t holding its size in bytes
-#define RS_RING_HEAD_SIZE sizeof(uint32_t) // I.e., 4.
+#define RS_RING_HEAD_SIZE sizeof(struct rs_consumer_msg) // AKA 4
 
 // Every ring message must reserve the following size as a tail beyond the
 // message itself; to allow a route instruction to be inserted upon the
@@ -121,7 +128,7 @@ struct rs_consumer_msg {
 #define RS_RING_ROUTE_SIZE (RS_RING_HEAD_SIZE + sizeof(uint8_t *))
 
 #ifdef RS_INCLUDE_PRODUCE_RING_MSG
-static bool rs_would_clobber(
+static inline bool rs_would_clobber(
     uint8_t const * unwritable,
     uint8_t const * w,
     uint32_t msg_size
@@ -130,10 +137,15 @@ static bool rs_would_clobber(
 }
 
 // Ensure that the calling producer thread can safely write msg_size message
-// bytes to prod->w once/if RS_OK is returned. This will update the members of
-// the "prod" struct where necessary in order to make said guarantee (including
-// prod->w itself).
-static rs_ret rs_produce_ring_msg(
+// bytes to prod->w if RS_OK is returned. This will update the members of
+// the prod instance where necessary in order to make said guarantee.
+//
+// This function will also take care of writing the uint32_t msg_size to the
+// ring buffer (becoming the .size member of struct rs_consumer_msg),
+// and incrementing prod->w by 4 bytes before returning. After returning, it's
+// the caller's responsibility to increment prod->w by msg_size prior to calling
+// rs_enqueue_ring_update() (see ringsocket_queue.h).
+static inline rs_ret rs_produce_ring_msg(
     struct rs_ring_atomic const * atomic,
     struct rs_ring_producer * prod,
     double alloc_multiplier, // If allocated, how big should a new ring buf be?
@@ -145,6 +157,8 @@ static rs_ret rs_produce_ring_msg(
         // r and w are currently both within bounds of the same prod->ring.
         if (prod->prev_ring) {
             // This means any previously used ring buffer can be free()d now.
+            RS_LOG(LOG_NOTICE, "Free()ing previous ring buffer at %p",
+                prod->prev_ring);
             RS_FREE(prod->prev_ring);
         }
         if (prod->w < r) {
@@ -172,14 +186,18 @@ static rs_ret rs_produce_ring_msg(
                 // Use RS_CACHE_ALIGNED_CALLOC() to eliminate possibility of
                 // false sharing with preceding or trailing heap bytes.
                 RS_CACHE_ALIGNED_CALLOC(prod->ring, prod->ring_size);
-                RS_LOG(LOG_NOTICE, "Allocated a new ring buffer with size %zu",
-                    prod->ring_size);
+                RS_LOG(LOG_NOTICE, "Allocated a new %zu byte ring buffer at %p",
+                    prod->ring_size, prod->ring);
+            } else {
+                RS_LOG(LOG_DEBUG, "Insufficient ring buffer tail space: "
+                    "wrapping message around to the start of the buffer at %p",
+                    prod->ring);
             }
             // Write a "route instruction": a value of 0 instead of msg_size,
             // to tell the consumer thread that the bytes following it should be
             // interpreted as a pointer to the next ring buffer location.
             *((uint32_t *) prod->w) = 0;
-            prod->w += sizeof(uint32_t);
+            prod->w += sizeof(struct rs_consumer_msg); // += 4
             // Set either a pointer to the start of the same ring to indicate
             // wrapping, or a pointer to a new ring buffer (route_to_new_ring).
             *((uint8_t * *) prod->w) = prod->ring;
@@ -195,7 +213,7 @@ static rs_ret rs_produce_ring_msg(
         return RS_FATAL;
     }
     *((uint32_t *) prod->w) = msg_size;
-    prod->w += sizeof(uint32_t);
+    prod->w += sizeof(struct rs_consumer_msg); // += 4
     // Note that the message itself has not been writtin yet. Instead, this
     // function returns RS_OK to indicate that the calling producer thread can
     // now safely write msg_size message bytes starting from prod->w. 
@@ -203,12 +221,12 @@ static rs_ret rs_produce_ring_msg(
 }
 #endif
 
-// Obtain a consumer_msg pointer from a ring consumer interface, or return NULL
-// if no new ring buffer message is avalailable yet.
+// Obtain a consumer_msg pointer from a ring consumer interface and increment
+// cons->r by that message's size, or return NULL if no new message exists yet.
 #ifdef RS_INCLUDE_CONSUME_RING_MSG
-static struct rs_consumer_msg * rs_consume_ring_msg(
+static inline struct rs_consumer_msg * rs_consume_ring_msg(
     struct rs_ring_atomic const * atomic,
-    struct rs_ring_consumer const * cons
+    struct rs_ring_consumer * cons
 ) {
     uint8_t * w = NULL;
     RS_CASTED_ATOMIC_LOAD_RELAXED(&atomic->w, w, (uint8_t *));
@@ -223,9 +241,12 @@ static struct rs_consumer_msg * rs_consume_ring_msg(
         // 0 means the message was too large to be appended at the current
         // location. Instead, a pointer to its actual location should be
         // retrieved from the current location.
-        uint8_t const * r = *((uint8_t const * *) &cmsg->msg);
-        cmsg = (struct rs_consumer_msg *) r;
+        cons->r = *((uint8_t const * *) &cmsg->msg);
+        RS_LOG(LOG_DEBUG, "Consuming ring message from non-contiguous ring "
+            "buffer location %p", cons->r);
+        cmsg = (struct rs_consumer_msg *) cons->r;
     }
+    cons->r += sizeof(*cmsg) + cmsg->size;
     return cmsg;
 }
 #endif
