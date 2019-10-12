@@ -146,8 +146,7 @@ enum rs_data_kind {
 // # RS_LOG() & Co. ############################################################
 
 // These macros are syslog() wrappers that prepend the translation unit's
-// filename, function name, and line_number of the location where the macro is
-// invoked.
+// function name and line_number of the location where the macro is invoked.
 
 // 1st arg: syslog priority level (required)
 // 2nd arg: format string (optional)
@@ -218,8 +217,7 @@ thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 #define _RS_SYSLOG(lvl, ...) \
 do { \
     if ((lvl) <= _rs_log_max) { \
-        syslog((lvl), "%s" __FILE__ ":%s():" RS_STRINGIFY(__LINE__) \
-            __VA_ARGS__); \
+        syslog((lvl), "%s:%s():" RS_STRINGIFY(__LINE__) __VA_ARGS__); \
     } \
 } while (0)
 

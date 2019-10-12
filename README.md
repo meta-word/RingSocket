@@ -465,13 +465,13 @@ client recipients.
 
 ##### RS_LOG(*log_level*[, *fmt*[, *var1*[, *var2*[, ...]]]])
 
-This is a wrapper around `syslog()`, providing extra context such as source
-file name, function name, line number, and app name (the `"name"` value of your
+This is a wrapper around `syslog()`, providing extra context such as function
+name, line number, and app name (the `"name"` value of your
 [App configuration](#app-configuration)). All arguments correspond to those of
 `syslog()`, so see your system's `man 3 syslog` manual page for the details.
 
 Note that log messages will only show up in your system's logging facility if
-they are given a *log_level* importance at least as great as the `"log_level"`
+they are given a *log_level* priority at least as great as the `"log_level"`
 value given in your [Global configuration](#global-configuration)), which
 defaults to `"warning"`.
 
