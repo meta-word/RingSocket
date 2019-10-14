@@ -97,9 +97,9 @@ static rs_ret read_bidirectional_tcp_shutdown(
     // to be readily overwritten during any next read().
     ssize_t rsize = read(peer->socket_fd, worker->rbuf,
         worker->conf->worker_rbuf_size);
-    RS_LOG(LOG_INFO, "Read(%d, ...) %ld bytes of ignored TCP data from %s",
-        peer->socket_fd, rsize, get_peer_str(peer));
     while (rsize > 0) {
+        //RS_LOG(LOG_INFO, "Read(%d, ...) %ld bytes of ignored TCP data from "
+        //    "%s", peer->socket_fd, rsize, get_peer_str(peer));
         rsize = read(peer->socket_fd, worker->rbuf,
             worker->conf->worker_rbuf_size);
     }

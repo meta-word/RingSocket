@@ -125,7 +125,6 @@ union rs_peer {
         // 3rd (max-)64-bit block
         uint8_t * heap_buf;
         // 4th & 5th 64-bit blocks
-        // todo: move shutdown_start_time to block #3 once custom alloc exists
         uint16_t shutdown_deadline; // 0 means never (i.e., "not yet")
         uint16_t layer_specific_data[7];
     };

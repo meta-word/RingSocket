@@ -414,7 +414,7 @@ static inline rs_ret rs_close_peer(
     return RS_OK;
 }
 
-static inline rs_ret rs_guard_cb(
+static inline rs_ret rs_guard_init_cb(
     int ret
 ) {
     switch (ret) {

@@ -197,6 +197,23 @@ static void send_something(
     send_somewhere(rs, s, cb_has_cur);
 }
 
+rs_test_ret remove_client_id(
+    rs_t * rs
+) {
+    struct rs_stress * s = rs_get_app_data(rs);
+    uint64_t client_id = rs_get_client_id(rs);
+    for (uint64_t * cid = s->client_ids;
+        cid < s->client_ids + RS_TEST_MAX_CLIENT_C; cid++) {
+        if (*cid == client_id) {
+            *cid = 0;
+            s->client_c--;
+            return RS_TEST_OK;
+        }
+    }
+    RS_LOG(LOG_CRIT, "Close callback received unknown client ID.");
+    return RS_TEST_FATAL;
+}
+
 rs_test_ret init_cb(
     rs_t * rs
 ) {
@@ -238,8 +255,9 @@ rs_test_ret read_cb(
     for (size_t i = 0; i < msg_byte_c; i++) {
         if (msg[i] != 255 - i % 256) { // expect same as send_something() sends
             RS_LOG(LOG_ERR, "Received a message byte at index %zu with a value "
-                "of " PRIu8 " instead of the expected value " PRIu8,
+                "of %" PRIu8 " instead of the expected value %" PRIu8,
                 i, msg[i], 255 - i % 256);
+            remove_client_id(rs);
             return RS_TEST_BAD_MSG;
         }
     }
@@ -251,18 +269,7 @@ rs_test_ret read_cb(
 rs_test_ret close_cb(
     rs_t * rs
 ) {
-    struct rs_stress * s = rs_get_app_data(rs);
-    uint64_t client_id = rs_get_client_id(rs);
-    for (uint64_t * cid = s->client_ids;
-        cid < s->client_ids + RS_TEST_MAX_CLIENT_C; cid++) {
-        if (*cid == client_id) {
-            *cid = 0;
-            s->client_c--;
-            return RS_TEST_OK;
-        }
-    }
-    RS_LOG(LOG_CRIT, "Close callback received unknown client ID.");
-    return RS_TEST_FATAL;
+    return remove_client_id(rs);
 }
 
 rs_test_ret timer_cb(

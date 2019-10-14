@@ -236,7 +236,7 @@ RS_MACRIFY_INIT( \
 )
 
 #define _RS_INIT_WITHOUT_APP_DATA(init_cb) \
-    RS_GUARD_APP(rs_guard_cb(init_cb(&rs)))
+    RS_GUARD_APP(rs_guard_init_cb(init_cb(&rs)))
 
 #define _RS_INIT_WITH_APP_DATA(init_cb, app_data_byte_c) \
     /* Omit do {} while loop to keep app_data array in function scope */ \
