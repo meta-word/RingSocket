@@ -1,6 +1,6 @@
 {
   "log_level": "debug",
-  "worker_c": 1,
+  "worker_c": 2,
   "ports": [{
     "port_number": RANDOM_PORT_PLACEHOLDER,
     "is_unencrypted": true

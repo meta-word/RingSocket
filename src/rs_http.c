@@ -48,10 +48,10 @@ static rs_ret read_http(
     }
     size_t rsize = 0;
     rs_ret ret = peer->is_encrypted ?
-        read_tls(peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen,
-            &rsize):
-        read_tcp(peer, *ch, worker->conf->worker_rbuf_size - unsaved_strlen,
-            &rsize);
+        read_tls(worker, peer,
+            *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize) :
+        read_tcp(peer,
+            *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize);
     *ch_over = *ch + rsize;
     if (ret != RS_AGAIN) {
         return ret;
@@ -125,8 +125,8 @@ static rs_ret match_hostname(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG_CHBUF(LOG_NOTICE, "Rejected unrecognized hostname",
-                hostname, hostname_strlen);
+            RS_LOG(LOG_NOTICE, "Rejected unrecognized hostname: %.*s",
+                (int) hostname_strlen, hostname);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -165,8 +165,8 @@ static rs_ret match_url(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG_CHBUF(LOG_NOTICE, "Rejected unrecognized url",
-                url, url_strlen);
+            RS_LOG(LOG_NOTICE, "Rejected unrecognized url: %.*s",
+                (int) url_strlen, url);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -218,8 +218,8 @@ static bool match_origin(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG_CHBUF(LOG_NOTICE, "Rejected unrecognized origin",
-                origin, origin_strlen);
+            RS_LOG(LOG_NOTICE, "Rejected unrecognized origin: %.*s",
+                (int) origin_strlen, origin);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -395,8 +395,11 @@ static rs_ret parse_http_upgrade_request(
         }
         RS_H_GETCH(16);
         if (ch > unsaved_str + worker->conf->url_max_strlen) {
-            RS_LOG_CHBUF(LOG_NOTICE, "Rejected url due to max length",
-                unsaved_str, ch - unsaved_str);
+            RS_LOG(LOG_NOTICE, "Rejected %.*s because its length exceeds the "
+                "longest configured url's size %zu by %zu byte(s)",
+                (int) (ch - unsaved_str), unsaved_str,
+                worker->conf->url_max_strlen,
+                ch - unsaved_str - worker->conf->url_max_strlen);
             RS_H_ERR(RS_HTTP_NOT_FOUND);
         }
     }
@@ -473,8 +476,11 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + worker->conf->hostname_max_strlen) {
-                RS_LOG_CHBUF(LOG_NOTICE, "Rejected hostname due to max length",
-                    unsaved_str, ch - unsaved_str);
+                RS_LOG(LOG_NOTICE, "Rejected %.*s because its length exceeds "
+                    "the longest hostname's size %zu by %zu byte(s)",
+                    (int) (ch - unsaved_str), unsaved_str,
+                    worker->conf->hostname_max_strlen,
+                    ch - unsaved_str - worker->conf->hostname_max_strlen);
                 RS_H_ERR(RS_HTTP_BAD_REQUEST);
             }
             RS_H_GETCH(53);
@@ -497,8 +503,11 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + worker->conf->allowed_origin_max_strlen) {
-                RS_LOG_CHBUF(LOG_NOTICE, "Rejected origin due to max length",
-                    unsaved_str, ch - unsaved_str);
+                RS_LOG(LOG_NOTICE, "Rejected %.*s because its length exceeds "
+                    "the longest allowed origin's size %zu by %zu byte(s)",
+                    (int) (ch - unsaved_str), unsaved_str,
+                    worker->conf->allowed_origin_max_strlen,
+                    ch - unsaved_str - worker->conf->allowed_origin_max_strlen);
                 RS_H_ERR(RS_HTTP_FORBIDDEN);
             }
             RS_H_GETCH(62);
@@ -590,8 +599,8 @@ static rs_ret write_http_upgrade_response(
         memcpy(wskey_hash_dest, peer->heap_buf, 27);
     }
     rs_ret ret = peer->is_encrypted ?
-        write_tls(peer, http101, RS_CONST_STRLEN(http101)):
-        write_tcp(peer, http101, RS_CONST_STRLEN(http101));
+        write_tls(worker, peer, http101, RS_CONST_STRLEN(http101)) :
+                write_tcp(peer, http101, RS_CONST_STRLEN(http101));
     switch (ret) {
     case RS_OK:
         if (peer->heap_buf) {
@@ -614,12 +623,17 @@ static rs_ret write_http_upgrade_response(
 }
 
 static rs_ret write_http_error_response(
+    struct rs_worker * worker,
     union rs_peer * peer
 ) {
+    RS_LOG(LOG_NOTICE, "Writing HTTP_%s) to peer %s",
+        (char *[]){"BAD_REQUEST (400", "FORBIDDEN (403", "NOT_FOUND (404",
+        "METHOD_NOT_ALLOWED (405"}[RS_MIN(3, peer->http.error_i)],
+        get_peer_str(peer));
     char const * msg = http_errors[peer->http.error_i];
     return peer->is_encrypted ?
-        write_tls(peer, msg, RS_CONST_STRLEN(msg)):
-        write_tcp(peer, msg, RS_CONST_STRLEN(msg));
+        write_tls(worker, peer, msg, RS_CONST_STRLEN(msg)) :
+                write_tcp(peer, msg, RS_CONST_STRLEN(msg));
 }
 
 rs_ret handle_http_io(
@@ -674,7 +688,7 @@ rs_ret handle_http_io(
         break;
     case RS_MORTALITY_SHUTDOWN_WRITE:
         write_http_error:
-        switch (write_http_error_response(peer)) {
+        switch (write_http_error_response(worker, peer)) {
         case RS_OK:
             // Keep peer->mortality at RS_MORTALITY_SHUTDOWN_WRITE because
             // the next thing will be write_bidirectional_(tls/tcp)_shutdown().

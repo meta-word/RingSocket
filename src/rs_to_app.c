@@ -42,7 +42,7 @@ static rs_ret send_msg_to_app(
     imsg->socket_fd = peer->socket_fd;
     imsg->endpoint_id =
         worker->conf->apps[peer->app_i].endpoints[peer->endpoint_i].endpoint_id;
-    imsg->data_kind = peer->ws.rmsg_is_utf8;
+    imsg->data_kind = peer->ws.rmsg_data_kind;
     imsg->inbound_kind = inbound_kind;
 
     prod->w += sizeof(*imsg);

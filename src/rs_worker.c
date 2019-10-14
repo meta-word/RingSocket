@@ -44,7 +44,7 @@ static rs_ret init_rbuf(
 static rs_ret _work(
     struct rs_worker * worker
 ) {
-    // Thread ID used as prefix by RS_LOG -- see conf.c and ringsocket_util.h
+    // Thread ID used as prefix by RS_LOG(): see ringsocket_api.h.
     sprintf(_rs_thread_id_str, "Worker#%zu: ", worker->worker_i + 1);
 
     RS_GUARD(init_inbound_producers(worker)); // rs_to_app.c

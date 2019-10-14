@@ -8,6 +8,64 @@
 #include <netdb.h> // getnameinfo(), MI_MAXHOST, NI_MAXSERV
 #include <sys/epoll.h> // EPOLL* event bitflag macros
 
+// Move <size> bytes from <dst + offset> to <dst>. Source memory range and
+// destination memory range are allowed to overlap. Implemented through one or
+// more memcpy() operations of max <offset> bytes from the source range leftward
+// to the destination in left to right order, which has the cache-miss-reducing
+// benefit of eliminating the need to copy to a temporary intermediate buffer
+// outside of the <dst> array -- as might have been the case if a naive
+// memmove() implementation was used instead.
+void move_left(
+    void * dst,
+    size_t offset,
+    size_t size
+) {
+    uint8_t * _dst = dst;
+    uint8_t * _src = _dst + offset;
+    size_t moved_size = 0;
+    while (size > offset) {
+        memcpy(_dst + moved_size, _src + moved_size, offset);
+        size -= offset;
+        moved_size += offset;
+    }
+    memcpy(_dst + moved_size, _src + moved_size, size);
+}
+
+// For any buf/array "bin" of "size" bytes, store a hex representation string of
+// its binary contents in worker->log_buf. Any tail end of the hex string that
+// would overflow sizeof(worker->log_buf) is truncated. The resulting
+// worker-log_buf string is guaranteed to be null-terminated. Finally,
+// return the worker->log_buf pointer to allow calls to be inlined as arguments.
+char * bin_to_log_buf_as_hex(
+    struct rs_worker * worker,
+    void const * bin,
+    size_t size
+) {
+    uint8_t const * p = bin;
+    uint8_t const * const p_over = p + size;
+    
+    char * hex = worker->log_buf;
+    char * const hex_over = hex + sizeof(worker->log_buf) - sizeof(", FF}");
+    static_assert(sizeof(worker->log_buf) >= sizeof("{00}"));
+    
+    char const hex_table[] = "0123456789ABCDEF";
+
+    *hex++ = '{';
+    if (size) {
+        *hex++ = hex_table[*p >> 4];
+        *hex++ = hex_table[*p++ & 0xF];
+        while (p < p_over && hex < hex_over) {
+            *hex++ = ',';
+            *hex++ = ' ';
+            *hex++ = hex_table[*p >> 4];
+            *hex++ = hex_table[*p++ & 0xF];
+        }
+    }
+    *hex++ = '}';
+    *hex = '\0';
+    return worker->log_buf;
+}
+
 static char * get_addr_str(
     int socket_fd,
     char * str
@@ -83,7 +141,7 @@ char * get_peer_str(
                 "ws.rmsg_utf8_state: 255, "
                 "ws.heap_buf_contains_pong: Y, "
                 "ws.rmsg_is_fragmented: Y, "
-                "ws.rmsg_is_utf8: Y, "
+                "ws.rmsg_data_kind: RS_UTF8, "
                 "ws.owref_c: 255, "
                 "ws.owref_i: 4294967295, "
                 "ws.msg_rsize: 4294967295, "
@@ -107,10 +165,11 @@ char * get_peer_str(
         "shutdown_deadline: %" PRIu16,
         peer->is_encrypted ? 'Y' : 'N',
         peer->is_writing ? 'Y' : 'N',
-        (char *[]){"TCP", "TLS", "HTTP", "WS"}[peer->layer],
+        (char *[]){"TCP", "TLS", "HTTP", "WS"}[RS_BOUNDS(0, peer->layer, 3)],
         (char *[]){"LIVE", "SHUTDOWN_WRITE_WS", "SHUTDOWN_WRITE",
-            "SHUTDOWN_READ", "DEAD"}[peer->mortality],
-        (char *[]){"NONE", "PARSING", "SENDING"}[peer->continuation],
+            "SHUTDOWN_READ", "DEAD"}[RS_BOUNDS(0, peer->mortality, 4)],
+        (char *[]){"NONE", "PARSING", "SENDING"}
+            [RS_BOUNDS(0, peer->continuation, 2)],
         peer->app_i,
         peer->endpoint_i,
         peer->socket_fd,
@@ -145,7 +204,7 @@ char * get_peer_str(
         str += sprintf(str, ", "
             "ws.heap_buf_contains_pong: %c, "
             "ws.rmsg_is_fragmented: %c, "
-            "ws.rmsg_is_utf8: %c, "
+            "ws.rmsg_data_kind: %s, "
             "ws.rmsg_utf8_state: %" PRIu8 ", "
             "ws.owref_c: %" PRIu8 ", "
             "ws.owref_i: %" PRIu32 ", "
@@ -153,7 +212,7 @@ char * get_peer_str(
             "ws.%s: %" PRIu32,
             peer->ws.heap_buf_contains_pong ? 'Y' : 'N',
             peer->ws.rmsg_is_fragmented ? 'Y' : 'N',
-            peer->ws.rmsg_is_utf8 ? 'Y' : 'N',
+            peer->ws.rmsg_data_kind == RS_UTF8 ? "RS_UTF8" : "RS_BIN",
             peer->ws.rmsg_utf8_state,
             peer->ws.owref_c,
             peer->ws.owref_i,
@@ -186,27 +245,4 @@ char * get_epoll_events_str(
         strcpy(str, "(none)");
     }
     return str;
-}
-
-// Move <size> bytes from <dest + offset> to <dest>. Source memory range and
-// destination memory range are allowed to overlap. Implemented through one or
-// more memcpy() operations of max <offset> bytes from the source range leftward
-// to the destination in left to right order, which has the cache-miss-reducing
-// benefit of eliminating the need to copy to a temporary intermediate buffer
-// outside of the <dest> array -- as might have been the case if a naive
-// memmove() implementation was used instead.
-void move_left(
-    void * dest,
-    size_t offset,
-    size_t size
-) {
-    uint8_t * _dest = dest;
-    uint8_t * _src = _dest + offset;
-    size_t moved_size = 0;
-    while (size > offset) {
-        memcpy(_dest + moved_size, _src + moved_size, offset);
-        size -= offset;
-        moved_size += offset;
-    }
-    memcpy(_dest + moved_size, _src + moved_size, size);
 }

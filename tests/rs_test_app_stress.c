@@ -203,8 +203,7 @@ rs_test_ret init_cb(
     struct rs_conf const * conf = rs_get_conf(rs);
     struct rs_stress * s = rs_get_app_data(rs);
     s->max_msg_byte_c = conf->max_ws_msg_size;
-    s->msg_byte_c = s->max_msg_byte_c;
-    s->interval = 10000000; // 10 seconds
+    s->interval = 1000000; // 1 second
     RS_LOG(LOG_DEBUG, "[init_cb] s->interval: %d, s->msg_byte_c: %zu, "
         "s->max_msg_byte_c: %zu",
         s->interval, s->msg_byte_c, s->max_msg_byte_c);
@@ -270,24 +269,11 @@ rs_test_ret timer_cb(
     rs_t * rs
 ) {
     struct rs_stress * s = rs_get_app_data(rs);
-    if (!s->client_c) {
-        return s->interval;
+    if (s->client_c) {
+        s->msg_byte_c = randrange(s->max_msg_byte_c / 10) + 1;
+        send_something(rs, s, false);
     }
-    send_something(rs, s, false);
-    s->msg_byte_c = s->msg_byte_c > 200000 ? s->msg_byte_c - 200000 : 1;
-    //if (s->msg_byte_c < s->max_msg_byte_c) {
-    //    s->msg_byte_c++;
-    //    return s->interval = RS_MAX(100000 /* 0.1 sec */, s->interval * 9 / 10);
-    //}
-    //// Give RingSocket some time to cool down and process accumulated owrefs.
-    //s->msg_byte_c = 1;
-    //return s->interval = 200000; // 0.2 sec
-
-    //if (s->interval >= 20000000) {
-    //    return s->interval = 100000;
-    //}
-    //return s->interval = s->interval < 99000 ? 20000000 : s->interval - 100;
-    return s->interval;
+    return s->interval = RS_MAX(10000 /* 0.01 sec */, s->interval - 1000);
 }
 
 RS_APP(

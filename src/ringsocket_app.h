@@ -143,9 +143,9 @@ struct rs_app_cb_args { // AKA rs_t (typedef located in ringsocket_api.h)
     uint8_t * wbuf;
     size_t wbuf_size;
     size_t wbuf_i;
-    enum rs_callback cb;
     uint32_t inbound_peer_i;
     int inbound_socket_fd;
+    unsigned cb; // unsigned version of enum rs_callback
     uint16_t inbound_endpoint_id;
     uint16_t inbound_worker_i;
 };
@@ -162,22 +162,10 @@ struct rs_app_schedule {
 // #############################################################################
 // # Fatal app error handling ##################################################
 
-// todo: This should probably be replaced with something less dumb.
+// This should probably be replaced at some point with something less dumb.
 #define RS_APP_FATAL exit(EXIT_FAILURE)
 
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
-
-#define RS_GUARD_CB(allowed_cb_mask) \
-do { \
-    if (!(rs->cb & allowed_cb_mask)) { \
-        RS_LOG(LOG_ERR, "%s must not be called from an RS_%s() " \
-            "callback function: shutting down...", __func__, \
-            (char *[]){"", /*0x01*/"INIT", /*0x02*/"OPEN", "", \
-                /*0x04*/"READ...", "", "", "", /*0x08*/"CLOSE", "", "", "", \
-                "", "", "", "", /*0x10*/"TIMER..."}[rs->cb]); \
-        RS_APP_FATAL; \
-    } \
-} while (0)
 
 // #############################################################################
 // # RS_APP() ##################################################################

@@ -58,7 +58,7 @@ struct rs_worker {
     // Prevents looping over the entire array when targeting all connected peers
     uint32_t highest_peer_i;
 
-    uint8_t * rbuf;
+    uint8_t * rbuf; // Read buffer for read_tcp()/read_tls()
 
     // These 3 are used exclusively by rs_hash.c for HTTP Upgrade key hashing.
     EVP_MD_CTX * sha1_ctx;
@@ -73,6 +73,9 @@ struct rs_worker {
     size_t owrefs_elem_c;
     size_t newest_owref_i;
     size_t * oldest_owref_i_by_app;
+
+    // Used for library error string evaluation, or for passing on to RS_LOG().
+    char log_buf[256]; // Large enough for OpenSSL's ERR_error_string_n(), etc.
 };
 
 // The worker threads' array of connected peers may need to be quite long, so
@@ -153,7 +156,7 @@ union rs_peer {
             // because RFC6455 inexplicably allows fragments with payload size
             // of 0, hence the need for the separate .is_fragmented flag.
             uint8_t rmsg_is_fragmented: 1;
-            uint8_t rmsg_is_utf8: 1;
+            uint8_t rmsg_data_kind: 1; // Enum rs_data_kind as a single bit
             uint8_t rmsg_utf8_state: 5;
         };
         uint8_t owref_c; // Total of all outbound app wmsgs waiting to be sent

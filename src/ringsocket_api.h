@@ -111,6 +111,8 @@ enum rs_data_kind {
 #define RS_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define RS_MAX(a, b) ((a) > (b) ? (a) : (b))
 
+#define RS_BOUNDS(lower, i, upper) RS_MIN(RS_MAX(lower, i), upper)
+
 // Size in bytes of a fixed length char array, excluding the trailing NULL byte.
 #define RS_CONST_STRLEN(const_str) (sizeof(const_str) - 1)
 
@@ -174,21 +176,6 @@ RS_MACRIFY_LOG( \
     __VA_ARGS__ \
 )
 
-// Same as RS_LOG, except that the 3rd arg is expected to be a non-0-terminated
-// string buffer, of which the size is expected to be the 4th arg.
-#define RS_LOG_CHBUF(lvl, fmt, chbuf, ...) \
-RS_MACRIFY_LOG( \
-    RS_256_2( \
-        _RS_LOG_CHBUF_1, \
-        _RS_LOG_CHBUF_MORE, \
-        __VA_ARGS__ \
-    ), \
-    lvl, \
-    fmt, \
-    chbuf, \
-    __VA_ARGS__ \
-)
-
 // RingSocket's only two variables with external linkage:
 
 // Used instead of setlogmask() in order to optimize out the overhead of calling
@@ -217,7 +204,7 @@ thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 #define _RS_SYSLOG(lvl, ...) \
 do { \
     if ((lvl) <= _rs_log_max) { \
-        syslog((lvl), "%s:%s():" RS_STRINGIFY(__LINE__) __VA_ARGS__); \
+        syslog((lvl), "%s%s():" RS_STRINGIFY(__LINE__) __VA_ARGS__); \
     } \
 } while (0)
 
@@ -236,23 +223,6 @@ do { \
 #define _RS_LOG_ERRNO_MORE(lvl, fmt, ...) \
     _RS_SYSLOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
         __VA_ARGS__, strerror(errno))
-
-#define _RS_LOG_CHBUF_VLA(chbuf, size) \
-    char str[(size) + 1]; \
-    memcpy(str, chbuf, size); \
-    str[size] = '\0' \
-
-#define _RS_LOG_CHBUF_1(lvl, fmt, chbuf, size) \
-do { \
-    _RS_LOG_CHBUF_VLA(chbuf, size); \
-    _RS_LOG_MORE((lvl), fmt ": %s", (str)); \
-} while (0)
-
-#define _RS_LOG_CHBUF_MORE(lvl, fmt, chbuf, size, ...) \
-do { \
-    _RS_LOG_CHBUF_VLA(chbuf, size); \
-    _RS_LOG_MORE((lvl), fmt ": %s", __VA_ARGS__, (str)); \
-} while (0)
 
 // #############################################################################
 // # Heap memory management macros #############################################

@@ -7,7 +7,7 @@
 #include "rs_tls.h" // read_tls(), write_tls()
 #include "rs_to_app.h" // send_read_to_app(), send_close_to_app()
 #include "rs_utf8.h" // validate_utf8()
-#include "rs_util.h" // get_peer_str(), move_left()
+#include "rs_util.h" // move_left(), bin_to_hexstr(), get_peer_str()
 #include "rs_websocket.h"
 
 #define RS_IS_CONTROL_FRAME(opc) ((opc) >= RS_WS_OPC_FIN_CLOSE)
@@ -33,16 +33,19 @@ static uint8_t const close_wmsgs[][4] = {
 };
 
 static rs_ret write_ws_control_frame(
+    struct rs_worker * worker,
     union rs_peer * peer,
     uint8_t const * control_frame
 ) {
     // Because control frame payload size cannot be greater than 125, byte #2 of
     // a server-to-client control frame must contain the payload size as-is.
     // Reference: https://tools.ietf.org/html/rfc6455#section-5.5
-    size_t wsize = 2 + control_frame[1];
-    return peer->is_encrypted ?
-        write_tls(peer, control_frame, wsize):
-        write_tcp(peer, control_frame, wsize);
+    size_t wsize = control_frame[1];
+    RS_LOG(LOG_DEBUG, "Writing a WebSocket control frame to peer %s: %s",
+        get_peer_str(peer),
+        bin_to_log_buf_as_hex(worker, control_frame, wsize));
+    return peer->is_encrypted ? write_tls(worker, peer, control_frame, wsize) :
+                                        write_tcp(peer, control_frame, wsize);
 }
 
 static rs_ret read_ws(
@@ -68,10 +71,10 @@ static rs_ret read_ws(
         }
         size_t new_rsize = 0;
         rs_ret ret = peer->is_encrypted ?
-            read_tls(peer, worker->rbuf + old_rsize, rbuf_size - old_rsize,
-                &new_rsize):
-            read_tcp(peer, worker->rbuf + old_rsize, rbuf_size - old_rsize,
-                &new_rsize);
+            read_tls(worker, peer,
+                worker->rbuf + old_rsize, rbuf_size - old_rsize, &new_rsize) :
+            read_tcp(peer,
+                worker->rbuf + old_rsize, rbuf_size - old_rsize, &new_rsize);
         *unparsed_rsize += new_rsize;
         old_rsize += new_rsize;
         switch (ret) {
@@ -146,7 +149,7 @@ static rs_ret parse_ws_msg(
     size_t unparsed_rsize = peer->ws.unparsed_rsize;
 
     if (peer->ws.heap_buf_contains_pong) {
-        RS_GUARD(write_ws_control_frame(peer,
+        RS_GUARD(write_ws_control_frame(worker, peer,
             peer->heap_buf + *msg_size + unparsed_rsize));
         // The pong frame has been written out. Altough it's actually still
         // stored in peer->heap_buf, being located behind any of its other data
@@ -199,8 +202,8 @@ static rs_ret parse_ws_msg(
                 // was a non-final RS_WS_OPC_NFIN_*.
                 RS_WS_RETURN_CLOSE_MSG(RS_WS_CLOSE_ERROR_PROTOCOL);
             }
-            // WebSocket test messages must be utf8-encoded.
-            peer->ws.rmsg_is_utf8 = true;
+            // WebSocket text messages must be utf8-encoded.
+            peer->ws.rmsg_data_kind = RS_UTF8;
             break;
         case RS_WS_OPC_NFIN_BIN:
         case RS_WS_OPC_FIN_BIN:
@@ -210,7 +213,7 @@ static rs_ret parse_ws_msg(
                 // was a non-final RS_WS_OPC_NFIN_*.
                 RS_WS_RETURN_CLOSE_MSG(RS_WS_CLOSE_ERROR_PROTOCOL);
             }
-            peer->ws.rmsg_is_utf8 = false;
+            peer->ws.rmsg_data_kind = RS_BIN;
             break;
         default:
             // Handle the rest of the opcode checks after obtaining the payload.
@@ -302,7 +305,7 @@ static rs_ret parse_ws_msg(
                 // Reduce payload size to only the payload part already read
                 payload_size = unparsed_rsize - header_size;
                 unmask_ws_payload(payload, payload_size, mask_i);
-                if (peer->ws.rmsg_is_utf8) {
+                if (peer->ws.rmsg_data_kind == RS_UTF8) {
                     peer->ws.rmsg_utf8_state = validate_utf8(payload,
                         payload_size, peer->ws.rmsg_utf8_state);
                     if (!RS_IS_VALID_UTF8_FRAGMENT(
@@ -318,7 +321,7 @@ static rs_ret parse_ws_msg(
         unparsed_rsize -= frame_size;
         // This frame's whole payload was read. Unmask from mask_i and validate.
         unmask_ws_payload(payload, payload_size, mask_i);
-        if (peer->ws.rmsg_is_utf8) {
+        if (peer->ws.rmsg_data_kind == RS_UTF8) {
             peer->ws.rmsg_utf8_state =
                 validate_utf8(payload, payload_size, peer->ws.rmsg_utf8_state);
             if (!RS_IS_VALID_UTF8_MESSAGE(peer->ws.rmsg_utf8_state)) {
@@ -341,13 +344,13 @@ static rs_ret parse_ws_msg(
             goto parse_success;
         case RS_WS_OPC_NFIN_TEXT:
             // The first frame of a fragmented UTF-8 message
-            // (Already set above: peer->ws.is_utf8 = true)
+            // (Already set above: peer->ws.rmsg_data_kind = RS_UTF8)
         case RS_WS_OPC_NFIN_BIN:
             // The first frame of a fragmented binary message
             break;
         case RS_WS_OPC_FIN_TEXT:
             // The only frame of an unfragmented UTF-8 message
-            // (Already set above: peer->ws.is_utf8 = true)
+            // (Already set above: peer->ws.rmsg_data_kind = RS_UTF8)
         case RS_WS_OPC_FIN_BIN:
             // The only frame of an unfragmented binary message
             *msg = payload;
@@ -356,7 +359,7 @@ static rs_ret parse_ws_msg(
             // Clean up per-msg peer state
             peer->ws.rmsg_is_fragmented = false;
             peer->ws.rmsg_utf8_state = 0;
-            // ws.rmsg_is_utf8 must remain as-is
+            // ws.rmsg_data_kind must remain as-is
             peer->ws.msg_rsize = 0;
             peer->ws.unparsed_rsize = unparsed_rsize;
             if (peer->heap_buf) {
@@ -384,7 +387,7 @@ static rs_ret parse_ws_msg(
             payload[-2] = RS_WS_OPC_FIN_PONG;
             payload[-1] = payload_size;
             {
-                rs_ret ret = write_ws_control_frame(peer, payload - 2);
+                rs_ret ret = write_ws_control_frame(worker, peer, payload - 2);
                 switch (ret) {
                 case RS_OK:
                     break; // The next step is the same as that of the pong case
@@ -443,8 +446,8 @@ rs_ret handle_ws_io(
     case RS_MORTALITY_SHUTDOWN_WRITE:
         if (peer->continuation == RS_CONT_SENDING) {
             write_ws_close_msg:
-            switch (write_ws_control_frame(peer,
-                close_wmsgs[peer->ws.close_wmsg_i])) {
+            switch (write_ws_control_frame(worker, peer,
+                close_wmsgs[RS_BOUNDS(0, peer->ws.close_wmsg_i, 3)])) {
             case RS_OK:
                 peer->continuation = RS_CONT_NONE;
                 break;
@@ -475,9 +478,8 @@ rs_ret handle_ws_io(
             size_t msg_size = 0;
             switch (parse_ws_msg(worker, peer, &msg, &msg_size)) {
             case RS_OK:
-                //RS_LOG_CHBUF(LOG_INFO,
-                //    "Received a chunked WebSocket message from %s",
-                //    msg, msg_size, get_peer_str(peer));
+                RS_LOG(LOG_DEBUG, "Successfully parsed a %zu byte chunked "
+                    "WebSocket message from %s", msg_size, get_peer_str(peer));
                 RS_GUARD(send_read_to_app(worker, peer, peer_i, msg, msg_size));
                 break;
             case RS_AGAIN:
@@ -519,9 +521,9 @@ rs_ret handle_ws_io(
             size_t msg_size = 0;
             switch (parse_ws_msg(worker, peer, &msg, &msg_size)) {
             case RS_OK:
-                //RS_LOG_CHBUF(LOG_DEBUG,
-                //    "Received a WebSocket message in one go from %s",
-                //    msg, msg_size, get_peer_str(peer));
+                RS_LOG(LOG_DEBUG, "Successfully parsed a %zu byte WebSocket "
+                    "message in a single iteration from %s", msg_size,
+                    get_peer_str(peer));
                 RS_GUARD(send_read_to_app(worker, peer, peer_i, msg, msg_size));
                 break;
             case RS_AGAIN:

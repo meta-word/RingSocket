@@ -70,10 +70,8 @@ static rs_ret send_newest_cmsg(
             "PARS" : "SEND", peer->ws.owref_c);
         return RS_OK;
     }
-    switch (peer->is_encrypted ?
-        write_tls(peer, msg, msg_size) :
-        write_tcp(peer, msg, msg_size)
-    ) {
+    switch (peer->is_encrypted ? write_tls(worker, peer, msg, msg_size) :
+                                         write_tcp(peer, msg, msg_size)) {
     case RS_OK:
         if (*msg == RS_WS_OPC_FIN_CLOSE) { // Check if msg is close notification
             RS_LOG(LOG_DEBUG, "Successfully sent newest %zu byte ws%s close "
@@ -405,9 +403,8 @@ rs_ret send_pending_owrefs(
         struct rs_owref * owref = worker->owrefs + peer->ws.owref_i;
         uint8_t const * ws = owref->cmsg->msg + owref->head_size;
         size_t ws_size = owref->cmsg->size - owref->head_size;
-        switch (peer->is_encrypted ?
-            write_tls(peer, ws, ws_size) :
-            write_tcp(peer, ws, ws_size)) {
+        switch (peer->is_encrypted ? write_tls(worker, peer, ws, ws_size) :
+                                             write_tcp(peer, ws, ws_size)) {
         case RS_OK:
             if (*ws != RS_WS_OPC_FIN_CLOSE) {
                 RS_LOG(LOG_DEBUG, "Successfully sent %zu byte ws%s %s owref "

@@ -38,6 +38,24 @@
 // #############################################################################
 // # Internal app callback helper functions (don't call these from app code) ###
 
+static inline void rs_guard_cb(
+    char const * function_str,
+    unsigned cb,
+    unsigned allowed_cb_mask
+) {
+    if (!(cb & allowed_cb_mask)) {
+        RS_LOG(LOG_ERR, "%s must not be called from an RS_%s() callback "
+            "function: shutting down...", function_str,
+            (char *[]){/* 0*/"",
+                /* 1*/"INIT", /* 2*/"OPEN", /* 3*/"", /* 4*/"READ...",
+                /* 5*/"",     /* 6*/"",     /* 7*/"", /* 8*/"CLOSE",
+                /* 9*/"",     /*10*/"",     /*11*/"", /*12*/"",
+                /*13*/"",     /*14*/"",     /*15*/"", /*16*/"TIMER..."
+            }[RS_MIN(16, cb)]);
+        RS_APP_FATAL;
+    }
+}
+
 static inline rs_ret rs_check_app_wsize(
     rs_t * rs,
     size_t incr_size
@@ -60,7 +78,8 @@ static inline void rs_send(
     uint32_t recipient_c,
     enum rs_data_kind data_kind
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     size_t payload_size = rs->wbuf_i;
     if (payload_size > rs->conf->max_ws_msg_size) {
         RS_LOG(LOG_ERR, "Payload of size %zu exceeds the configured "

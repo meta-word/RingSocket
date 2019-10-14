@@ -34,7 +34,7 @@
 static inline uint64_t rs_get_client_id(
     rs_t const * rs
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE); 
+    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
     return *((uint64_t *) (uint32_t []){
         // Offset worker index by 1 to prevent ever returning an ID value of 0.
         rs->inbound_worker_i + 1,
@@ -45,7 +45,7 @@ static inline uint64_t rs_get_client_id(
 static inline uint64_t rs_get_endpoint_id(
     rs_t const * rs
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE); 
+    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
     return rs->inbound_endpoint_id;
 }
 
@@ -66,8 +66,8 @@ static inline void rs_w_p(
     void const * src,
     size_t size
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
-    RS_GUARD_APP(rs_check_app_wsize(rs, size));
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     memcpy(rs->wbuf + rs->wbuf_i, src, size);
     rs->wbuf_i += size;
 }
@@ -83,7 +83,8 @@ static inline void rs_w_uint8(
     rs_t * rs,
     uint8_t u8
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 1));
     rs->wbuf[rs->wbuf_i++] = u8;
 }
@@ -92,7 +93,8 @@ static inline void rs_w_uint16(
     rs_t * rs,
     uint16_t u16
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 2));
     *((uint16_t *) (rs->wbuf + rs->wbuf_i)) = u16;
     rs->wbuf_i += 2;
@@ -102,7 +104,8 @@ static inline void rs_w_uint32(
     rs_t * rs,
     uint32_t u32
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 4));
     *((uint32_t *) (rs->wbuf + rs->wbuf_i)) = u32;
     rs->wbuf_i += 4;
@@ -112,7 +115,8 @@ static inline void rs_w_uint64(
     rs_t * rs,
     uint32_t u64
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER); 
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 8));
     *((uint64_t *) (rs->wbuf + rs->wbuf_i)) = u64;
     rs->wbuf_i += 8;
@@ -232,7 +236,7 @@ static inline void rs_to_cur(
     rs_t * rs,
     enum rs_data_kind data_kind
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ); 
+    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
     rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
         (uint32_t []){rs->inbound_peer_i}, 1, data_kind);
     rs->wbuf_i = 0;
@@ -301,7 +305,7 @@ static inline void rs_to_every_except_cur(
     rs_t * rs,
     enum rs_data_kind data_kind
 ) {
-    RS_GUARD_CB(RS_CB_OPEN | RS_CB_READ); 
+    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
