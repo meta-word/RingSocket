@@ -11,10 +11,19 @@ void move_left(
     size_t size
 );
 
-char * bin_to_log_buf_as_hex(
+char * bin_to_log_buf(
     struct rs_worker * worker,
     void const * bin,
     size_t size
+);
+
+char * pointer_context_to_log_buf(
+    struct rs_worker * worker,
+    void const * pointer,
+    void const * lower_bound,
+    void const * upper_bound,
+    size_t max_left_byte_c,
+    size_t max_right_byte_c
 );
 
 char * get_peer_str(

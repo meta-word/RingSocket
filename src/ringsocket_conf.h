@@ -15,18 +15,20 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 #include <arpa/inet.h> // struct in_addr, struct in6_addr
 
@@ -45,10 +47,11 @@ struct rs_conf {
     struct rs_conf_app * apps;
     size_t inbound_ring_buf_size;
     size_t outbound_ring_buf_size;
+    size_t worker_rbuf_size;
+    size_t max_ws_msg_size;
+    size_t max_ws_frame_chain_size;
     double realloc_multiplier;
     uint32_t fd_alloc_c;
-    uint32_t max_ws_msg_size;
-    uint32_t worker_rbuf_size;
     uint32_t owrefs_elem_c;
     uint16_t epoll_buf_elem_c;
     uint16_t port_c;

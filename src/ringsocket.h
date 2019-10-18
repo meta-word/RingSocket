@@ -14,19 +14,21 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   |    [YOU ARE HERE]
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  [YOU ARE HERE]          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 // #############################################################################
 // # RingSocket app callback API helper functions ##############################

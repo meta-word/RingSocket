@@ -11,6 +11,9 @@
 // threads. Instead, commence the RingSocket "include chain" "2 steps up" at:
 #include <ringsocket_app.h>
 
+// #############################################################################
+// # struct rs_worker & Co. ####################################################
+
 // It may seem like the rs_worker_args and rs_worker structs could be replaced
 // by a single struct, but their differentation is due to false sharing
 // considerations.
@@ -74,17 +77,23 @@ struct rs_worker {
     size_t newest_owref_i;
     size_t * oldest_owref_i_by_app;
 
-    // Used for library error string evaluation, or for passing on to RS_LOG().
-    char log_buf[256]; // Large enough for OpenSSL's ERR_error_string_n(), etc.
+    // Defined in ringsocket_wsframe.h. Used by rs_websocket.c to buffer pongs.
+    struct rs_wsframe_out_pong pong_response;
+
+    // Used for OpenSSL's ERR_error_string_n(), and for passing on to RS_LOG().
+    char log_buf[400]; // Enough to print a full control frame as hex, etc.
 };
+
+// #############################################################################
+// # union rs_peer & Co. #######################################################
 
 // The worker threads' array of connected peers may need to be quite long, so
 // each peer element should be made as compact as possible to minimize cache
 // misses, which is why rs_peer is implemented as follows:
 //
-// * Member types are as small as they can be proven to be safe, unless
+// * Member types are as small as they can be proven to be safe (unless
 //   alignment requirements allow them extra space that would otherwise lead to
-//   padding below that member.
+//   padding below that member).
 // * Small types are grouped in pairs such that their combined size matches the
 //   alignment of their adjacent member recursively, up to 64-bit "blocks".
 // * Union usage allows space sharing between variables that have mutually
@@ -94,78 +103,96 @@ struct rs_worker {
 //   top-level struct. Because of that, rs_peer is instead implemented as a
 //   top-level union of equally sized structs.
 // * Clean namespacing: full-lifetime shared member variables are placed in a
-//   C11 anonymous struct to avoid confusion with layer/phase-specific .http and
-//   .ws struct members and vice versa.
+//   C11 anonymous struct to avoid confusion with layer-specific .http and .ws
+//   struct members, and vice versa.
 // * To prevent member overlap with the shared anonymous struct members, each
 //   struct contains an anonymous "phony bit flag" placeholder of the right size
-//   and position to achieve said alignment.
-// * A C11 static_assert(sizeof(union rs_peer) == 40) call makes sure everything
-//   is packed by the compiler as intended.
+//   and position to achieve the desired alignment.
+// * C11 static_assert(sizeof(X) == Y) assertions in rs_worker.c make sure
+//   everything is packed by as intended in a standard-compliant way.
+
 union rs_peer {
-    // 5 64-bit "blocks" amounting to a total size of only 40 bytes
+    // 4 64-bit "blocks" amounting to a total size of only 32 bytes
+    // (static_assert(sizeof(union rs_peer) == 32) checked in rs_worker.c.)
+
+    // Anonymous struct containing members that are valid regardless of .layer.
     struct {
         // 1st 64-bit block
         struct {
             uint8_t is_encrypted: 1; // Is this peer talking through TLS? 
-            uint8_t is_writing: 1; // Did the last IO call return WANT_WRITE?
+            uint8_t is_writing: 1; // Will the next IO direction be a write()?
             uint8_t layer: 2; // See enum rs_layer below
             uint8_t mortality: 2; // See enum rs_mortality below
-            uint8_t continuation: 2; // See enum rs_ws_call below
+            uint8_t continuation: 2; // See enum rs_continuation below
         };
         uint8_t app_i;
         uint16_t endpoint_i;
-        int socket_fd; // Requires static_assert(sizeof(int) == 4)
+        int socket_fd; // static_assert(sizeof(int) == 4) checked in rs_worker.c
         // 2nd (max-)64-bit block
         union {
+            // Applicable if .is_encrypted is true: OpenSSL session pointer.
             SSL * tls;
-            // Only used when not is_encrypted. Unlike SSL_write_ex(), write()
-            // needs this offset on the original message when resuming write()s.
+
+            // Applicable if .is_encrypted is false: write() needs this offset
+            // added to the original message pointer when resuming write()s in
+            // order to match OpenSSL's SSL_write(_ex)() behavior which wants to
+            // received the same message pointer on write resumptions (and
+            // therefore tracks this offset internally in its session SSL data).
             size_t old_wsize;
         };
-        // 3rd (max-)64-bit block
-        uint8_t * heap_buf;
-        // 4th & 5th 64-bit blocks
-        uint16_t shutdown_deadline; // 0 means never (i.e., "not yet")
-        uint16_t layer_specific_data[7];
+        // 3rd and 4th 64-bit blocks
+        uint16_t shutdown_deadline;
+        uint8_t layer_specific_data[14]; // Allow memset()ting layer data to 0.
     };
+
+    // Applicable if .layer == RS_LAYER_HTTP
     struct {
-        // 1st-3rd 64-bit blocks
-        uint64_t:64; uint64_t:64; uint64_t:64;
-        // 4th 64-bit block
-        uint16_t:16;
-        uint16_t origin_i;
-        uint32_t partial_strlen;
-        // 5th 64-bit block
-        uint16_t jump_distance;
-        uint8_t error_i;
-        uint8_t hostname_was_parsed; // boolean
-        uint8_t origin_was_parsed; // boolean
-        uint8_t upgrade_was_parsed; // boolean
-        uint8_t wskey_was_parsed; // boolean
-        uint8_t wsversion_was_parsed; // boolean
-    } http;
-    struct {
-        // 1st-3rd 64-bit blocks
-        uint64_t:64; uint64_t:64; uint64_t:64;
-        // 4th 64-bit block
-        uint16_t:16;
+        // 1st and 2nd 64-bit blocks
+        uint64_t:64; uint64_t:64; // Pad past the anonymous shared struct above.
+        
+        // 3rd 64-bit block
+        uint16_t:16; // Pad past .shutdown_deadline of the shared struct above;
         struct {
-            uint8_t heap_buf_contains_pong: 1;
-            // Cannot check for websocket fragmentation with .msg_rsize > 0,
-            // because RFC6455 inexplicably allows fragments with payload size
-            // of 0, hence the need for the separate .is_fragmented flag.
-            uint8_t rmsg_is_fragmented: 1;
-            uint8_t rmsg_data_kind: 1; // Enum rs_data_kind as a single bit
-            uint8_t rmsg_utf8_state: 5;
+            uint8_t hostname_was_parsed: 1;
+            uint8_t origin_was_parsed: 1;
+            uint8_t upgrade_was_parsed: 1;
+            uint8_t wskey_was_parsed: 1;
+            uint8_t wsversion_was_parsed: 1;
+            uint8_t error_i: 3;
         };
-        uint8_t owref_c; // Total of all outbound app wmsgs waiting to be sent
-        uint32_t owref_i; // Index to worker->rs_owrefs array of owref structs
-        // 5th 64-bit block
-        uint32_t msg_rsize;
+        uint8_t jump_distance; 
+        uint16_t partial_strlen;
+        uint16_t origin_i;
+
+        // 4th (max-)64-bit block
+        char * char_buf;
+    } http;
+
+    // Applicable if .layer == RS_LAYER_WEBSOCKET
+    struct {
+        // 1st and 2nd 64-bit blocks
+        uint64_t:64; uint64_t:64; // Pad past the anonymous shared struct above.
+
+        // 3rd  64-bit block
+        uint16_t:16; // Pad past .shutdown_deadline of the shared struct above;
+        // owref: "Outbound Write REFerence" (see struct rs_owref below)
+        uint16_t owref_c; // Pending outbound write count (see rs_from_app.c)
+        uint32_t owref_i; // This peer's lowest index among worker->owrefs
+
+        // 4th (max-)64-bit block
         union {
-            // Mutually exclusive because no more msg will be read when closing.
-            uint32_t unparsed_rsize;
-            uint32_t close_wmsg_i;
+            // Applicable if .mortality == RS_MORTALITY_LIVE &&
+            //            .continuation == RS_CONT_PARSING
+            struct rs_wsframe_parser_storage * storage; // See rs_websocket.c.
+
+            // Applicable if .mortality == RS_MORTALITY_LIVE &&
+            //            .continuation == RS_CONT_SENDING
+            struct rs_wsframe_out_small * pong_response; // See rs_websocket.c.
+            
+            // Applicable if .mortality == RS_MORTALITY_SHUTDOWN_WRITE &&
+            //            .continuation == RS_CONT_SENDING
+            // Control frame sent in response to a WebSocket parser condition
+            int close_frame; // See rs_websocket.c
         };
     } ws;
 };

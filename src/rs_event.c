@@ -87,7 +87,7 @@ rs_ret handle_peer_events(
             }
             break;
         case RS_LAYER_WEBSOCKET: default:
-            RS_GUARD(handle_ws_io(worker, peer, peer_i));
+            RS_GUARD(handle_websocket_io(worker, peer, peer_i));
         }
     } while (peer->layer != layer);
     return RS_OK;

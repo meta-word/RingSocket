@@ -23,7 +23,10 @@ RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.
 #define RS_MIN_FD_ALLOC_C 0x1000 // 4096 == the Linux default these days
 #define RS_DEFAULT_MAX_WS_MSG_SIZE 0x1000000 // 16 MB
 #define RS_MIN_MAX_WS_MSG_SIZE 125
-#define RS_MAX_MAX_WS_MSG_SIZE (UINT32_MAX - 0xFF)
+#define RS_MAX_MAX_WS_MSG_SIZE 0x1000000000 // 64 GB (Have a monstrous machine?)
+#define RS_DEFAULT_MAX_WS_FRAME_CHAIN_SIZE (4 * RS_DEFAULT_MAX_WS_MSG_SIZE)
+#define RS_MIN_MAX_WS_FRAME_CHAIN_SIZE (1.1 * RS_MIN_MAX_WS_MSG_SIZE)
+#define RS_MAX_MAX_WS_FRAME_SIZE (1.01 * RS_MAX_MAX_WS_MSG_SIZE)
 #define RS_DEFAULT_WORKER_RBUF_SIZE (2 * RS_DEFAULT_MAX_WS_MSG_SIZE)
 #define RS_MIN_WORKER_RBUF_SIZE (2 * RS_MIN_MAX_WS_MSG_SIZE)
 #define RS_DEFAULT_INBOUND_RING_BUF_SIZE (4 * RS_DEFAULT_MAX_WS_MSG_SIZE)
@@ -557,21 +560,32 @@ static rs_ret parse_configuration(
                 "any lower is a bad idea."
         }, &conf->fd_alloc_c));
 
-    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "max_ws_msg_size",
-        &(jg_obj_uint32){
-            .defa = &(uint32_t){RS_DEFAULT_MAX_WS_MSG_SIZE},
-            .min = &(uint32_t){RS_MIN_MAX_WS_MSG_SIZE},
-            .max = &(uint32_t){RS_MAX_MAX_WS_MSG_SIZE},
+    RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "max_ws_msg_size",
+        &(jg_obj_sizet){
+            .defa = &(size_t){RS_DEFAULT_MAX_WS_MSG_SIZE},
+            .min = &(size_t){RS_MIN_MAX_WS_MSG_SIZE},
+            .max = &(size_t){RS_MAX_MAX_WS_MSG_SIZE},
             .min_reason = "Setting the maximum WebSocket message size any "
                 "lower is a bad idea.",
             .max_reason = "RingSocket does not support WebSocket messages any "
                 "larger."
         }, &conf->max_ws_msg_size));
 
-    RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "worker_rbuf_size",
-        &(jg_obj_uint32){
-            .defa = &(uint32_t){RS_DEFAULT_WORKER_RBUF_SIZE},
-            .min = &(uint32_t){RS_MIN_WORKER_RBUF_SIZE},
+    RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "max_ws_frame_chain_size",
+        &(jg_obj_sizet){
+            .defa = &(size_t){RS_DEFAULT_MAX_WS_FRAME_CHAIN_SIZE},
+            .min = &(size_t){RS_MIN_MAX_WS_FRAME_CHAIN_SIZE},
+            .max = &(size_t){RS_MAX_MAX_WS_FRAME_SIZE},
+            .min_reason = "Setting the maximum WebSocket frame chain size any "
+                "lower is a bad idea.",
+            .max_reason = "RingSocket does not support WebSocket frame chains "
+                "any larger."
+        }, &conf->max_ws_frame_chain_size));
+
+    RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "worker_rbuf_size",
+        &(jg_obj_sizet){
+            .defa = &(size_t){RS_DEFAULT_WORKER_RBUF_SIZE},
+            .min = &(size_t){RS_MIN_WORKER_RBUF_SIZE},
             .min_reason = "Setting worker_rbuf_size any lower is a bad idea."
         }, &conf->worker_rbuf_size));
 

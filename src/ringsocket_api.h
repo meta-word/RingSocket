@@ -15,18 +15,20 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 #include <errno.h> // errno for RS_LOG_ERRNO()
 #include <stdalign.h> // C11: aligned_alloc() for RS_CACHE_ALIGNED_CALLOC()
@@ -125,11 +127,11 @@ enum rs_data_kind {
 // Swap between network byte order and host byte order: reverse the bytes if
 // the machine is little-endian, else do nothing.
 #define RS_NTOH16(h16) (RS_IS_LITTLE_ENDIAN ? \
-    __builtin_bswap16(h16) : (h16))
+    __builtin_bswap16((uint16_t) (h16)) : (uint16_t) (h16))
 #define RS_NTOH32(h32) (RS_IS_LITTLE_ENDIAN ? \
-    __builtin_bswap32(h32) : (h32))
+    __builtin_bswap32((uint32_t) (h32)) : (uint32_t) (h32))
 #define RS_NTOH64(h64) (RS_IS_LITTLE_ENDIAN ? \
-    __builtin_bswap64(h64) : (h64))
+    __builtin_bswap64((uint64_t) (h64)) : (uint64_t) (h64))
 #define RS_HTON16(n16) RS_NTOH16(n16)
 #define RS_HTON32(n32) RS_NTOH32(n32)
 #define RS_HTON64(n64) RS_NTOH64(n64)

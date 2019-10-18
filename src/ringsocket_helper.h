@@ -5,10 +5,6 @@
 
 #define _POSIX_C_SOURCE 201112L // CLOCK_MONOTONIC_COARSE
 
-#define RS_INCLUDE_QUEUE_FUNCTIONS // Include function defs @ ringsocket_queue.h
-#define RS_INCLUDE_CONSUME_RING_MSG // rs_consume_ring_msg() @ ringsocket_ring.h
-#define RS_INCLUDE_PRODUCE_RING_MSG // rs_produce_ring_msg() @ ringsocket_ring.h
-
 #include <ringsocket_app.h>
 // <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
 //   |
@@ -20,18 +16,21 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//    [YOU ARE HERE]        |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   |       [YOU ARE HERE]
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 #include <time.h> // clock_gettime()
 
@@ -80,27 +79,24 @@ static inline void rs_send(
 ) {
     rs_guard_cb(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
-    size_t payload_size = rs->wbuf_i;
-    if (payload_size > rs->conf->max_ws_msg_size) {
+
+    if (rs->wbuf_i > rs->conf->max_ws_msg_size) {
         RS_LOG(LOG_ERR, "Payload of size %zu exceeds the configured "
             "max_ws_msg_size %zu. Shutting down to avert further trouble...",
-            payload_size, rs->conf->max_ws_msg_size);
+            rs->wbuf_i, rs->conf->max_ws_msg_size);
         RS_APP_FATAL;
     }
+
     size_t msg_size =
         1 + // uint8_t outbound_kind
         4 * (recipient_c > 1) + // if (recipient_c > 1): uint32_t recipient_c
         4 * recipient_c + // uint32_t array of recipients (peer_i elements)
-        2; // uint8_t WebSocket opcode + uint8_t WebSocket size indicator byte
-    if (payload_size > UINT16_MAX) {
-        msg_size += 8; // uint64_t WebSocket payload size (after '127' byte)
-    } else if (payload_size > 125) {
-        msg_size += 2; // uint16_t payload size (after '126' byte)
-    }
-    msg_size += payload_size;
+        rs_get_wsframe_out_size_from_payload_size(rs->wbuf_i);
+
     struct rs_ring_producer * prod = rs->outbound_producers + worker_i;
     RS_GUARD_APP(rs_produce_ring_msg(&rs->ring_pairs[worker_i].outbound_ring,
         prod, rs->conf->realloc_multiplier, msg_size));
+
     *prod->w++ = (uint8_t) outbound_kind;
     if (recipient_c) {
         if (recipient_c > 1) {
@@ -112,22 +108,14 @@ static inline void rs_send(
             prod->w += 4;
         } while (--recipient_c);
     }
-    *prod->w++ = data_kind == RS_UTF8 ? RS_WS_OPC_FIN_TEXT : RS_WS_OPC_FIN_BIN;
-    if (payload_size > UINT16_MAX) {
-        *prod->w++ = 127;
-        RS_W_HTON64(prod->w, payload_size);
-        prod->w += 8;
-    } else if (payload_size > 125) {
-        *prod->w++ = 126;
-        RS_W_HTON16(prod->w, payload_size);
-        prod->w += 2;
-    } else {
-        *prod->w++ = payload_size;
-    }
-    if (rs->wbuf_i) {
-        memcpy(prod->w, rs->wbuf, rs->wbuf_i);
-        prod->w += rs->wbuf_i;
-    }
+    union rs_wsframe * frame = (union rs_wsframe *) prod->w;
+    rs_clear_wsframe_bit_fields(frame);
+    rs_set_wsframe_is_final(frame, true);
+    rs_set_wsframe_opcode(frame, data_kind == RS_UTF8 ?
+        RS_WSFRAME_OPC_TEXT : RS_WSFRAME_OPC_BIN);
+    prod->w += rs_set_wsframe_out_payload_and_get_frame_size(frame, rs->wbuf,
+        rs->wbuf_i);
+
     RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_queue, rs->ring_pairs,
         rs->worker_sleep_states, rs->worker_eventfds, prod->w, worker_i, true));
 }
@@ -404,10 +392,17 @@ static inline rs_ret rs_close_peer(
     *prod->w++ = RS_OUTBOUND_SINGLE;
     *((uint32_t *) prod->w) = rs->inbound_peer_i;
     prod->w += 4;
-    *prod->w++ = RS_WS_OPC_FIN_CLOSE;
-    *prod->w++ = 0x02; /* payload size == 2 */
-    *((uint16_t *) prod->w) = RS_HTON16(ws_close_code);
-    prod->w += 2;
+
+    union rs_wsframe * frame = (union rs_wsframe *) prod->w;
+    rs_clear_wsframe_bit_fields(frame);
+    rs_set_wsframe_is_final(frame, true);
+    rs_set_wsframe_opcode(frame, RS_WSFRAME_OPC_CLOSE);
+
+    uint16_t net_bytes = 0;
+    RS_W_HTON16(&net_bytes, ws_close_code);
+    prod->w += rs_set_wsframe_out_payload_and_get_frame_size(frame,
+        &net_bytes, sizeof(net_bytes));
+ 
     RS_GUARD(rs_enqueue_ring_update(rs->ring_queue, rs->ring_pairs,
         rs->worker_sleep_states, rs->worker_eventfds, prod->w,
         rs->inbound_worker_i, true));

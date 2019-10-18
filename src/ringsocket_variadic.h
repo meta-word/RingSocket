@@ -14,18 +14,21 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
+
 
 // This header file contains helper macros that enable macros to expand into
 // different child macros depending on the number of __VA_ARGS__ they are called

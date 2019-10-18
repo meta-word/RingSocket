@@ -15,18 +15,20 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 #include <stdbool.h> // bool
 
@@ -110,28 +112,27 @@ struct rs_ring_consumer {
 // rs_consume_ring_msg() casts any ring buffer message pointer it returns to
 // this struct to clarify the message format to the caller.
 struct rs_consumer_msg {
-    uint32_t const size; // The size of msg in bytes.
+    uint64_t const size; // The size of msg in bytes.
     uint8_t const msg[]; // const: see comment in struct rs_ring_consumer above
 };
 
-// Every ring message is preceded by an uint32_t holding its size in bytes
-#define RS_RING_HEAD_SIZE sizeof(struct rs_consumer_msg) // AKA 4
+// Every ring message is preceded by an uint64_t holding its size in bytes
+#define RS_RING_HEAD_SIZE sizeof(struct rs_consumer_msg) // AKA 8
 
 // Every ring message must reserve the following size as a tail beyond the
 // message itself; to allow a route instruction to be inserted upon the
 // next ring write attempt, in the event that there is insufficient space inside
 // the current ring buffer to append the next message contiguously.
 //
-// A route instruction is one uint32_t with a value of 0 (where the size
-// uint32_t would be if the next message was appended contiguously), followed by
+// A route instruction is one uint64_t with a value of 0 (where the size
+// uint64_t would be if the next message was appended contiguously), followed by
 // a uint8_t pointer to the start of a new producer-allocated ring buffer.
 #define RS_RING_ROUTE_SIZE (RS_RING_HEAD_SIZE + sizeof(uint8_t *))
 
-#ifdef RS_INCLUDE_PRODUCE_RING_MSG
 static inline bool rs_would_clobber(
     uint8_t const * unwritable,
     uint8_t const * w,
-    uint32_t msg_size
+    uint64_t msg_size
 ) {
     return w + RS_RING_HEAD_SIZE + msg_size + RS_RING_ROUTE_SIZE > unwritable;
 }
@@ -140,7 +141,7 @@ static inline bool rs_would_clobber(
 // bytes to prod->w if RS_OK is returned. This will update the members of
 // the prod instance where necessary in order to make said guarantee.
 //
-// This function will also take care of writing the uint32_t msg_size to the
+// This function will also take care of writing the uint64_t msg_size to the
 // ring buffer (becoming the .size member of struct rs_consumer_msg),
 // and incrementing prod->w by 4 bytes before returning. After returning, it's
 // the caller's responsibility to increment prod->w by msg_size prior to calling
@@ -149,7 +150,7 @@ static inline rs_ret rs_produce_ring_msg(
     struct rs_ring_atomic const * atomic,
     struct rs_ring_producer * prod,
     double alloc_multiplier, // If allocated, how big should a new ring buf be?
-    uint32_t msg_size
+    uint64_t msg_size
 ) {
     uint8_t const * r = NULL;
     RS_CASTED_ATOMIC_LOAD_RELAXED(&atomic->r, r, (uint8_t const *));
@@ -196,8 +197,8 @@ static inline rs_ret rs_produce_ring_msg(
             // Write a "route instruction": a value of 0 instead of msg_size,
             // to tell the consumer thread that the bytes following it should be
             // interpreted as a pointer to the next ring buffer location.
-            *((uint32_t *) prod->w) = 0;
-            prod->w += sizeof(struct rs_consumer_msg); // += 4
+            *((uint64_t *) prod->w) = 0;
+            prod->w += sizeof(struct rs_consumer_msg); // += 8
             // Set either a pointer to the start of the same ring to indicate
             // wrapping, or a pointer to a new ring buffer (route_to_new_ring).
             *((uint8_t * *) prod->w) = prod->ring;
@@ -212,18 +213,16 @@ static inline rs_ret rs_produce_ring_msg(
             prod->ring_size);
         return RS_FATAL;
     }
-    *((uint32_t *) prod->w) = msg_size;
-    prod->w += sizeof(struct rs_consumer_msg); // += 4
+    *((uint64_t *) prod->w) = msg_size;
+    prod->w += sizeof(struct rs_consumer_msg); // += 8
     // Note that the message itself has not been writtin yet. Instead, this
     // function returns RS_OK to indicate that the calling producer thread can
     // now safely write msg_size message bytes starting from prod->w. 
     return RS_OK;
 }
-#endif
 
 // Obtain a consumer_msg pointer from a ring consumer interface and increment
 // cons->r by that message's size, or return NULL if no new message exists yet.
-#ifdef RS_INCLUDE_CONSUME_RING_MSG
 static inline struct rs_consumer_msg * rs_consume_ring_msg(
     struct rs_ring_atomic const * atomic,
     struct rs_ring_consumer * cons
@@ -249,4 +248,3 @@ static inline struct rs_consumer_msg * rs_consume_ring_msg(
     cons->r += sizeof(*cmsg) + cmsg->size;
     return cmsg;
 }
-#endif

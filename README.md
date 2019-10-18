@@ -535,8 +535,11 @@ doing":
 * `"fd_alloc_c"`: The maximum number of open file descriptors (i.e., network
   connections) that RingSocket is allowed to handle simultaneously. Default:
   `4096`
-* `"max_ws_msg_size"`: Sets the maximum number of bytes a single WebSocket
-  message may contain. Default: `16777216` (i.e., 16 MB)
+* `"max_ws_msg_size"`: Sets the maximum total number of payload bytes a single
+  WebSocket message may contain. Default: `16777216` (i.e., 16 MB)
+* `"max_ws_frame_chain_size"`: Sets the maximum number of bytes a single
+  WebSocket message may encompass, including any frame headers and interleaved
+  control frames. Default: the `"max_ws_msg_size"` default multiplied by 1.1.
 * `"realloc_multiplier"`: The factor with which RingSocket should multipy the
   size of any memory buffer that has run out of free space when attempting to
   reallocate a larger buffer on the heap. Default: `1.5`

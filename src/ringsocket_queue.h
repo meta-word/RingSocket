@@ -15,18 +15,20 @@
 //    [YOU ARE HERE]       |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 #define _GNU_SOURCE // syscall()
 #include <inttypes.h> // PRI print format of stdint.h types
@@ -98,8 +100,6 @@ struct rs_ring_queue {
     size_t size;
     size_t oldest_i;
 };
-
-#ifdef RS_INCLUDE_QUEUE_FUNCTIONS
 
 static inline rs_ret rs_wake_up_app(
     struct rs_sleep_state * app_sleep_state,
@@ -269,5 +269,3 @@ static inline rs_ret rs_flush_ring_updates(
     }
     return RS_OK;
 }
-
-#endif

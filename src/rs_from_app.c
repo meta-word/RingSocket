@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2019 William Budd
 
-#define RS_INCLUDE_CONSUME_RING_MSG // See ringsocket_ring.h
-
 #include "rs_event.h" // handle_peer_events()
 #include "rs_from_app.h"
 #include "rs_tcp.h" // write_tcp()
@@ -37,25 +35,25 @@ rs_ret init_owrefs(
     return RS_OK;
 }
 
-static rs_ret send_newest_cmsg(
+static rs_ret send_newest_msg(
     struct rs_worker * worker,
     size_t * remaining_recipient_c,
     uint32_t peer_i,
-    uint8_t const * msg,
-    size_t msg_size
+    union rs_wsframe * frame,
+    uint64_t frame_size
 ) {
     union rs_peer * peer = worker->peers + peer_i;
     if (peer->layer != RS_LAYER_WEBSOCKET ||
         peer->mortality != RS_MORTALITY_LIVE) {
         //RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
         //    "peer %" PRIu32 ", because it's not live on the WebSocket layer.",
-        //    msg_size, peer_i);
+        //    frame_size, peer_i);
         return RS_OK;
     }
     if (peer->continuation != RS_CONT_NONE) {
-        if (peer->ws.owref_c == UINT8_MAX) {
+        if (peer->ws.owref_c == UINT16_MAX) {
             RS_LOG(LOG_WARNING, "More outbound write references are pending "
-                "for peer %s than the maximum supported number of 255: "
+                "for peer %s than the maximum supported number of 65535: "
                 "shutting the peer down", get_peer_str(peer));
             goto close_peer;
         }
@@ -66,16 +64,16 @@ static rs_ret send_newest_cmsg(
         RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
             "peer %" PRIu32 " yet, because its continuation state is "
             "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu8 ").",
-            msg_size, peer_i, peer->continuation == RS_CONT_PARSING ?
+            frame_size, peer_i, peer->continuation == RS_CONT_PARSING ?
             "PARS" : "SEND", peer->ws.owref_c);
         return RS_OK;
     }
-    switch (peer->is_encrypted ? write_tls(worker, peer, msg, msg_size) :
-                                         write_tcp(peer, msg, msg_size)) {
+    switch (peer->is_encrypted ? write_tls(worker, peer, frame, frame_size) :
+                                         write_tcp(peer, frame, frame_size)) {
     case RS_OK:
-        if (*msg == RS_WS_OPC_FIN_CLOSE) { // Check if msg is close notification
+        if (rs_get_wsframe_opcode(frame) == RS_WSFRAME_OPC_CLOSE) {
             RS_LOG(LOG_DEBUG, "Successfully sent newest %zu byte ws%s close "
-                "message from app to peer %" PRIu32 ".", msg_size,
+                "message from app to peer %" PRIu32 ".", frame_size,
                 peer->is_encrypted ? "s" : "", peer_i);
             peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
             // Call handle_peer_events() with MORTALITY_SHUTDOWN_WRITE (but
@@ -85,14 +83,14 @@ static rs_ret send_newest_cmsg(
             return handle_peer_events(worker, peer_i, 0);
         }
         RS_LOG(LOG_DEBUG, "Successfully sent newest %zu byte ws%s %s message "
-            "from app to peer %" PRIu32 ".", msg_size,
-            peer->is_encrypted ? "s" : "",
-            *msg == RS_WS_OPC_FIN_BIN ? "RS_BIN" : "RS_UTF8", peer_i);
+            "from app to peer %" PRIu32 ".", frame_size,
+            peer->is_encrypted ? "s" : "", rs_get_wsframe_opcode(frame) ==
+            RS_WSFRAME_OPC_BIN ? "RS_BIN" : "RS_UTF8", peer_i);
         return RS_OK;
     case RS_AGAIN:
         RS_LOG(LOG_DEBUG, "Attempt to send newest %zu byte ws%s message from "
             "app to peer %" PRIu32 " was unsuccessful due to RS_AGAIN.",
-            msg_size, peer->is_encrypted ? "s" : "", peer_i);
+            frame_size, peer->is_encrypted ? "s" : "", peer_i);
         peer->continuation = RS_CONT_SENDING;
         peer->ws.owref_c = 1;
         peer->ws.owref_i = worker->newest_owref_i;
@@ -101,9 +99,9 @@ static rs_ret send_newest_cmsg(
     case RS_CLOSE_PEER:
         RS_LOG(LOG_WARNING, "Attempt to send newest %zu byte ws%s message from "
             "app to peer %" PRIu32 " was unsuccessful due to RS_CLOSE_PEER.",
-            msg_size, peer->is_encrypted ? "s" : "", peer_i);
+            frame_size, peer->is_encrypted ? "s" : "", peer_i);
         close_peer:
-        if (*msg != RS_WS_OPC_FIN_CLOSE) {
+        if (rs_get_wsframe_opcode(frame) != RS_WSFRAME_OPC_CLOSE) {
             // Only notify the app of peer closure if the message the error
             // occurred on wasn't itself a close message sent by the app.
             RS_GUARD(send_close_to_app(worker, peer, peer_i));
@@ -181,33 +179,37 @@ rs_ret receive_from_app(
             size_t head_size = 1;
             uint32_t peer_c = 0;
             uint32_t * peer_i = (uint32_t *) (cmsg->msg + 1);
+            union rs_wsframe * frame = NULL;
             switch (*cmsg->msg) {
             case RS_OUTBOUND_SINGLE:
                 head_size += 4;
-                RS_GUARD(send_newest_cmsg(worker, &remaining_recipient_c,
-                    *peer_i, cmsg->msg + head_size, cmsg->size - head_size));
+                frame = (union rs_wsframe *) (cmsg->msg + head_size);
+                RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                    *peer_i, frame, cmsg->size - head_size));
                 break;
             case RS_OUTBOUND_ARRAY:
                 peer_c = *peer_i++;
                 head_size += 4 + 4 * peer_c;
+                frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t i = 0; i < peer_c; i++) {
-                    RS_GUARD(send_newest_cmsg(worker, &remaining_recipient_c,
-                        peer_i[i], cmsg->msg + head_size,
-                        cmsg->size - head_size));
+                    RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                        peer_i[i], frame, cmsg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY:
+                frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    RS_GUARD(send_newest_cmsg(worker, &remaining_recipient_c,
-                        p_i, cmsg->msg + head_size, cmsg->size - head_size));
+                    RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                        p_i, frame, cmsg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY_EXCEPT_SINGLE:
                 head_size += 4;
+                frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
                     if (p_i != *peer_i) {
-                        RS_GUARD(send_newest_cmsg(worker,
-                            &remaining_recipient_c, p_i, cmsg->msg + head_size,
+                        RS_GUARD(send_newest_msg(worker,
+                            &remaining_recipient_c, p_i, frame,
                             cmsg->size - head_size));
                     }
                 }
@@ -215,12 +217,13 @@ rs_ret receive_from_app(
             case RS_OUTBOUND_EVERY_EXCEPT_ARRAY: default:
                 peer_c = *peer_i++;
                 head_size += 4 + 4 * peer_c;
+                frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
                     for (size_t i = 0; peer_i[i] != p_i; i++) {
                         if (i == peer_c) {
-                            RS_GUARD(send_newest_cmsg(worker,
-                                &remaining_recipient_c, p_i,
-                                cmsg->msg + head_size, cmsg->size - head_size));
+                            RS_GUARD(send_newest_msg(worker,
+                                &remaining_recipient_c, p_i, frame,
+                                cmsg->size - head_size));
                             break;
                         }
                     }
@@ -401,20 +404,23 @@ rs_ret send_pending_owrefs(
     }
     for (;;) {
         struct rs_owref * owref = worker->owrefs + peer->ws.owref_i;
-        uint8_t const * ws = owref->cmsg->msg + owref->head_size;
-        size_t ws_size = owref->cmsg->size - owref->head_size;
-        switch (peer->is_encrypted ? write_tls(worker, peer, ws, ws_size) :
-                                             write_tcp(peer, ws, ws_size)) {
+        union rs_wsframe * frame =
+            (union rs_wsframe *) owref->cmsg->msg + owref->head_size;
+        size_t frame_size = owref->cmsg->size - owref->head_size;
+        switch (peer->is_encrypted ?
+            write_tls(worker, peer, frame, frame_size) :
+                    write_tcp(peer, frame, frame_size)) {
         case RS_OK:
-            if (*ws != RS_WS_OPC_FIN_CLOSE) {
+            if (rs_get_wsframe_opcode(frame) != RS_WSFRAME_OPC_CLOSE) {
                 RS_LOG(LOG_DEBUG, "Successfully sent %zu byte ws%s %s owref "
-                    "message to peer %" PRIu32 ".", ws_size,
+                    "message to peer %" PRIu32 ".", frame_size,
                     peer->is_encrypted ? "s" : "",
-                    *ws == RS_WS_OPC_FIN_BIN ? "RS_BIN" : "RS_UTF8", peer_i);
+                    rs_get_wsframe_opcode(frame) == RS_WSFRAME_OPC_BIN ?
+                    "RS_BIN" : "RS_UTF8", peer_i);
                 break;
             }
             RS_LOG(LOG_DEBUG, "Successfully sent %zu byte ws%s close owref "
-                "message to peer %" PRIu32 ".", ws_size,
+                "message to peer %" PRIu32 ".", frame_size,
                 peer->is_encrypted ? "s" : "", peer_i);
             // This message was a WebSocket Close message.
             peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
@@ -429,13 +435,13 @@ rs_ret send_pending_owrefs(
         case RS_AGAIN:
             RS_LOG(LOG_DEBUG, "Attempt to send %zu byte ws%s owref message to "
                 "peer %" PRIu32 " was unsuccessful due to RS_AGAIN.",
-                ws_size, peer->is_encrypted ? "s" : "", peer_i);
+                frame_size, peer->is_encrypted ? "s" : "", peer_i);
             return RS_AGAIN;
         case RS_CLOSE_PEER:
             RS_LOG(LOG_DEBUG, "Attempt to send %zu byte ws%s owref message to "
                 "peer %" PRIu32 " was unsuccessful due to RS_CLOSE_PEER.",
-                ws_size, peer->is_encrypted ? "s" : "", peer_i);
-            if (*ws != RS_WS_OPC_FIN_CLOSE) {
+                frame_size, peer->is_encrypted ? "s" : "", peer_i);
+            if (rs_get_wsframe_opcode(frame) != RS_WSFRAME_OPC_CLOSE) {
                 // Only notify the app of peer closure if the message the error
                 // occurred on wasn't itself a close message sent by the app.
                 RS_GUARD(send_close_to_app(worker, peer, peer_i));

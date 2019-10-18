@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright © 2019 William Budd
 
-#define RS_INCLUDE_QUEUE_FUNCTIONS // See ringsocket_queue.h
-
 #include "rs_event.h" // loop_over_events()
 #include "rs_from_app.h" // get_outbound_readers(), init_owrefs()
 #include "rs_hash.h" // init_hash_state()
@@ -26,8 +24,8 @@ static rs_ret init_peers_array(
     static_assert(sizeof(int) == 4, "sizeof(int) != 4. Some code might need to "
         "be written in a more portable manner after all. Please file a bug "
         "report mentioning your CPU model. ");
-    static_assert(sizeof(union rs_peer) == 40, "sizeof(union rs_peer) is not "
-        "the 40 bytes it was expected to be.");
+    static_assert(sizeof(union rs_peer) == 32, "sizeof(union rs_peer) is not "
+        "the 32 bytes it was expected to be.");
     worker->peers_elem_c = worker->conf->fd_alloc_c / worker->conf->worker_c;
     RS_CALLOC(worker->peers, worker->peers_elem_c);
     RS_GUARD(init_slots(worker->peers_elem_c, &worker->peer_slots));
@@ -64,13 +62,18 @@ int work(
 ) {
     // See rs_worker.h for the difference between rs_worker_args and rs_worker.
     struct rs_worker worker = {
+        // Only instantialize const members here. The rest can be done later.
+
+        // worker_args member copies
         .conf = worker_args->conf,
         .ring_pairs = worker_args->ring_pairs,
         .sleep_state = worker_args->sleep_state,
         .app_sleep_states = worker_args->app_sleep_states,
         .eventfd = worker_args->eventfd,
-        .worker_i = worker_args->worker_i
-        // Instantiate the remaining members from _work().
+        .worker_i = worker_args->worker_i,
+
+        // Defined in ringsocket_wsframe.h. Used by rs_websocket.c.
+        .pong_response = {.is_final_with_opcode = 0x80 | RS_WSFRAME_OPC_PONG }
     };
     _work(&worker);
     // _work() only returns if something went wrong: call exit() instead of

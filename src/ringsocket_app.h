@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <ringsocket_queue.h>
+#include <ringsocket_wsframe.h>
 // <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
 //   |
 //   \---> <ringsocket_api.h>                            # RingSocket's core API
@@ -14,19 +14,21 @@
 //                         |
 // <ringsocket_queue.h> <--/      # Ring buffer update queuing and thread waking
 //   |
-//   |         [YOU ARE HERE]
-//   \-------> <ringsocket_app.h> # Definition of RS_APP() and descendent macros
-//                          | |
-//                          | |
-//                          | \--> [ Worker translation units: see rs_worker.h ]
-//                          |
-//                          |
-// <ringsocket_helper.h> <--/   # Definitions of app helper functions (internal)
+//   \--> <ringsocket_wsframe.h>   # RFC 6455 WebSocket frame protocol interface
+//                           |
+//   [YOU ARE HERE]          |
+// <ringsocket_app.h> <------/    # Definition of RS_APP() and descendent macros
+//   |            |
+//   |            |
+//   |            \--------------> [ Worker translation units: see rs_worker.h ]
 //   |
-//   \--> <ringsocket.h>             # Definitions of app helper functions (API)
-//                   |
-//                   |
-//                   \----------------> [ Any RingSocket app translation units ]
+//   |
+//   \--> <ringsocket_helper.h> # Definitions of app helper functions (internal)
+//                          |
+//  <ringsocket.h> <--------/        # Definitions of app helper functions (API)
+//    |
+//    |
+//    \-------------------------------> [ Any RingSocket app translation units ]
 
 // #############################################################################
 // # Initial Arguments app threads receive when spawned ########################
@@ -85,21 +87,11 @@ enum rs_outbound_kind { // The outbound message format depends on the enum value
 // This allows worker threads to treat the outbound ring buffers as read-only
 // write buffers, because they never have to alter the contents of the messages
 // they relay.
-
+//
 // For any outbound ring buffer WebSocket message arriving from an app, worker
 // threads determine whether to keep or shut down the peer(s) it's addressed to
-// simply by checking whether its WebSocket opcode is a RS_WS_OPC_FIN_CLOSE.
-enum rs_websocket_opcode {
-    RS_WS_OPC_NFIN_CONT = 0x00, // Only used by worker threads: rs_websocket.c
-    RS_WS_OPC_NFIN_TEXT = 0x01, // Only used by worker threads: rs_websocket.c
-    RS_WS_OPC_NFIN_BIN  = 0x02, // Only used by worker threads: rs_websocket.c
-    RS_WS_OPC_FIN_CONT  = 0x80, // Only used by worker threads: rs_websocket.c
-    RS_WS_OPC_FIN_TEXT  = 0x81, // Also applicable to outbound msgs: rs_send()
-    RS_WS_OPC_FIN_BIN   = 0x82, // Also applicable to outbound msgs: rs_send()
-    RS_WS_OPC_FIN_CLOSE = 0x88, // Also applicable to outbound: rs_close_peer()
-    RS_WS_OPC_FIN_PING  = 0x89, // Only used by worker threads: rs_websocket.c
-    RS_WS_OPC_FIN_PONG  = 0x8A  // Only used by worker threads: rs_websocket.c
-};
+// simply by checking whether its WebSocket opcode is a RS_WS_OPC_FIN_CLOSE
+// (See also the WebSocket definitions in ringsocket_api.h).
 
 // When an incoming message fails to pass an internal check performed by the
 // RS_APP() macro below (as stipulated by the arguments passed to said macro),

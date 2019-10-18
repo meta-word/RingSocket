@@ -59,21 +59,26 @@ static rs_ret read_http(
     // Store parsing state in the peer union to allow resumption later on.
     peer->http.jump_distance = jump_distance;
     if (unsaved_strlen) {
+        // peer->http.partial_strlen is an uint16_t, which should be plenty;
+        // but even in the event of an overflow, the worst that could happen is
+        // for the HTTP contents to be rejected and the peer to be disconnected
+        // (due to the fact that unsigned types are guaranteed to wrap around on
+        // overflow).
         peer->http.partial_strlen = unsaved_strlen;
-        if (peer->heap_buf == (uint8_t *) wskey) {
-            RS_REALLOC(peer->heap_buf, 22 + unsaved_strlen);
-            memcpy(peer->heap_buf + 22, unsaved_str, unsaved_strlen);
+        if (peer->http.char_buf == wskey) {
+            RS_REALLOC(peer->http.char_buf, 22 + unsaved_strlen);
+            memcpy(peer->http.char_buf + 22, unsaved_str, unsaved_strlen);
         } else if (wskey) {
-            RS_CALLOC(peer->heap_buf, 22 + unsaved_strlen);
-            memcpy(peer->heap_buf, wskey, 22);
-            memcpy(peer->heap_buf + 22, unsaved_str, unsaved_strlen);
+            RS_CALLOC(peer->http.char_buf, 22 + unsaved_strlen);
+            memcpy(peer->http.char_buf, wskey, 22);
+            memcpy(peer->http.char_buf + 22, unsaved_str, unsaved_strlen);
         } else {
-            RS_CALLOC(peer->heap_buf, unsaved_strlen);
-            memcpy(peer->heap_buf, unsaved_str, unsaved_strlen);
+            RS_CALLOC(peer->http.char_buf, unsaved_strlen);
+            memcpy(peer->http.char_buf, unsaved_str, unsaved_strlen);
         }
-    } else if (wskey && (uint8_t *) wskey != peer->heap_buf) {
-        RS_CALLOC(peer->heap_buf, 22);
-        memcpy(peer->heap_buf, wskey, 22);
+    } else if (wskey && wskey != peer->http.char_buf) {
+        RS_CALLOC(peer->http.char_buf, 22);
+        memcpy(peer->http.char_buf, wskey, 22);
     }
     return RS_AGAIN;
 }
@@ -261,16 +266,17 @@ static rs_ret parse_http_upgrade_request(
     char * unsaved_str = NULL;
     // If the previous call to this function was broken off while in the middle
     // of parsing an unsaved_str, that partial string was stored in
-    // peer->heap_buf, and must now be copied to worker->rbuf as a prefix to a
-    // new read()
+    // peer->http.char_buf, and must now be copied to worker->rbuf as a prefix
+    // to a new read().
     if (peer->http.partial_strlen) {
         if (peer->http.wskey_was_parsed) {
-            *wskey = (char *) peer->heap_buf;
-            memcpy(worker->rbuf, peer->heap_buf + 22,
+            *wskey = peer->http.char_buf;
+            memcpy(worker->rbuf, peer->http.char_buf + 22,
                 peer->http.partial_strlen);
         } else {
-            memcpy(worker->rbuf, peer->heap_buf, peer->http.partial_strlen);
-            RS_FREE(peer->heap_buf);
+            memcpy(worker->rbuf, peer->http.char_buf,
+                peer->http.partial_strlen);
+            RS_FREE(peer->http.char_buf);
         }
         ch += peer->http.partial_strlen;
         ch_over = ch;
@@ -290,7 +296,7 @@ static rs_ret parse_http_upgrade_request(
         84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95);
 #undef RS_H_JUMP
     default:
-        RS_LOG(LOG_CRIT, "Invalid peer->http.jump_distance: %u. "
+        RS_LOG(LOG_CRIT, "Invalid peer->http.jump_distance: %" PRIu8 ". "
             "This shouldn't be possible.", peer->http.jump_distance);
         return RS_FATAL;
     }
@@ -596,25 +602,25 @@ static rs_ret write_http_upgrade_response(
     if (wskey) {
         RS_GUARD(get_websocket_key_hash(worker, wskey, wskey_hash_dest));
     } else {
-        memcpy(wskey_hash_dest, peer->heap_buf, 27);
+        memcpy(wskey_hash_dest, peer->http.char_buf, 27);
     }
     rs_ret ret = peer->is_encrypted ?
         write_tls(worker, peer, http101, RS_CONST_STRLEN(http101)) :
                 write_tcp(peer, http101, RS_CONST_STRLEN(http101));
     switch (ret) {
     case RS_OK:
-        if (peer->heap_buf) {
-            RS_FREE(peer->heap_buf);
+        if (peer->http.char_buf) {
+            RS_FREE(peer->http.char_buf);
         }
         return RS_OK;
     case RS_AGAIN:
         if (wskey) {
-            if (peer->heap_buf) {
-                RS_REALLOC(peer->heap_buf, 27);
+            if (peer->http.char_buf) {
+                RS_REALLOC(peer->http.char_buf, 27);
             } else {
-                RS_CALLOC(peer->heap_buf, 27);
+                RS_CALLOC(peer->http.char_buf, 27);
             }
-            memcpy(peer->heap_buf, wskey_hash_dest, 27);
+            memcpy(peer->http.char_buf, wskey_hash_dest, 27);
         }
         return RS_AGAIN;
     default:
@@ -626,11 +632,12 @@ static rs_ret write_http_error_response(
     struct rs_worker * worker,
     union rs_peer * peer
 ) {
+    unsigned error_i = RS_MAX(peer->http.error_i, 3);
     RS_LOG(LOG_NOTICE, "Writing HTTP_%s) to peer %s",
         (char *[]){"BAD_REQUEST (400", "FORBIDDEN (403", "NOT_FOUND (404",
-        "METHOD_NOT_ALLOWED (405"}[RS_MIN(3, peer->http.error_i)],
+        "METHOD_NOT_ALLOWED (405"}[error_i],
         get_peer_str(peer));
-    char const * msg = http_errors[peer->http.error_i];
+    char const * msg = http_errors[error_i];
     return peer->is_encrypted ?
         write_tls(worker, peer, msg, RS_CONST_STRLEN(msg)) :
                 write_tcp(peer, msg, RS_CONST_STRLEN(msg));
@@ -653,8 +660,8 @@ rs_ret handle_http_io(
                 peer->continuation = RS_CONT_PARSING;
                 return RS_OK;
             case RS_CLOSE_PEER:
-                if (peer->heap_buf) {
-                    RS_FREE(peer->heap_buf);
+                if (peer->http.char_buf) {
+                    RS_FREE(peer->http.char_buf);
                 }
                 if (peer->mortality == RS_MORTALITY_SHUTDOWN_WRITE) {
                     goto write_http_error;
@@ -707,8 +714,8 @@ rs_ret handle_http_io(
     default:
         break;
     }
-    if (peer->heap_buf) {
-        RS_FREE(peer->heap_buf);
+    if (peer->http.char_buf) {
+        RS_FREE(peer->http.char_buf);
     }
     peer->mortality = RS_MORTALITY_DEAD;
     peer->layer = peer->is_encrypted ? RS_LAYER_TLS : RS_LAYER_TCP;

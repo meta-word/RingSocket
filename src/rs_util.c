@@ -8,12 +8,12 @@
 #include <netdb.h> // getnameinfo(), MI_MAXHOST, NI_MAXSERV
 #include <sys/epoll.h> // EPOLL* event bitflag macros
 
-// Move <size> bytes from <dst + offset> to <dst>. Source memory range and
+// Move "size" bytes from "dst"+"offset" to "dst". Source memory range and
 // destination memory range are allowed to overlap. Implemented through one or
-// more memcpy() operations of max <offset> bytes from the source range leftward
+// more memcpy() operations of max "offset" bytes from the source range leftward
 // to the destination in left to right order, which has the cache-miss-reducing
 // benefit of eliminating the need to copy to a temporary intermediate buffer
-// outside of the <dst> array -- as might have been the case if a naive
+// outside of the "dst" array -- as might have been the case if a naive
 // memmove() implementation was used instead.
 void move_left(
     void * dst,
@@ -31,37 +31,84 @@ void move_left(
     memcpy(_dst + moved_size, _src + moved_size, size);
 }
 
+// Helper for bin_to_log_buf() and pointer_context_to_log_buf() (see below).
+static char * bin_to_hex(
+    uint8_t const * bin,
+    uint8_t const * const bin_max,
+    char * hex,
+    char * const hex_max
+) {
+    char const hex_table[] = "0123456789ABCDEF";
+    if (bin <= bin_max && hex <= hex_max) {
+        *hex++ = hex_table[*bin >> 4];
+        *hex++ = hex_table[*bin++ & 0xF];
+        while (bin <= bin_max && hex <= hex_max) {
+            *hex++ = ' ';
+            *hex++ = hex_table[*bin >> 4];
+            *hex++ = hex_table[*bin++ & 0xF];
+        }
+    }
+    return hex;
+}
+
 // For any buf/array "bin" of "size" bytes, store a hex representation string of
 // its binary contents in worker->log_buf. Any tail end of the hex string that
 // would overflow sizeof(worker->log_buf) is truncated. The resulting
 // worker-log_buf string is guaranteed to be null-terminated. Finally,
 // return the worker->log_buf pointer to allow calls to be inlined as arguments.
-char * bin_to_log_buf_as_hex(
+char * bin_to_log_buf(
     struct rs_worker * worker,
     void const * bin,
     size_t size
 ) {
-    uint8_t const * p = bin;
-    uint8_t const * const p_over = p + size;
-    
     char * hex = worker->log_buf;
-    char * const hex_over = hex + sizeof(worker->log_buf) - sizeof(", FF}");
-    static_assert(sizeof(worker->log_buf) >= sizeof("{00}"));
+    char * const hex_max = hex + sizeof(worker->log_buf) - 1;
+    static_assert(sizeof(worker->log_buf) >= sizeof("[01]"));
     
-    char const hex_table[] = "0123456789ABCDEF";
+    *hex++ = '[';
+    hex = bin_to_hex(bin, (uint8_t const *) bin + size - 1,
+        hex, hex_max - sizeof(" EF]"));
+    *hex++ = ']';
+    *hex = '\0';
+    return worker->log_buf;
+}
 
-    *hex++ = '{';
-    if (size) {
-        *hex++ = hex_table[*p >> 4];
-        *hex++ = hex_table[*p++ & 0xF];
-        while (p < p_over && hex < hex_over) {
-            *hex++ = ',';
-            *hex++ = ' ';
-            *hex++ = hex_table[*p >> 4];
-            *hex++ = hex_table[*p++ & 0xF];
-        }
+// Same as bin_to_log_buf() above, except that the hex sequence shall start
+// "max_left_byte_c" to the left of "pointer" and end "max_right_byte_c" to the
+// right of it, with the byte at "pointer" enclosed in angular <> brackets.
+// However, any such start or end part beyond the "lower_bound" or "upper_bound"
+// pointer arguments respectively shall be truncated -- lest we crash and burn.
+char * pointer_context_to_log_buf(
+    struct rs_worker * worker,
+    void const * pointer,
+    void const * lower_bound,
+    void const * upper_bound,
+    size_t max_left_byte_c,
+    size_t max_right_byte_c
+) {
+    uint8_t const * const ptr = pointer;
+    uint8_t const * const lower = lower_bound;
+    uint8_t const * const upper = upper_bound;
+
+    char * hex = worker->log_buf;
+    char * const hex_max = hex + sizeof(worker->log_buf) - 1;
+    static_assert(sizeof(worker->log_buf) >= sizeof("[01 <23> 45]"));
+    
+    *hex++ = '[';
+    if (ptr > lower) {
+        hex = bin_to_hex(RS_MAX(ptr - max_left_byte_c, lower), ptr - 1,
+            hex, hex_max - sizeof(" CD <EF> ]"));
+        *hex++ = ' ';
     }
-    *hex++ = '}';
+    *hex++ = '<';
+    hex = bin_to_hex(ptr, ptr, hex, hex_max - sizeof("EF> ]"));
+    *hex++ = '>';
+    if (ptr < upper) {
+        *hex++ = ' ';
+        hex = bin_to_hex(ptr + 1, RS_MIN(upper, ptr + max_right_byte_c),
+            hex, hex_max - sizeof(" EF]"));
+    }
+    *hex++ = ']';
     *hex = '\0';
     return worker->log_buf;
 }
@@ -121,35 +168,19 @@ char * get_peer_str(
             "app_i: 255, "
             "endpoint_i: 65535, "
             "socket_fd: 2147483647, "
-            "heap_buf: used, "
             "shutdown_deadline: 65535, "
             "old_wsize: 18446744073709551615, "
-        ) +
-        RS_MAX(
-            RS_CONST_STRLEN(
-                "http.origin_i: 65535, "
-                "http.partial_strlen: 4294967295, "
-                "http.jump_distance: 65535, "
-                "http.error_i: 255, "
-                "http.hostname_was_parsed: Y, "
-                "http.origin_was_parsed: Y, "
-                "http.upgrade_was_parsed: Y, "
-                "http.wskey_was_parsed: Y, "
-                "http.wsversion_was_parsed: Y"
-            ),
-            RS_CONST_STRLEN(
-                "ws.rmsg_utf8_state: 255, "
-                "ws.heap_buf_contains_pong: Y, "
-                "ws.rmsg_is_fragmented: Y, "
-                "ws.rmsg_data_kind: RS_UTF8, "
-                "ws.owref_c: 255, "
-                "ws.owref_i: 4294967295, "
-                "ws.msg_rsize: 4294967295, "
-                "ws.unparsed_rsize: 4294967295 "
-            )
-        ) +
-        RS_CONST_STRLEN(")") +
-        1
+            "http.hostname_was_parsed: Y, "
+            "http.origin_was_parsed: Y, "
+            "http.upgrade_was_parsed: Y, "
+            "http.wskey_was_parsed: Y, "
+            "http.wsversion_was_parsed: Y, "
+            "http.error_i: 8, "
+            "http.jump_distance: 255, "
+            "http.partial_strlen: 65535, "
+            "http.origin_i: 65535, "
+            "http.char_buf: used"
+        ) + RS_CONST_STRLEN(")") + 1
     ] = {0};
     char * str = get_addr_str(peer->socket_fd, peer_str);
     str += sprintf(str, " ("
@@ -161,7 +192,6 @@ char * get_peer_str(
         "app_i: %" PRIu8 ", "
         "endpoint_i: %" PRIu16 ", "
         "socket_fd: %d, "
-        "heap_buf: %s, "
         "shutdown_deadline: %" PRIu16,
         peer->is_encrypted ? 'Y' : 'N',
         peer->is_writing ? 'Y' : 'N',
@@ -173,7 +203,6 @@ char * get_peer_str(
         peer->app_i,
         peer->endpoint_i,
         peer->socket_fd,
-        peer->heap_buf ? "used" : "null",
         peer->shutdown_deadline
     );
     if (!peer->is_encrypted) {
@@ -181,46 +210,41 @@ char * get_peer_str(
     }
     if (peer->layer == RS_LAYER_HTTP) {
         str += sprintf(str, ", "
-            "http.origin_i: %" PRIu16 ", "
-            "http.partial_strlen: %" PRIu32 ", "
-            "http.jump_distance: %" PRIu16 ", "
-            "http.error_i: %" PRIu8 ", "
             "http.hostname_was_parsed: %c, "
             "http.origin_was_parsed: %c, "
             "http.upgrade_was_parsed: %c, "
             "http.wskey_was_parsed: %c, "
-            "http.wsversion_was_parsed: %c",
-            peer->http.origin_i,
-            peer->http.partial_strlen,
-            peer->http.jump_distance,
-            peer->http.error_i,
+            "http.wsversion_was_parsed: %c, "
+            "http.error_i: %" PRIu8 ", "
+            "http.jump_distance: %" PRIu16 ", "
+            "http.partial_strlen: %" PRIu32 ", "
+            "http.origin_i: %" PRIu16 ", "
+            "http.char_buf: %s",
             peer->http.hostname_was_parsed ? 'Y' : 'N',
             peer->http.origin_was_parsed ? 'Y' : 'N',
             peer->http.upgrade_was_parsed ? 'Y' : 'N',
             peer->http.wskey_was_parsed ? 'Y' : 'N',
-            peer->http.wsversion_was_parsed ? 'Y' : 'N'
-            );
+            peer->http.wsversion_was_parsed ? 'Y' : 'N',
+            peer->http.error_i,
+            peer->http.jump_distance,
+            peer->http.partial_strlen,
+            peer->http.origin_i,
+            peer->http.char_buf ? "used" : "null"
+        );
     } else if (peer->layer == RS_LAYER_WEBSOCKET) {
         str += sprintf(str, ", "
-            "ws.heap_buf_contains_pong: %c, "
-            "ws.rmsg_is_fragmented: %c, "
-            "ws.rmsg_data_kind: %s, "
-            "ws.rmsg_utf8_state: %" PRIu8 ", "
-            "ws.owref_c: %" PRIu8 ", "
-            "ws.owref_i: %" PRIu32 ", "
-            "ws.msg_rsize: %" PRIu32 ", "
-            "ws.%s: %" PRIu32,
-            peer->ws.heap_buf_contains_pong ? 'Y' : 'N',
-            peer->ws.rmsg_is_fragmented ? 'Y' : 'N',
-            peer->ws.rmsg_data_kind == RS_UTF8 ? "RS_UTF8" : "RS_BIN",
-            peer->ws.rmsg_utf8_state,
+            "ws.owref_c: %" PRIu16 ", "
+            "ws.owref_i: %" PRIu32 ", ",
             peer->ws.owref_c,
-            peer->ws.owref_i,
-            peer->ws.msg_rsize,
-            peer->mortality == RS_MORTALITY_LIVE ?
-                "unparsed_rsize" : "close_wmsg_i",
-            peer->ws.unparsed_rsize // same as unionized peer->ws.close_wmsg_i
+            peer->ws.owref_i
         );
+        if (peer->mortality == RS_MORTALITY_LIVE) {
+            str += sprintf(str, "ws.%s: %s", peer->continuation ==
+                RS_CONT_SENDING ? "pong_response" : "storage",
+                peer->ws.storage ? "used" : "null");
+        } else {
+            str += sprintf(str, "ws.close_frame: %d", peer->ws.close_frame);
+        }
     }
     * str = ')';
     return peer_str;
