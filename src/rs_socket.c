@@ -6,7 +6,7 @@
 #include "rs_event.h" // rs_event_kind
 #include "rs_slot.h" // alloc_slot(), free_slot()
 #include "rs_socket.h"
-#include "rs_util.h" // get_peer_str()
+#include "rs_util.h" // get_addr_str()
 
 #include <linux/filter.h> // struct sock_filter
 #include <sys/epoll.h> // epoll_create1(), epoll_ctl()
@@ -272,8 +272,9 @@ rs_ret accept_sockets(
         }
         size_t peer_i = 0;
         if (alloc_slot(&worker->peer_slots, &peer_i) != RS_OK) {
-            RS_LOG(LOG_WARNING, "Accept()ed new peer %d, but all peer slots "
-                "are currently full. Aborting peer.", socket_fd);
+            RS_LOG(LOG_WARNING, "Accept()ed new peer %s, but all peer slots "
+                "are currently full. Aborting peer.",
+                get_addr_str(&(union rs_peer){.socket_fd = socket_fd}));
             if (close(socket_fd) == -1) {
                 RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful close(%d)", socket_fd);
                 return RS_FATAL;

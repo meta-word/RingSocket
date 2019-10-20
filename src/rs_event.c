@@ -8,7 +8,7 @@
 #include "rs_tcp.h" // handle_tcp_io()
 #include "rs_tls.h" // handle_tls_io()
 #include "rs_to_app.h" // send_open_to_app(), send_close_to_app()
-#include "rs_util.h" // get_peer_str(), get_epoll_events_str()
+#include "rs_util.h" // get_addr_str(), get_epoll_events_str()
 #include "rs_websocket.h" // handle_ws_io()
 
 #include <sys/epoll.h>
@@ -19,9 +19,10 @@ rs_ret handle_peer_events(
     uint32_t events
 ) {
     union rs_peer * peer = worker->peers + peer_i;
+    // Don't log get_addr_str(peer) because the peer may already be gone.
     if (events & EPOLLERR) {
-        RS_LOG(LOG_WARNING, "Received EPOLLERR (all events: %s) for %s",
-            get_epoll_events_str(events), get_peer_str(peer));
+        RS_LOG(LOG_WARNING, "Received EPOLLERR (all events: %s)",
+            get_epoll_events_str(events));
         // Should not be a common occurence. Fail fast to free up resources.
         peer->mortality = RS_MORTALITY_DEAD;
         if (peer->layer == RS_LAYER_WEBSOCKET) {
@@ -33,7 +34,6 @@ rs_ret handle_peer_events(
             remove_pending_owrefs(worker, peer, peer_i);
         }
     } else if (events & EPOLLHUP) {
-        // Don't user get_peer_str() because the peer may already be gone.
         RS_LOG(LOG_INFO, "Received EPOLLHUP (all events: %s)",
             get_epoll_events_str(events));
         // HUP means that the peer has disappeared, or at least is not going to
@@ -45,7 +45,6 @@ rs_ret handle_peer_events(
             peer->mortality = RS_MORTALITY_DEAD;
         }
     } else if (events & EPOLLRDHUP) {
-        // Don't user get_peer_str() because the peer may already be gone.
         RS_LOG(LOG_INFO, "Received EPOLLRDHUP (all events: %s)",
             get_epoll_events_str(events));
         // Although RDHUP is supposed to mean that there will no longer be any
@@ -61,8 +60,8 @@ rs_ret handle_peer_events(
     }
     if (peer->is_writing && !(events & EPOLLOUT) &&
         peer->mortality == RS_MORTALITY_LIVE) {
-        RS_LOG(LOG_INFO, "Writing blocked for %s with events %s",
-            get_peer_str(peer), get_epoll_events_str(events));
+        RS_LOG(LOG_DEBUG, "Writing blocked for %s with events %s",
+            get_addr_str(peer), get_epoll_events_str(events));
         return RS_OK;
     }
     enum rs_layer layer = RS_LAYER_TCP;

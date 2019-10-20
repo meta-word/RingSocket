@@ -116,8 +116,8 @@ static inline rs_ret rs_wake_up_app(
                 app_sleep_state->is_asleep, app_i);
             return RS_FATAL;
         }
-        RS_LOG(LOG_DEBUG, "Called syscall(SYS_futex, %d, FUTEX_WAKE_PRIVATE, "
-            "...) for app_i %" PRIu32, app_sleep_state->is_asleep, app_i);
+        //RS_LOG(LOG_DEBUG, "Called syscall(SYS_futex, %d, FUTEX_WAKE_PRIVATE, "
+        //    "...) for app_i %" PRIu32, app_sleep_state->is_asleep, app_i);
     } else {
         RS_LOG(LOG_DEBUG, "Not making a FUTEX_WAKE_PRIVATE syscall() for "
             "app_i %" PRIu32 ", because app_is_asleep seem to be false", app_i);
@@ -139,8 +139,8 @@ static inline rs_ret rs_wake_up_worker(
                 "worker #%" PRIu32, worker_i + 1);
             return RS_FATAL;
         }
-        RS_LOG(LOG_DEBUG, "Successful write(worker_eventfd, ...) to worker #%"
-            PRIu32, worker_i + 1);
+        //RS_LOG(LOG_DEBUG, "Successful write(worker_eventfd, ...) to worker #%"
+        //    PRIu32, worker_i + 1);
     } else {
         RS_LOG(LOG_DEBUG, "Not calling write(worker_eventfd, ...) for worker #%"
             PRIu32 ", because worker_is_asleep seems to be false",

@@ -4,7 +4,7 @@
 #include "rs_slot.h" // free_slot()
 #include "rs_tcp.h"
 #include "rs_tls.h" // init_tls_session()
-#include "rs_util.h" // get_peer_str()
+#include "rs_util.h" // get_addr_str()
 
 rs_ret read_tcp(
     union rs_peer * peer,
@@ -20,7 +20,7 @@ rs_ret read_tcp(
     *rsize = 0;
     if (!ret) {
         RS_LOG(LOG_NOTICE, "read(%d, rbuf, %zu) from %s returned 0.",
-            peer->socket_fd, rbuf_size, get_peer_str(peer));
+            peer->socket_fd, rbuf_size, get_addr_str(peer));
         return RS_CLOSE_PEER;
     }
     if (errno == EAGAIN) {
@@ -28,7 +28,7 @@ rs_ret read_tcp(
         return RS_AGAIN;
     }
     RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, rbuf, %zu) from %s",
-        peer->socket_fd, rbuf_size, get_peer_str(peer));
+        peer->socket_fd, rbuf_size, get_addr_str(peer));
     return RS_CLOSE_PEER;
 }
 
@@ -61,7 +61,7 @@ rs_ret write_tcp(
         return RS_AGAIN;
     }
     RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, wbuf + %zu, %zu) to %s",
-        peer->socket_fd, peer->old_wsize, remaining_wsize, get_peer_str(peer));
+        peer->socket_fd, peer->old_wsize, remaining_wsize, get_addr_str(peer));
     return RS_CLOSE_PEER;
 }
 
@@ -79,7 +79,7 @@ rs_ret write_bidirectional_tcp_shutdown(
             return RS_CLOSE_PEER;
         }
         RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful shutdown(%d, SHUT_WR) of %s",
-            peer->socket_fd, get_peer_str(peer));
+            peer->socket_fd, get_addr_str(peer));
         return RS_FATAL;
     }
     return RS_OK;
@@ -99,7 +99,7 @@ static rs_ret read_bidirectional_tcp_shutdown(
         worker->conf->worker_rbuf_size);
     while (rsize > 0) {
         //RS_LOG(LOG_INFO, "Read(%d, ...) %ld bytes of ignored TCP data from "
-        //    "%s", peer->socket_fd, rsize, get_peer_str(peer));
+        //    "%s", peer->socket_fd, rsize, get_addr_str(peer));
         rsize = read(peer->socket_fd, worker->rbuf,
             worker->conf->worker_rbuf_size);
     }
@@ -112,7 +112,7 @@ static rs_ret read_bidirectional_tcp_shutdown(
     }
     RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful read(%d, rbuf, %zu) from %s in "
         "RS_IO_STATE_CLOSING_READ_ONLY while at the TCP layer",
-        peer->socket_fd, worker->conf->worker_rbuf_size, get_peer_str(peer));
+        peer->socket_fd, worker->conf->worker_rbuf_size, get_addr_str(peer));
     return RS_CLOSE_PEER;
 }
 

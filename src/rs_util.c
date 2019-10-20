@@ -113,18 +113,25 @@ char * pointer_context_to_log_buf(
     return worker->log_buf;
 }
 
-static char * get_addr_str(
-    int socket_fd,
-    char * str
+char * get_addr_str(
+    union rs_peer const * peer
 ) {
+    thread_local static char addr_str[
+        RS_CONST_STRLEN("[") + NI_MAXHOST + RS_CONST_STRLEN("]:") +
+        NI_MAXSERV + 1
+    ] = {0};
+
     struct sockaddr_storage addr = {0};
     socklen_t addr_size = sizeof(addr);
-    if (getpeername(socket_fd, (struct sockaddr *) &addr, &addr_size) == -1) {
+    if (getpeername(peer->socket_fd, (struct sockaddr *) &addr, &addr_size) ==
+        -1) {
         RS_LOG_ERRNO(LOG_NOTICE, "Unsuccessful getpeername(%d, ...)",
-            socket_fd);
-        strcpy(str, "<UNKNOWN>");
-        return str + RS_CONST_STRLEN("<UNKNOWN>");
+            peer->socket_fd);
+        strcpy(addr_str, "<UNKNOWN>");
+        return addr_str;
     }
+
+    char * str = addr_str;
     if (addr.ss_family == AF_INET6) {
         *str++ = '[';
     }
@@ -133,11 +140,8 @@ static char * get_addr_str(
         NI_MAXHOST, port_str, NI_MAXSERV, NI_NUMERICHOST | NI_NUMERICSERV);
     if (ret) {
         RS_LOG(LOG_NOTICE, "Unsuccessful getnameinfo(): %s", gai_strerror(ret));
-        if (addr.ss_family == AF_INET6) {
-            str--;
-        }
-        strcpy(str, "<UNKNOWN>");
-        return str + RS_CONST_STRLEN("<UNKNOWN>");
+        strcpy(addr_str, "<UNKNOWN>");
+        return addr_str;
     }
     while (*str != '\0') {
         str++;
@@ -148,42 +152,57 @@ static char * get_addr_str(
     *str++ = ':';
     size_t port_strlen = strlen(port_str);
     move_left(str, port_str - str, port_strlen + 1);
-    return str + port_strlen;
+    return addr_str;
+}
+
+char * print_to_log_buf(
+    struct rs_worker * worker,
+    char * log_dst,
+    char const * fmt,
+    ...
+) {
+    if (log_dst < worker->log_buf) {
+        RS_LOG(LOG_ERR, "The code monkey responsible for the calling function "
+            "messed up: first worker->log_buf character byte position "
+            "undershot by %zu bytes", worker->log_buf - log_dst);
+        return NULL;
+    }
+    if (log_dst >= worker->log_buf + sizeof(worker->log_buf) - 1) {
+        RS_LOG(LOG_ERR, "The code monkey responsible for the calling function "
+            "messed up: last worker->log_buf character byte position overshot "
+            "by %zu bytes",
+            log_dst - (worker->log_buf + sizeof(worker->log_buf) - 1));
+        return NULL;
+    }
+    // Don't subtract 1 from max_char_c because vsnprintf() expects the null
+    // byte to be included when calculating its max size argument.
+    size_t max_char_c = worker->log_buf + sizeof(worker->log_buf) - log_dst;
+
+    va_list args;
+    va_start(args, fmt);
+    int char_c = vsnprintf(log_dst, max_char_c, fmt, args);
+    va_end(args);
+
+    if (char_c < 0) {
+        RS_LOG(LOG_ERR, "Unsuccessful snprintf(%p, %zu, %s, ...)",
+            log_dst, max_char_c, fmt);
+        return NULL;
+    }
+    if ((size_t) char_c > max_char_c) {
+        RS_LOG(LOG_WARNING, "Insufficient worker->log_buf size: "
+            "log message truncated by %zu bytes", char_c - max_char_c);
+        return NULL;
+    }
+    return log_dst + char_c;
 }
 
 char * get_peer_str(
-    union rs_peer * peer
+    struct rs_worker * worker,
+    union rs_peer const * peer
 ) {
-    // Upside of using thread_local static like this: no worrying about free().
-    // Downside of this approach: 40 lines of cruft to get an appropriate size,
-    // instead of just calling asprintf().
-    thread_local static char peer_str[
-        RS_CONST_STRLEN("[") + NI_MAXHOST + RS_CONST_STRLEN("]:") + NI_MAXSERV +
-        RS_CONST_STRLEN(" (") + RS_CONST_STRLEN(
-            "is_encrypted: Y, "
-            "is_writing: Y, "
-            "layer: HTTP, "
-            "mortality: SHUTDOWN_WRITE_WS, "
-            "continuation: PARSING, "
-            "app_i: 255, "
-            "endpoint_i: 65535, "
-            "socket_fd: 2147483647, "
-            "shutdown_deadline: 65535, "
-            "old_wsize: 18446744073709551615, "
-            "http.hostname_was_parsed: Y, "
-            "http.origin_was_parsed: Y, "
-            "http.upgrade_was_parsed: Y, "
-            "http.wskey_was_parsed: Y, "
-            "http.wsversion_was_parsed: Y, "
-            "http.error_i: 8, "
-            "http.jump_distance: 255, "
-            "http.partial_strlen: 65535, "
-            "http.origin_i: 65535, "
-            "http.char_buf: used"
-        ) + RS_CONST_STRLEN(")") + 1
-    ] = {0};
-    char * str = get_addr_str(peer->socket_fd, peer_str);
-    str += sprintf(str, " ("
+    char * log_dst = worker->log_buf;
+    if (!(log_dst = print_to_log_buf(worker, log_dst,
+        "%s ("
         "is_encrypted: %c, "
         "is_writing: %c, "
         "layer: %s, "
@@ -192,7 +211,8 @@ char * get_peer_str(
         "app_i: %" PRIu8 ", "
         "endpoint_i: %" PRIu16 ", "
         "socket_fd: %d, "
-        "shutdown_deadline: %" PRIu16,
+        "shutdown_deadline: %" PRIu16 ", ",
+        get_addr_str(peer),
         peer->is_encrypted ? 'Y' : 'N',
         peer->is_writing ? 'Y' : 'N',
         (char *[]){"TCP", "TLS", "HTTP", "WS"}[RS_BOUNDS(0, peer->layer, 3)],
@@ -204,12 +224,15 @@ char * get_peer_str(
         peer->endpoint_i,
         peer->socket_fd,
         peer->shutdown_deadline
-    );
-    if (!peer->is_encrypted) {
-        str += sprintf(str, ", old_wsize: %zu", peer->old_wsize);
+    ))) {
+        return NULL;
+    }
+    if (!peer->is_encrypted && !(log_dst = print_to_log_buf(worker, log_dst,
+        "old_wsize: %zu, ", peer->old_wsize))) {
+        return NULL;
     }
     if (peer->layer == RS_LAYER_HTTP) {
-        str += sprintf(str, ", "
+        if (!print_to_log_buf(worker, log_dst,
             "http.hostname_was_parsed: %c, "
             "http.origin_was_parsed: %c, "
             "http.upgrade_was_parsed: %c, "
@@ -219,7 +242,7 @@ char * get_peer_str(
             "http.jump_distance: %" PRIu16 ", "
             "http.partial_strlen: %" PRIu32 ", "
             "http.origin_i: %" PRIu16 ", "
-            "http.char_buf: %s",
+            "http.char_buf: %s)",
             peer->http.hostname_was_parsed ? 'Y' : 'N',
             peer->http.origin_was_parsed ? 'Y' : 'N',
             peer->http.upgrade_was_parsed ? 'Y' : 'N',
@@ -230,24 +253,34 @@ char * get_peer_str(
             peer->http.partial_strlen,
             peer->http.origin_i,
             peer->http.char_buf ? "used" : "null"
-        );
+        )) {
+            return NULL;
+        }
     } else if (peer->layer == RS_LAYER_WEBSOCKET) {
-        str += sprintf(str, ", "
+        if (!(log_dst = print_to_log_buf(worker, log_dst,
             "ws.owref_c: %" PRIu16 ", "
             "ws.owref_i: %" PRIu32 ", ",
             peer->ws.owref_c,
             peer->ws.owref_i
-        );
+        ))) {
+            return NULL;
+        }
         if (peer->mortality == RS_MORTALITY_LIVE) {
-            str += sprintf(str, "ws.%s: %s", peer->continuation ==
-                RS_CONT_SENDING ? "pong_response" : "storage",
-                peer->ws.storage ? "used" : "null");
-        } else {
-            str += sprintf(str, "ws.close_frame: %d", peer->ws.close_frame);
+            if (!print_to_log_buf(worker, log_dst,
+                "ws.%s: %s)",
+                peer->continuation == RS_CONT_SENDING ? "pong_response" :
+                "storage", peer->ws.storage ? "used" : "null"
+            )) {
+                return NULL;
+            }
+        } else if (!print_to_log_buf(worker, log_dst,
+            "ws.close_frame: %d)",
+            peer->ws.close_frame
+        )) {
+            return NULL;
         }
     }
-    * str = ')';
-    return peer_str;
+    return worker->log_buf;
 }
 
 char * get_epoll_events_str(

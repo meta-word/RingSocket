@@ -335,6 +335,7 @@ static inline rs_wait_for_inbound_msg(
                 sched->timestamp_microsec + sched->interval_microsec -
                 timestamp_microsec)) {
             case RS_OK: // A worker thread already woke this thread up.
+                RS_LOG(LOG_DEBUG, "Awoken by a worker thread.");
                 RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
                 continue;
             case RS_AGAIN: // futex timed out: assume timing was accurate-ish

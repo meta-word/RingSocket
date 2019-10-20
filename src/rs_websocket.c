@@ -6,7 +6,7 @@
 #include "rs_tcp.h" // read_tcp(), write_tcp()
 #include "rs_tls.h" // read_tls(), write_tls()
 #include "rs_to_app.h" // send_read_to_app(), send_close_to_app()
-#include "rs_util.h" // bin_to_log_buf(), get_peer_str()
+#include "rs_util.h" // move_left(), bin_to_log_buf(), get_addr_str()
 #include "rs_websocket.h"
 
 // enum rs_wsframe_opcode, union rs_wsframe and related structs and helper
@@ -68,21 +68,30 @@ struct rs_wsframe_parser_storage {
 };
 
 static rs_ret parse_websocket_frame_header(
+    union rs_peer * peer,
     struct rs_wsframe_parser * wsp
 ) {
     if (!rs_get_wsframe_ismasked(wsp->frame)) {
+        RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket frame with "
+            "an unset IS_MASKED bit.", get_addr_str(peer));
         wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
         return RS_CLOSE_PEER;
     }
     switch (rs_get_wsframe_opcode(wsp->frame)) {
     case RS_WSFRAME_OPC_CONT:
         if (!wsp->is_continuation) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: opcode value of the first "
+                "frame of a WebSocket message is CONTINUATION despite not "
+                "being a continuation.", get_addr_str(peer));
             wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
             return RS_CLOSE_PEER;
         }
         break;
     case RS_WSFRAME_OPC_TEXT:
         if (wsp->is_continuation) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: opcode value of a WebSocket "
+                "message continuation frame is TEXT instead of the expected "
+                "value CONTINUATION", get_addr_str(peer));
             wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
             return RS_CLOSE_PEER;
         }
@@ -90,14 +99,26 @@ static rs_ret parse_websocket_frame_header(
         break;
     case RS_WSFRAME_OPC_BIN:
         if (wsp->is_continuation) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: opcode value of a WebSocket "
+                "message continuation frame is BINARY instead of the expected "
+                "value CONTINUATION", get_addr_str(peer));
             wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
             return RS_CLOSE_PEER;
         }
         wsp->data_kind = RS_BIN;
         break;
     case RS_WSFRAME_OPC_CLOSE:
-        if (!rs_get_wsframe_is_final(wsp->frame) ||
-            rs_get_wsframe_payload_size(wsp->frame) > 125) {
+        if (!rs_get_wsframe_is_final(wsp->frame)) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket CLOSE "
+                "control frame with an unset IS_FINAL bit.",
+                get_addr_str(peer));
+            wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
+            return RS_CLOSE_PEER;
+        }
+        if (rs_get_wsframe_payload_size(wsp->frame) > 125) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket CLOSE "
+                "control frame with a payload size value greater than the "
+                "maximum control frame size of 125.", get_addr_str(peer));
             wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
             return RS_CLOSE_PEER;
         }
@@ -115,14 +136,22 @@ static rs_ret parse_websocket_frame_header(
         wsp->close_frame = RS_WSFRAME_CLOSE_EMPTY_REPLY;
         return RS_CLOSE_PEER;
     case RS_WSFRAME_OPC_PING:
-    case RS_WSFRAME_OPC_PONG:
-        if (!rs_get_wsframe_is_final(wsp->frame) ||
-            rs_get_wsframe_payload_size(wsp->frame) > 125) {
+        if (rs_get_wsframe_is_final(wsp->frame)) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket PING "
+                "control frame with an unset IS_FINAL bit.",
+                get_addr_str(peer));
+            wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
             return RS_CLOSE_PEER;
         }
-        // Regarding pings:
-        //
+        if (rs_get_wsframe_payload_size(wsp->frame) > 125) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket PING "
+                "control frame with a payload size value greater than the "
+                "maximum control frame size of 125.", get_addr_str(peer));
+            wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
+            return RS_CLOSE_PEER;
+        }
         // Relevant https://tools.ietf.org/html/rfc6455#section-5.5.2 quote:
+        //
         // > Upon receipt of a Ping frame, an endpoint MUST send a Pong frame in
         // > response, unless it already received a Close frame.  It SHOULD
         // > respond with Pong frame as soon as is practical.
@@ -138,9 +167,24 @@ static rs_ret parse_websocket_frame_header(
         // The response pong is generated at the bottom of
         // parse_websocket_frame(), because the ping frame payload which it must
         // echo is not unmasked here yet.
-        //
-        // Regarding pongs:
-        //
+        wsp->payload = wsp->frame->in_small.payload;
+        wsp->payload_size = wsp->frame->payload_size_x7F & 0x7F;
+        return RS_OK;
+    case RS_WSFRAME_OPC_PONG:
+        if (rs_get_wsframe_is_final(wsp->frame)) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket PONG "
+                "control frame with an unset IS_FINAL bit.",
+                get_addr_str(peer));
+            wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
+            return RS_CLOSE_PEER;
+        }
+        if (rs_get_wsframe_payload_size(wsp->frame) > 125) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket PONG "
+                "control frame with a payload size value greater than the "
+                "maximum control frame size of 125.", get_addr_str(peer));
+            wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
+            return RS_CLOSE_PEER;
+        }
         // Relevant https://tools.ietf.org/html/rfc6455#section-5.5.3 quote:
         // > A Pong frame MAY be sent unsolicited.  This serves as a
         // > unidirectional heartbeat.  A response to an unsolicited Pong frame
@@ -153,6 +197,8 @@ static rs_ret parse_websocket_frame_header(
         return RS_OK;
     default:
         wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PROTOCOL;
+        RS_LOG(LOG_NOTICE, "Failing peer %s: received a WebSocket message "
+            "frame with an invalid opcode.", get_addr_str(peer));
         return RS_CLOSE_PEER;
     }
     //  rs_get_wsframe_in_payload_and_payload_size() can't be used safely here
@@ -181,12 +227,13 @@ static rs_ret parse_websocket_frame_header(
 }
 
 static void unmask_websocket_payload(
-    struct rs_wsframe_parser * wsp
+    struct rs_wsframe_parser * wsp,
+    size_t masked_size
 ) {
     uint8_t * mask_key = wsp->payload - 4;
     for (size_t mask_i =
         wsp->cur_read > wsp->payload ? wsp->cur_read - wsp->payload : 0;
-        mask_i < wsp->payload_size; mask_i++) {
+        mask_i < masked_size; mask_i++) {
         wsp->payload[mask_i] ^= mask_key[mask_i % 4];
     }
 }
@@ -200,28 +247,46 @@ static rs_ret validate_websocket_utf8(
 
 static rs_ret parse_websocket_frame(
     struct rs_worker * worker,
+    union rs_peer * peer,
     struct rs_wsframe_parser * wsp
 ) {
     if (wsp->cur_read < wsp->frame->in_large.payload) {
         if (wsp->next_read < wsp->frame->in_small.payload) {
             return RS_AGAIN;
         }
-        RS_GUARD(parse_websocket_frame_header(wsp));
-        if (wsp->total_payload_size > worker->conf->max_ws_msg_size ||
-            wsp->payload + wsp->payload_size >
+        RS_GUARD(parse_websocket_frame_header(peer, wsp));
+        if (wsp->total_payload_size > worker->conf->max_ws_msg_size) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: total WebSocket message "
+                "payload size of %zu exceeds the configured "
+                "\"max_ws_msg_size\" value of %zu by %zu bytes.",
+                get_addr_str(peer),
+                wsp->total_payload_size, worker->conf->max_ws_msg_size,
+                wsp->total_payload_size - worker->conf->max_ws_msg_size);
+                wsp->close_frame = RS_WSFRAME_CLOSE_ERR_TOO_LARGE;
+                return RS_CLOSE_PEER;
+        }
+        if (wsp->payload + wsp->payload_size >
             worker->rbuf + worker->conf->max_ws_frame_chain_size) {
+            RS_LOG(LOG_NOTICE, "Failing peer %s: total size of all seen "
+                "frames %zu in WebSocket message exceeds the configured "
+                "\"max_ws_frame_chain_size\" value of %zu by %zu bytes.",
+                get_addr_str(peer),
+                wsp->payload + wsp->payload_size - worker->rbuf,
+                worker->conf->max_ws_frame_chain_size,
+                wsp->payload + wsp->payload_size -
+                (worker->rbuf + worker->conf->max_ws_frame_chain_size));
             wsp->close_frame = RS_WSFRAME_CLOSE_ERR_TOO_LARGE;
             return RS_CLOSE_PEER;
         }
     }
     if (wsp->next_read < wsp->payload + wsp->payload_size) {
-        unmask_websocket_payload(wsp);
+        unmask_websocket_payload(wsp, wsp->next_read - wsp->payload);
         if (wsp->data_kind == RS_UTF8) {
             RS_GUARD(validate_websocket_utf8(wsp));
         }
         return RS_AGAIN;
     }
-    unmask_websocket_payload(wsp);
+    unmask_websocket_payload(wsp, wsp->payload_size);
     if (rs_get_wsframe_opcode(wsp->frame) == RS_WSFRAME_OPC_PING) {
         // Do this here because the Pong response frame must contain the Ping
         // frame's unmasked payload.
@@ -254,7 +319,7 @@ static rs_ret save_websocket_parse_state(
     // to avoid zero-ing overhead of large buffers, use "raw" malloc() instead
     // of the macros of ringsocket_api.h.
     peer->ws.storage =
-        malloc(sizeof(peer->ws.storage) + frames_size + pong_payload_size);
+        malloc(sizeof(*peer->ws.storage) + frames_size + pong_payload_size);
     if (!peer->ws.storage) {
         RS_LOG(LOG_ERR, "Unsuccessful malloc(%zu)",
             frames_size + pong_payload_size);
@@ -268,8 +333,7 @@ static rs_ret save_websocket_parse_state(
     peer->ws.storage->utf8_state = wsp->utf8_state;
     peer->ws.storage->pong_payload_size = pong_payload_size;
 
-    memcpy(peer->ws.storage->frames, worker->rbuf,
-        peer->ws.storage->next_read_i);
+    memcpy(peer->ws.storage->frames, worker->rbuf, frames_size);
 
     if (pong_payload_size) {
         memcpy(peer->ws.storage->frames + frames_size,
@@ -381,9 +445,14 @@ static rs_ret parse_websocket_messages(
             break;
         case RS_AGAIN:
             if (is_parsing_a_ws_msg) {
+                RS_LOG(LOG_DEBUG, "RS_AGAIN occurred while attempting to read "
+                    "the remainder of a partially parsed WebSocket message: "
+                    "calling save_websocket_parse_state()");
                 RS_GUARD(save_websocket_parse_state(worker, peer, &wsp));
                 return RS_AGAIN;
             }
+            RS_LOG(LOG_DEBUG, "RS_AGAIN occurred after a WebSocket message was "
+                    "fully parsed: ready now to handle any pending writes.");
             return worker->pong_response.payload_size ?
                 send_pong_response_from_worker(worker, peer) : RS_OK;
         case RS_CLOSE_PEER: return RS_CLOSE_PEER;
@@ -391,18 +460,29 @@ static rs_ret parse_websocket_messages(
         }
         is_parsing_a_ws_msg = true;
         for (;;) {
-            switch (parse_websocket_frame(worker, &wsp)) {
+            switch (parse_websocket_frame(worker, peer, &wsp)) {
             case RS_OK:
                 wsp.total_payload_size += wsp.payload_size;
                 if (rs_get_wsframe_is_final(wsp.frame)) {
-                    is_parsing_a_ws_msg = false;
                     send_read_to_app(worker, peer, peer_i,
                         wsp.total_payload_size, wsp.data_kind);
+                    uint8_t * next_msg = wsp.payload + wsp.payload_size;
+                    if (next_msg < wsp.next_read) {
+                        size_t remaining_size = wsp.next_read - next_msg;
+                        move_left(worker->rbuf, next_msg - worker->rbuf,
+                            remaining_size);
+                        memset(&wsp, 0, sizeof(wsp));
+                        wsp.next_read = worker->rbuf + remaining_size;
+                        wsp.frame = (union rs_wsframe *) worker->rbuf;
+                        continue;
+                    }
                     memset(&wsp, 0, sizeof(wsp));
                     wsp.next_read = worker->rbuf;
                     wsp.frame = (union rs_wsframe *) worker->rbuf;
+                    is_parsing_a_ws_msg = false;
                     break;
                 }
+                wsp.is_continuation = true;
                 wsp.frame = (union rs_wsframe *)
                     (wsp.payload + wsp.payload_size);
                 continue;
@@ -425,7 +505,7 @@ static rs_ret write_websocket_control_frame(
 ) {
     size_t frame_size = sizeof(*frame) + frame->payload_size_x7F;
     RS_LOG(LOG_DEBUG, "Writing a WebSocket control frame to peer %s with a "
-        "%zu byte payload: %s", get_peer_str(peer), frame->payload_size_x7F,
+        "%zu byte payload: %s", get_addr_str(peer), frame->payload_size_x7F,
         bin_to_log_buf(worker, frame, frame_size));
     return peer->is_encrypted ? write_tls(worker, peer, frame, frame_size) :
                                         write_tcp(peer, frame, frame_size);

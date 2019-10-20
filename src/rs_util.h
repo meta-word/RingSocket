@@ -26,8 +26,20 @@ char * pointer_context_to_log_buf(
     size_t max_right_byte_c
 );
 
+char * get_addr_str(
+    union rs_peer const * peer
+);
+
+char * print_to_log_buf(
+    struct rs_worker * worker,
+    char * log_dst,
+    char const * fmt,
+    ...
+);
+
 char * get_peer_str(
-    union rs_peer * peer
+    struct rs_worker * worker,
+    union rs_peer const * peer
 );
 
 char * get_epoll_events_str(

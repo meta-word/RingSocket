@@ -6,7 +6,7 @@
 #include "rs_http.h"
 #include "rs_tcp.h" // read_tcp(), write_tcp()
 #include "rs_tls.h" // read_tls(), write_tls()
-#include "rs_util.h" // get_peer_str()
+#include "rs_util.h" // get_addr_str()
 
 enum http_error_index {
     RS_HTTP_BAD_REQUEST = 0,
@@ -130,8 +130,8 @@ static rs_ret match_hostname(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG(LOG_NOTICE, "Rejected unrecognized hostname: %.*s",
-                (int) hostname_strlen, hostname);
+            RS_LOG(LOG_NOTICE, "Failing peer %s: unrecognized hostname: %.*s",
+                get_addr_str(peer), (int) hostname_strlen, hostname);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -170,8 +170,8 @@ static rs_ret match_url(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG(LOG_NOTICE, "Rejected unrecognized url: %.*s",
-                (int) url_strlen, url);
+            RS_LOG(LOG_NOTICE, "Failing peer %s: unrecognized url: %.*s",
+                get_addr_str(peer), (int) url_strlen, url);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -223,8 +223,8 @@ static bool match_origin(
             }
         }
         if (++app >= conf->apps + conf->app_c) {
-            RS_LOG(LOG_NOTICE, "Rejected unrecognized origin: %.*s",
-                (int) origin_strlen, origin);
+            RS_LOG(LOG_NOTICE, "Failing peer %s: unrecognized origin: %.*s",
+                get_addr_str(peer), (int) origin_strlen, origin);
             return RS_CLOSE_PEER;
         }
         endpoint = app->endpoints;
@@ -401,9 +401,9 @@ static rs_ret parse_http_upgrade_request(
         }
         RS_H_GETCH(16);
         if (ch > unsaved_str + worker->conf->url_max_strlen) {
-            RS_LOG(LOG_NOTICE, "Rejected %.*s because its length exceeds the "
-                "longest configured url's size %zu by %zu byte(s)",
-                (int) (ch - unsaved_str), unsaved_str,
+            RS_LOG(LOG_NOTICE, "Failing peer %s: length of \"%.*s\" exceeds "
+                "the longest configured url's size %zu by %zu byte(s)",
+                get_addr_str(peer), (int) (ch - unsaved_str), unsaved_str,
                 worker->conf->url_max_strlen,
                 ch - unsaved_str - worker->conf->url_max_strlen);
             RS_H_ERR(RS_HTTP_NOT_FOUND);
@@ -482,9 +482,9 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + worker->conf->hostname_max_strlen) {
-                RS_LOG(LOG_NOTICE, "Rejected %.*s because its length exceeds "
-                    "the longest hostname's size %zu by %zu byte(s)",
-                    (int) (ch - unsaved_str), unsaved_str,
+                RS_LOG(LOG_NOTICE, "Failing peer %s: Length of \"%.*s\" "
+                    "exceeds the longest hostname's size %zu by %zu byte(s)",
+                    get_addr_str(peer), (int) (ch - unsaved_str), unsaved_str,
                     worker->conf->hostname_max_strlen,
                     ch - unsaved_str - worker->conf->hostname_max_strlen);
                 RS_H_ERR(RS_HTTP_BAD_REQUEST);
@@ -509,10 +509,10 @@ static rs_ret parse_http_upgrade_request(
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
             if (ch >= unsaved_str + worker->conf->allowed_origin_max_strlen) {
-                RS_LOG(LOG_NOTICE, "Rejected %.*s because its length exceeds "
-                    "the longest allowed origin's size %zu by %zu byte(s)",
-                    (int) (ch - unsaved_str), unsaved_str,
-                    worker->conf->allowed_origin_max_strlen,
+                RS_LOG(LOG_NOTICE, "Failing peer %s: length of \"%.*s\" "
+                    "exceeds the longest allowed origin's size %zu by %zu "
+                    "byte(s)", get_addr_str(peer), (int) (ch - unsaved_str),
+                    unsaved_str, worker->conf->allowed_origin_max_strlen,
                     ch - unsaved_str - worker->conf->allowed_origin_max_strlen);
                 RS_H_ERR(RS_HTTP_FORBIDDEN);
             }
@@ -636,7 +636,7 @@ static rs_ret write_http_error_response(
     RS_LOG(LOG_NOTICE, "Writing HTTP_%s) to peer %s",
         (char *[]){"BAD_REQUEST (400", "FORBIDDEN (403", "NOT_FOUND (404",
         "METHOD_NOT_ALLOWED (405"}[error_i],
-        get_peer_str(peer));
+        get_addr_str(peer));
     char const * msg = http_errors[error_i];
     return peer->is_encrypted ?
         write_tls(worker, peer, msg, RS_CONST_STRLEN(msg)) :

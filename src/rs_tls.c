@@ -3,7 +3,7 @@
 
 #include "rs_tcp.h" // write_bidirectional_tcp_shutdown()
 #include "rs_tls.h"
-#include "rs_util.h" // get_peer_str()
+#include "rs_util.h" // get_addr_str()
 
 #include <openssl/conf.h>
 #include <openssl/err.h>
@@ -225,13 +225,13 @@ static rs_ret check_tls_error(
     switch (err) {
     case SSL_ERROR_NONE:
         if (size) {
-            RS_LOG(LOG_ERR, "%s of size %zu of %s returned %d and "
+            RS_LOG(LOG_ERR, "%s: %s of size %zu returned %d and "
                 "SSL_ERROR_NONE, even though those return values contradict "
-                "each other", func_str, size, get_peer_str(peer), ret);
+                "each other", get_addr_str(peer), func_str, size, ret);
         } else {
-            RS_LOG(LOG_ERR, "%s of %s returned %d and SSL_ERROR_NONE, even "
-                "though those return values contradict each other", func_str,
-                get_peer_str(peer), ret);
+            RS_LOG(LOG_ERR, "%s: %s returned %d and SSL_ERROR_NONE, even "
+                "though those return values contradict each other",
+                get_addr_str(peer), func_str, ret);
         }
         return RS_CLOSE_PEER;
     case SSL_ERROR_ZERO_RETURN:
@@ -240,13 +240,13 @@ static rs_ret check_tls_error(
         {
             int priority = zero_return_is_expected ? LOG_DEBUG : LOG_INFO;
             if (size) {
-                RS_LOG(priority, "%s of size %zu of %s returned %d and "
-                    "SSL_ERROR_ZERO_RETURN: %s", func_str, size,
-                    get_peer_str(peer), ret, worker->log_buf);
+                RS_LOG(priority, "%s: %s of size %zu returned %d and "
+                    "SSL_ERROR_ZERO_RETURN: %s", get_addr_str(peer), func_str,
+                    size, ret, worker->log_buf);
             } else {
-                RS_LOG(priority, "%s of %s returned %d and "
-                    "SSL_ERROR_ZERO_RETURN: %s", func_str, get_peer_str(peer),
-                    ret, worker->log_buf);
+                RS_LOG(priority,
+                    "%s: %s returned %d and SSL_ERROR_ZERO_RETURN: %s",
+                    get_addr_str(peer), func_str, ret, worker->log_buf);
             }
         }
         return zero_return_is_expected ? RS_OK : RS_CLOSE_PEER;
@@ -260,37 +260,37 @@ static rs_ret check_tls_error(
         ERR_error_string_n(ERR_get_error(), worker->log_buf,
             sizeof(worker->log_buf));
         if (size) {
-            RS_LOG_ERRNO(LOG_ERR, "%s of size %zu of %s returned %d and "
-                "SSL_ERROR_SYSCALL: %s", func_str, size, get_peer_str(peer),
-                ret, worker->log_buf);
+            RS_LOG_ERRNO(LOG_ERR,
+                "%s: %s of size %zu returned %d and SSL_ERROR_SYSCALL: %s",
+                get_addr_str(peer), func_str, size, ret, worker->log_buf);
         } else {
-            RS_LOG_ERRNO(LOG_ERR, "%s of %s returned %d and "
-                "SSL_ERROR_SYSCALL: %s", func_str, get_peer_str(peer), ret,
-                worker->log_buf);
+            RS_LOG_ERRNO(LOG_ERR,
+                "%s: %s returned %d and SSL_ERROR_SYSCALL: %s",
+                get_addr_str(peer), func_str, ret, worker->log_buf);
         }
         return RS_CLOSE_PEER;
     case SSL_ERROR_SSL:
         ERR_error_string_n(ERR_get_error(), worker->log_buf,
             sizeof(worker->log_buf));
         if (size) {
-            RS_LOG(LOG_ERR, "%s of size %zu of %s returned %d and "
-                "SSL_ERROR_SSL: %s", func_str, size, get_peer_str(peer), ret,
-                worker->log_buf);
+            RS_LOG(LOG_ERR,
+                "%s: %s of size %zu returned %d and SSL_ERROR_SSL: %s",
+                get_addr_str(peer), func_str, size, ret, worker->log_buf);
         } else {
-            RS_LOG(LOG_ERR, "%s of %s returned %d and SSL_ERROR_SSL: %s",
-                func_str, get_peer_str(peer), ret, worker->log_buf);
+            RS_LOG(LOG_ERR, "%s: %s returned %d and SSL_ERROR_SSL: %s",
+                get_addr_str(peer), func_str, ret, worker->log_buf);
         }
         return RS_CLOSE_PEER;
     default:
         ERR_error_string_n(ERR_get_error(), worker->log_buf,
             sizeof(worker->log_buf));
         if (size) {
-            RS_LOG(LOG_ERR, "%s of size %zu of %s returned %d and wildly "
-                "inappropriate error value %d: %s", func_str, size,
-                get_peer_str(peer), ret, err, worker->log_buf);
+            RS_LOG(LOG_ERR, "%s: %s of size %zu returned %d and wildly "
+                "inappropriate error value %d: %s",
+                get_addr_str(peer), func_str, size, ret, err, worker->log_buf);
         } else {
-            RS_LOG(LOG_ERR, "%s of %s returned %d and wildly inappropriate "
-                "error value %d: %s", func_str, get_peer_str(peer), ret, err,
+            RS_LOG(LOG_ERR, "%s: %s returned %d and wildly inappropriate "
+                "error value %d: %s", get_addr_str(peer), func_str, ret, err,
                 worker->log_buf);
         }
         return RS_CLOSE_PEER;

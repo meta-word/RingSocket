@@ -6,7 +6,7 @@
 #include "rs_tcp.h" // write_tcp()
 #include "rs_tls.h" // write_tls()
 #include "rs_to_app.h" // send_close_to_app()
-#include "rs_util.h" // move_left()
+#include "rs_util.h" // get_addr_str(), move_left()
 
 // "owref" is an abbreviation of "Outbound Write REFerence"
 
@@ -54,18 +54,18 @@ static rs_ret send_newest_msg(
         if (peer->ws.owref_c == UINT16_MAX) {
             RS_LOG(LOG_WARNING, "More outbound write references are pending "
                 "for peer %s than the maximum supported number of 65535: "
-                "shutting the peer down", get_peer_str(peer));
+                "shutting the peer down", get_addr_str(peer));
             goto close_peer;
         }
         if (!peer->ws.owref_c++) {
             peer->ws.owref_i = worker->newest_owref_i;
         }
         (*remaining_recipient_c)++;
-        RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
-            "peer %" PRIu32 " yet, because its continuation state is "
-            "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu8 ").",
-            frame_size, peer_i, peer->continuation == RS_CONT_PARSING ?
-            "PARS" : "SEND", peer->ws.owref_c);
+        //RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
+        //    "peer %" PRIu32 " yet, because its continuation state is "
+        //    "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu8 ").",
+        //    frame_size, peer_i, peer->continuation == RS_CONT_PARSING ?
+        //    "PARS" : "SEND", peer->ws.owref_c);
         return RS_OK;
     }
     switch (peer->is_encrypted ? write_tls(worker, peer, frame, frame_size) :
@@ -405,7 +405,7 @@ rs_ret send_pending_owrefs(
     for (;;) {
         struct rs_owref * owref = worker->owrefs + peer->ws.owref_i;
         union rs_wsframe * frame =
-            (union rs_wsframe *) owref->cmsg->msg + owref->head_size;
+            (union rs_wsframe *) (owref->cmsg->msg + owref->head_size);
         size_t frame_size = owref->cmsg->size - owref->head_size;
         switch (peer->is_encrypted ?
             write_tls(worker, peer, frame, frame_size) :
