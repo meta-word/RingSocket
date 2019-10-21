@@ -47,8 +47,8 @@ struct rs_wsframe_parser {
     uint64_t total_payload_size;
     enum rs_wsframe_close close_frame;
     enum rs_data_kind data_kind;
+    enum rs_utf8_state utf8_state;
     bool is_continuation;
-    uint16_t utf8_state; // tentative
 };
 
 struct rs_wsframe_parser_storage {
@@ -59,10 +59,10 @@ struct rs_wsframe_parser_storage {
     uint64_t next_read_i;
     uint64_t total_payload_size;
 
-    uint16_t data_kind;
-    uint16_t is_continuation;
-    uint16_t utf8_state;
+    enum rs_utf8_state utf8_state;
     uint16_t pong_payload_size;
+    uint8_t data_kind;
+    uint8_t is_continuation;
 
     uint8_t frames[];
 };

@@ -369,41 +369,46 @@ static inline enum rs_utf8_state rs_validate_utf8_byte(
     switch (state) {
     case RS_UTF8_OK:
         switch (b) {
-default:
-/* 0x00 <= b <= 0x7F */ return RS_UTF8_OK;
-case 0200:case 0201:case 0202:case 0203:case 0204:case 0205:case 0206:case 0207:
-case 0210:case 0211:case 0212:case 0213:case 0214:case 0215:case 0216:case 0217:
-case 0220:case 0221:case 0222:case 0223:case 0224:case 0225:case 0226:case 0227:
-case 0230:case 0231:case 0232:case 0233:case 0234:case 0235:case 0236:case 0237:
-case 0240:case 0241:case 0242:case 0243:case 0244:case 0245:case 0246:case 0247:
-case 0250:case 0251:case 0252:case 0253:case 0254:case 0255:case 0256:case 0257:
-case 0260:case 0261:case 0262:case 0263:case 0264:case 0265:case 0266:case 0267:
-case 0270:case 0271:case 0272:case 0273:case 0274:case 0275:case 0276:case 0277:
-/* 0x80 <= b <= 0xBF */ return RS_UTF8_INVALID;
-case 0300:case 0301:case 0302:case 0303:case 0304:case 0305:case 0306:case 0307:
-case 0310:case 0311:case 0312:case 0313:case 0314:case 0315:case 0316:case 0317:
-case 0320:case 0321:case 0322:case 0323:case 0324:case 0325:case 0326:case 0327:
-case 0330:case 0331:case 0332:case 0333:case 0334:case 0335:case 0336:case 0337:
-/* 0xC0 <= b <= 0xDF */ return RS_UTF8_2BYTE_I1;
-case 0340:
-/* 0xE0 == b == 0xE0 */ return RS_UTF8_3BYTE_1_I1;
-          case 0341:case 0342:case 0343:case 0344:case 0345:case 0346:case 0347:
-case 0350:case 0351:case 0352:case 0353:case 0354:
-/* 0xE1 <= b <= 0xEC */ return RS_UTF8_3BYTE_2_I1;
-                                                  case 0355:
-/* 0xED == b == 0xED */ return RS_UTF8_3BYTE_3_I1;
-                                                            case 0356:case 0357:
-/* 0xEE <= b <= 0xEF */ return RS_UTF8_3BYTE_4_I1;
-case 0360:
-/* 0xF0 == b == 0xF0 */ return RS_UTF8_4BYTE_1_I1;
-          case 0361:case 0362:case 0363:
-/* 0xF1 <= b <= 0xF3 */ return RS_UTF8_4BYTE_2_I1;
-                                        case 0364:
-/* 0xF4 == b == 0xF4 */ return RS_UTF8_4BYTE_3_I1;
-                                                  case 0365:case 0366:case 0367:
-case 0370:case 0371:case 0372:case 0373:case 0374:case 0375:case 0376:case 0377:
-/* 0xF5 <= b <= 0xFF */ return RS_UTF8_INVALID;
-    }
+        default: // b < 0x80
+            return RS_UTF8_OK;
+        case 0x80: case 0x81: case 0x82: case 0x83: case 0x84: case 0x85:
+        case 0x86: case 0x87: case 0x88: case 0x89: case 0x8A: case 0x8B:
+        case 0x8C: case 0x8D: case 0x8E: case 0x8F: case 0x90: case 0x91:
+        case 0x92: case 0x93: case 0x94: case 0x95: case 0x96: case 0x97:
+        case 0x98: case 0x99: case 0x9A: case 0x9B: case 0x9C: case 0x9D:
+        case 0x9E: case 0x9F: case 0xA0: case 0xA1: case 0xA2: case 0xA3:
+        case 0xA4: case 0xA5: case 0xA6: case 0xA7: case 0xA8: case 0xA9:
+        case 0xAA: case 0xAB: case 0xAC: case 0xAD: case 0xAE: case 0xAF:
+        case 0xB0: case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5:
+        case 0xB6: case 0xB7: case 0xB8: case 0xB9: case 0xBA: case 0xBB:
+        case 0xBC: case 0xBD: case 0xBE: case 0xBF:
+            return RS_UTF8_INVALID;
+                                                    case 0xC0: case 0xC1:
+        case 0xC2: case 0xC3: case 0xC4: case 0xC5: case 0xC6: case 0xC7:
+        case 0xC8: case 0xC9: case 0xCA: case 0xCB: case 0xCC: case 0xCD:
+        case 0xCE: case 0xCF: case 0xD0: case 0xD1: case 0xD2: case 0xD3:
+        case 0xD4: case 0xD5: case 0xD6: case 0xD7: case 0xD8: case 0xD9:
+        case 0xDA: case 0xDB: case 0xDC: case 0xDD: case 0xDE: case 0xDF:
+            return RS_UTF8_2BYTE_I1;
+        case 0xE0:
+            return RS_UTF8_3BYTE_1_I1;
+        case 0xE1: case 0xE2: case 0xE3: case 0xE4: case 0xE5: case 0xE6:
+        case 0xE7: case 0xE8: case 0xE9: case 0xEA: case 0xEB: case 0xEC:
+            return RS_UTF8_3BYTE_2_I1;
+        case 0xED:
+            return RS_UTF8_3BYTE_3_I1;
+        case 0xEE: case 0xEF:
+            return RS_UTF8_3BYTE_4_I1;
+        case 0xF0:
+            return RS_UTF8_4BYTE_1_I1;
+        case 0xF1: case 0xF2: case 0xF3:
+            return RS_UTF8_4BYTE_2_I1;
+        case 0xF4:
+            return RS_UTF8_4BYTE_3_I1;
+        case 0xF5: case 0xF6: case 0xF7: case 0xF8: case 0xF9: case 0xFA:
+        case 0xFB: case 0xFC: case 0xFD: case 0xFE: case 0xFF:
+            return RS_UTF8_INVALID;
+        }
 
     case RS_UTF8_2BYTE_I1:
         return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
