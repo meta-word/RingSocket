@@ -242,6 +242,7 @@ static rs_ret unmask_payload_and_validate_any_utf8(
             wsp->payload[mask_i] ^= mask_key[mask_i % 4];
             if ((wsp->utf8_state = rs_validate_utf8_byte(wsp->utf8_state,
                 wsp->payload[mask_i])) == RS_UTF8_INVALID) {
+                wsp->close_frame = RS_WSFRAME_CLOSE_ERR_PAYLOAD;
                 return RS_CLOSE_PEER;
             }
         }
@@ -464,6 +465,19 @@ static rs_ret parse_websocket_messages(
             case RS_OK:
                 wsp.total_payload_size += wsp.payload_size;
                 if (rs_get_wsframe_is_final(wsp.frame)) {
+                    if (wsp.utf8_state != RS_UTF8_OK) {
+                        // https://tools.ietf.org/html/rfc6455#section-5.6 :
+                        //
+                        // > Note that a particular text frame might include a
+                        // > partial UTF-8 sequence; however, the whole message
+                        // > MUST contain valid UTF-8.
+                        //
+                        // This check is also safe when kind == RS_BIN, because
+                        // wsp.utf8_state remains zero when not a UTF-8 message.
+                        peer->ws.close_frame = RS_WSFRAME_CLOSE_ERR_PAYLOAD;
+                        peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
+                        return RS_CLOSE_PEER;
+                    }
                     send_read_to_app(worker, peer, peer_i,
                         wsp.total_payload_size, wsp.data_kind);
                     uint8_t * next_msg = wsp.payload + wsp.payload_size;
@@ -489,8 +503,8 @@ static rs_ret parse_websocket_messages(
             case RS_AGAIN:
                 break;
             case RS_CLOSE_PEER: default:
-                peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
                 peer->ws.close_frame = wsp.close_frame;
+                peer->mortality = RS_MORTALITY_SHUTDOWN_WRITE;
                 return RS_CLOSE_PEER;
             }
             break;
