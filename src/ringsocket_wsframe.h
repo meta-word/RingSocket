@@ -326,3 +326,130 @@ static inline void rs_clear_wsframe_bit_fields(
 ) {
     memset(frame, 0, 2);
 }
+
+// #############################################################################
+// # UTF-8 validator ###########################################################
+
+// Included here because RFC 6455 mandates UTF-8 validation of all frame payload
+// content of type text (RS_WSFRAME_OPC_TEXT). Having this in this header also
+// has the benefit of allowing the compiler to do inlining optimization without
+// needing to rely on LTO.
+
+// Very basic implementation that should nonetheless result in decent bytecode:
+
+enum rs_utf8_state {
+    // The byte stream is in a valid UTF-8 state: ready to validate the next
+    // codepoint (i.e., unicode character).
+    RS_UTF8_OK = 0,
+
+    // The 1st byte of a 2 byte codepoint was valid: awaiting the 2nd byte.
+    RS_UTF8_2BYTE_I1 = 1,
+
+    // There are 4 valid range sequences of 3 byte codepoints.
+    // 2 more bytes are needed if at index 1 (I1), or 1 more if at index 2 (I2).
+    RS_UTF8_3BYTE_1_I1 = 2, RS_UTF8_3BYTE_1_I2 = 3,
+    RS_UTF8_3BYTE_2_I1 = 4, RS_UTF8_3BYTE_2_I2 = 5,
+    RS_UTF8_3BYTE_3_I1 = 6, RS_UTF8_3BYTE_3_I2 = 7,
+    RS_UTF8_3BYTE_4_I1 = 8, RS_UTF8_3BYTE_4_I2 = 9,
+
+    // There are 3 valid range sequences of 4 byte codepoints.
+    // 3 bytes await if index 1, 2 await if index 2, and 1 awaits if index 3.
+    RS_UTF8_4BYTE_1_I1 = 10, RS_UTF8_4BYTE_1_I2 = 11, RS_UTF8_4BYTE_1_I3 = 12,
+    RS_UTF8_4BYTE_2_I1 = 13, RS_UTF8_4BYTE_2_I2 = 14, RS_UTF8_4BYTE_2_I3 = 15,
+    RS_UTF8_4BYTE_3_I1 = 16, RS_UTF8_4BYTE_3_I2 = 17, RS_UTF8_4BYTE_3_I3 = 18,
+
+    // The byte stream contains invalid UTF-8 data, no matter what data follows.
+    RS_UTF8_INVALID = 19
+};
+
+static inline enum rs_utf8_state rs_validate_utf8_byte(
+    enum rs_utf8_state state,
+    uint8_t b
+) {
+    switch (state) {
+    case RS_UTF8_OK:
+        switch (b) {
+default:
+/* 0x00 <= b <= 0x7F */ return RS_UTF8_OK;
+case 0200:case 0201:case 0202:case 0203:case 0204:case 0205:case 0206:case 0207:
+case 0210:case 0211:case 0212:case 0213:case 0214:case 0215:case 0216:case 0217:
+case 0220:case 0221:case 0222:case 0223:case 0224:case 0225:case 0226:case 0227:
+case 0230:case 0231:case 0232:case 0233:case 0234:case 0235:case 0236:case 0237:
+case 0240:case 0241:case 0242:case 0243:case 0244:case 0245:case 0246:case 0247:
+case 0250:case 0251:case 0252:case 0253:case 0254:case 0255:case 0256:case 0257:
+case 0260:case 0261:case 0262:case 0263:case 0264:case 0265:case 0266:case 0267:
+case 0270:case 0271:case 0272:case 0273:case 0274:case 0275:case 0276:case 0277:
+/* 0x80 <= b <= 0xBF */ return RS_UTF8_INVALID;
+case 0300:case 0301:case 0302:case 0303:case 0304:case 0305:case 0306:case 0307:
+case 0310:case 0311:case 0312:case 0313:case 0314:case 0315:case 0316:case 0317:
+case 0320:case 0321:case 0322:case 0323:case 0324:case 0325:case 0326:case 0327:
+case 0330:case 0331:case 0332:case 0333:case 0334:case 0335:case 0336:case 0337:
+/* 0xC0 <= b <= 0xDF */ return RS_UTF8_2BYTE_I1;
+case 0340:
+/* 0xE0 == b == 0xE0 */ return RS_UTF8_3BYTE_1_I1;
+          case 0341:case 0342:case 0343:case 0344:case 0345:case 0346:case 0347:
+case 0350:case 0351:case 0352:case 0353:case 0354:
+/* 0xE1 <= b <= 0xEC */ return RS_UTF8_3BYTE_2_I1;
+                                                  case 0355:
+/* 0xED == b == 0xED */ return RS_UTF8_3BYTE_3_I1;
+                                                            case 0356:case 0357:
+/* 0xEE <= b <= 0xEF */ return RS_UTF8_3BYTE_4_I1;
+case 0360:
+/* 0xF0 == b == 0xF0 */ return RS_UTF8_4BYTE_1_I1;
+          case 0361:case 0362:case 0363:
+/* 0xF1 <= b <= 0xF3 */ return RS_UTF8_4BYTE_2_I1;
+                                        case 0364:
+/* 0xF4 == b == 0xF4 */ return RS_UTF8_4BYTE_3_I1;
+                                                  case 0365:case 0366:case 0367:
+case 0370:case 0371:case 0372:case 0373:case 0374:case 0375:case 0376:case 0377:
+/* 0xF5 <= b <= 0xFF */ return RS_UTF8_INVALID;
+    }
+
+    case RS_UTF8_2BYTE_I1:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_3BYTE_1_I1:
+        return b < 0xA0 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_3BYTE_1_I2;
+    case RS_UTF8_3BYTE_1_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_3BYTE_2_I1:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_3BYTE_2_I2;
+    case RS_UTF8_3BYTE_2_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_3BYTE_3_I1:
+        return b < 0x80 || b > 0x9F ? RS_UTF8_INVALID : RS_UTF8_3BYTE_3_I2;
+    case RS_UTF8_3BYTE_3_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_3BYTE_4_I1:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_3BYTE_4_I2;
+    case RS_UTF8_3BYTE_4_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_4BYTE_1_I1:
+        return b < 0x90 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_4BYTE_1_I2;
+    case RS_UTF8_4BYTE_1_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_4BYTE_1_I3;
+    case RS_UTF8_4BYTE_1_I3:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_4BYTE_2_I1:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_4BYTE_2_I2;
+    case RS_UTF8_4BYTE_2_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_4BYTE_2_I3;
+    case RS_UTF8_4BYTE_2_I3:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_4BYTE_3_I1:
+        return b < 0x80 || b > 0x8F ? RS_UTF8_INVALID : RS_UTF8_4BYTE_3_I2;
+    case RS_UTF8_4BYTE_3_I2:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_4BYTE_3_I3;
+    case RS_UTF8_4BYTE_3_I3:
+        return b < 0x80 || b > 0xBF ? RS_UTF8_INVALID : RS_UTF8_OK;
+
+    case RS_UTF8_INVALID: default:
+        return RS_UTF8_INVALID;
+    }
+}

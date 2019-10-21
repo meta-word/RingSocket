@@ -226,22 +226,26 @@ static rs_ret parse_websocket_frame_header(
     }
 }
 
-static void unmask_websocket_payload(
+static rs_ret unmask_payload_and_validate_any_utf8(
     struct rs_wsframe_parser * wsp,
     size_t masked_size
 ) {
     uint8_t * mask_key = wsp->payload - 4;
-    for (size_t mask_i =
+    size_t mask_i =
         wsp->cur_read > wsp->payload ? wsp->cur_read - wsp->payload : 0;
-        mask_i < masked_size; mask_i++) {
-        wsp->payload[mask_i] ^= mask_key[mask_i % 4];
+    if (wsp->data_kind == RS_BIN) {
+        for (; mask_i < masked_size; mask_i++) {
+            wsp->payload[mask_i] ^= mask_key[mask_i % 4];
+        }
+    } else {
+        for (; mask_i < masked_size; mask_i++) {
+            wsp->payload[mask_i] ^= mask_key[mask_i % 4];
+            if ((wsp->utf8_state = rs_validate_utf8_byte(wsp->utf8_state,
+                wsp->payload[mask_i])) == RS_UTF8_INVALID) {
+                return RS_CLOSE_PEER;
+            }
+        }
     }
-}
-
-static rs_ret validate_websocket_utf8(
-    struct rs_wsframe_parser * wsp
-) {
-    (void) wsp; // todo
     return RS_OK;
 }
 
@@ -280,13 +284,11 @@ static rs_ret parse_websocket_frame(
         }
     }
     if (wsp->next_read < wsp->payload + wsp->payload_size) {
-        unmask_websocket_payload(wsp, wsp->next_read - wsp->payload);
-        if (wsp->data_kind == RS_UTF8) {
-            RS_GUARD(validate_websocket_utf8(wsp));
-        }
+        RS_GUARD(unmask_payload_and_validate_any_utf8(wsp,
+            wsp->next_read - wsp->payload));
         return RS_AGAIN;
     }
-    unmask_websocket_payload(wsp, wsp->payload_size);
+    RS_GUARD(unmask_payload_and_validate_any_utf8(wsp, wsp->payload_size));
     if (rs_get_wsframe_opcode(wsp->frame) == RS_WSFRAME_OPC_PING) {
         // Do this here because the Pong response frame must contain the Ping
         // frame's unmasked payload.
@@ -302,8 +304,6 @@ static rs_ret parse_websocket_frame(
         // older frame may have been previously copied to it from here.
         worker->pong_response.payload_size = wsp->payload_size;
         memcpy(worker->pong_response.payload, wsp->payload, wsp->payload_size);
-    } else if (wsp->data_kind == RS_UTF8) {
-        RS_GUARD(validate_websocket_utf8(wsp));
     }
     return RS_OK;
 }
