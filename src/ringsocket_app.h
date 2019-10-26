@@ -198,11 +198,14 @@ rs_ret ringsocket_app( \
         RS_OK) { \
         switch (imsg->inbound_kind) { \
         case RS_INBOUND_OPEN: \
+            RS_ENQUEUE_APP_READ_UPDATE; \
             _##open_macro; /* Should expand _RS_OPEN[_NONE] */ \
             continue; \
         case RS_INBOUND_READ: \
             break; \
         case RS_INBOUND_CLOSE: default: \
+            RS_ENQUEUE_APP_READ_UPDATE; \
+            call_close_cb: \
             _##close_macro; /* Should expand _RS_CLOSE[_NONE] */ \
             continue; \
         } \
@@ -253,14 +256,13 @@ do { \
     sched.disable_sleep_timeout = true; \
 } while (0)
 
-#define _INIT_RS_TIMER_NONE
+#define _RS_TIMER_NONE
 
 // #############################################################################
 // # RS_OPEN() #################################################################
 
 #define _RS_OPEN(open_cb) \
 do { \
-    RS_ENQUEUE_APP_READ_UPDATE; \
     rs.cb = RS_CB_OPEN; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs))); \
 } while (0)
@@ -272,8 +274,6 @@ do { \
 
 #define _RS_CLOSE(close_cb) \
 do { \
-    RS_ENQUEUE_APP_READ_UPDATE; \
-    call_close_cb: \
     rs.cb = RS_CB_CLOSE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
 } while (0)
