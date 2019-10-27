@@ -53,6 +53,8 @@ static rs_ret read_http(
         read_tcp(peer,
             *ch, worker->conf->worker_rbuf_size - unsaved_strlen, &rsize);
     *ch_over = *ch + rsize;
+    //RS_LOG(LOG_DEBUG, "Read HTTP from peer %s: %.*s",
+    //            get_addr_str(peer), (int) rsize, *ch);
     if (ret != RS_AGAIN) {
         return ret;
     }
@@ -105,7 +107,8 @@ static rs_ret match_hostname(
         return RS_OK;
     }
     char * url = endpoint->url;
-    char * origin = endpoint->allowed_origins[peer->http.origin_i];
+    char * origin = endpoint->allowed_origin_c ?
+        endpoint->allowed_origins[peer->http.origin_i] : NULL;
     // The current endpoint did not match the hostname. Try remaining candidates
     for (;;) {
         while (++endpoint < app->endpoints + app->endpoint_c) {

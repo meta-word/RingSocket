@@ -51,6 +51,13 @@ static inline uint64_t rs_get_endpoint_id(
     return rs->inbound_endpoint_id;
 }
 
+static inline enum rs_data_kind rs_get_read_data_kind(
+    rs_t const * rs
+) {
+    rs_guard_cb(__func__, rs->cb, RS_CB_READ);
+    return rs->read_data_kind;
+}
+
 static inline struct rs_conf const * rs_get_conf(
     rs_t const * rs
 ) {
@@ -70,6 +77,7 @@ static inline void rs_w_p(
 ) {
     rs_guard_cb(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
+    RS_GUARD_APP(rs_check_app_wsize(rs, size));
     memcpy(rs->wbuf + rs->wbuf_i, src, size);
     rs->wbuf_i += size;
 }

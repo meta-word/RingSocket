@@ -150,7 +150,7 @@ static inline void rs_set_wsframe_is_final(
 }
 
 
-static inline unsigned rs_get_wsframe_opcode(
+static inline enum rs_wsframe_opcode rs_get_wsframe_opcode(
     union rs_wsframe const * frame
 ) {
     return frame->opcode_x0F & 0x0F;
@@ -158,7 +158,7 @@ static inline unsigned rs_get_wsframe_opcode(
 
 static inline void rs_set_wsframe_opcode(
     union rs_wsframe * frame,
-    uint8_t opcode
+    enum rs_wsframe_opcode opcode
 ) {
     frame->opcode_x0F |= opcode;
 }
@@ -381,9 +381,8 @@ static inline enum rs_utf8_state rs_validate_utf8_byte(
         case 0xAA: case 0xAB: case 0xAC: case 0xAD: case 0xAE: case 0xAF:
         case 0xB0: case 0xB1: case 0xB2: case 0xB3: case 0xB4: case 0xB5:
         case 0xB6: case 0xB7: case 0xB8: case 0xB9: case 0xBA: case 0xBB:
-        case 0xBC: case 0xBD: case 0xBE: case 0xBF:
+        case 0xBC: case 0xBD: case 0xBE: case 0xBF: case 0xC0: case 0xC1:
             return RS_UTF8_INVALID;
-                                                    case 0xC0: case 0xC1:
         case 0xC2: case 0xC3: case 0xC4: case 0xC5: case 0xC6: case 0xC7:
         case 0xC8: case 0xC9: case 0xCA: case 0xCB: case 0xCC: case 0xCD:
         case 0xCE: case 0xCF: case 0xD0: case 0xD1: case 0xD2: case 0xD3:

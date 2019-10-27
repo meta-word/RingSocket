@@ -214,23 +214,23 @@ static rs_ret parse_endpoint(
     {
         jg_arr_get_t * arr = NULL;
         size_t elem_c = 0;
-        RS_GUARD_JG(jg_obj_get_arr(jg, obj, "allowed_origins",
-            &(jg_obj_arr){
-                .min_c = 1,
+        RS_GUARD_JG(jg_obj_get_arr_defa(jg, obj, "allowed_origins",
+            &(jg_obj_arr_defa){
                 .max_c = RS_MAX_ALLOWED_ORIGIN_C,
-                .min_c_reason = "At least one origin must be allowed."
             }, &arr, &elem_c));
-        RS_CALLOC(endpoint->allowed_origins, elem_c);
-        endpoint->allowed_origin_c = elem_c;
-        for (size_t i = 0; i < elem_c; i++) {
-            size_t byte_c = 0;
-            RS_GUARD_JG(jg_arr_get_str(jg, arr, i,
-                &(jg_arr_str){
-                    .byte_c = &byte_c,
-                    .max_byte_c = RS_ALLOWED_ORIGIN_MAX_STRLEN
-                }, endpoint->allowed_origins + i));
-            if (byte_c > conf->allowed_origin_max_strlen) {
-                conf->allowed_origin_max_strlen = byte_c;
+        if (elem_c) {
+            RS_CALLOC(endpoint->allowed_origins, elem_c);
+            endpoint->allowed_origin_c = elem_c;
+            for (size_t i = 0; i < elem_c; i++) {
+                size_t byte_c = 0;
+                RS_GUARD_JG(jg_arr_get_str(jg, arr, i,
+                    &(jg_arr_str){
+                        .byte_c = &byte_c,
+                        .max_byte_c = RS_ALLOWED_ORIGIN_MAX_STRLEN
+                    }, endpoint->allowed_origins + i));
+                if (byte_c > conf->allowed_origin_max_strlen) {
+                    conf->allowed_origin_max_strlen = byte_c;
+                }
             }
         }
     }

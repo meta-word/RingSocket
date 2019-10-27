@@ -44,14 +44,14 @@ static rs_ret send_msg_to_app(
     struct rs_worker * worker,
     union rs_peer const * peer,
     uint32_t peer_i,
-    uint64_t total_payload_size,
+    uint64_t data_size,
     enum rs_data_kind data_kind,
     enum rs_inbound_kind inbound_kind
 ) {
     struct rs_ring_producer * prod = worker->inbound_producers + peer->app_i;
     RS_GUARD(rs_produce_ring_msg(&worker->ring_pairs[peer->app_i]->inbound_ring,
         prod, worker->conf->realloc_multiplier, sizeof(struct rs_inbound_msg) +
-        total_payload_size));
+        data_size));
 
     struct rs_inbound_msg * imsg = (struct rs_inbound_msg *) prod->w;
     imsg->peer_i = peer_i;
@@ -62,12 +62,15 @@ static rs_ret send_msg_to_app(
     imsg->inbound_kind = inbound_kind;
     prod->w += sizeof(*imsg);
 
-    if (total_payload_size) {
+    if (data_size) {
         copy_combined_websocket_payloads_to_inbound_ring(prod,
             (union rs_wsframe *) worker->rbuf);
-        if ((uint8_t const *) imsg + sizeof(*imsg) + total_payload_size !=
-            prod->w) {
-            RS_LOG(LOG_ERR, "Total payload size and prod->w don't add up.");
+        if ((uint8_t const *) imsg + sizeof(*imsg) + data_size != prod->w) {
+            RS_LOG(LOG_ERR, "%zu byte data_size doesn't equal %zu byte prod->w "
+                "increment ",
+                data_size, prod->w - (uint8_t const *) imsg - sizeof(*imsg));
+        }
+        if ((uint8_t const *) imsg + sizeof(*imsg) + data_size != prod->w) {
             return RS_FATAL;
         }
     }
@@ -90,10 +93,10 @@ rs_ret send_read_to_app(
     struct rs_worker * worker,
     union rs_peer const * peer,
     uint32_t peer_i,
-    uint64_t total_payload_size,
+    uint64_t data_size,
     enum rs_data_kind data_kind
 ) {
-    return send_msg_to_app(worker, peer, peer_i, total_payload_size, data_kind,
+    return send_msg_to_app(worker, peer, peer_i, data_size, data_kind,
         RS_INBOUND_READ);
 }
 

@@ -138,6 +138,7 @@ struct rs_app_cb_args { // AKA rs_t (typedef located in ringsocket_api.h)
     uint32_t inbound_peer_i;
     int inbound_socket_fd;
     unsigned cb; // unsigned version of enum rs_callback
+    enum rs_data_kind read_data_kind;
     uint16_t inbound_endpoint_id;
     uint16_t inbound_worker_i;
 };
@@ -209,6 +210,8 @@ rs_ret ringsocket_app( \
             _##close_macro; /* Should expand _RS_CLOSE[_NONE] */ \
             continue; \
         } \
+        rs.cb = RS_CB_READ; \
+        rs.read_data_kind = imsg->data_kind; \
         size_t payload_i = 0; \
         _##read_macro; /* Should expand _RS_READ_... */ \
     } \
@@ -307,25 +310,30 @@ do { \
         } \
         break
 
+#define _RS_CASE_ANY(cb_i, ...) \
+    case cb_i: \
+        { \
+            _RS_READ_ANY(__VA_ARGS__); \
+        } \
+        break
+
 #define _RS_READ_BIN(...) \
 do { \
-    if (imsg->data_kind == RS_UTF8) { \
+    if (rs.read_data_kind == RS_UTF8) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_DATA_TYPE); \
     } \
-    rs.cb = RS_CB_READ; \
-    RS_READ_PROCEED(__VA_ARGS__); \
+    _RS_READ_ANY(__VA_ARGS__); \
 } while (0)
 
 #define _RS_READ_UTF8(...) \
 do { \
-    if (imsg->data_kind == RS_BIN) { \
+    if (rs.read_data_kind == RS_BIN) { \
         RS_READ_ABORT(RS_APP_WS_CLOSE_WRONG_DATA_TYPE); \
     } \
-    rs.cb = RS_CB_READ; \
-    RS_READ_PROCEED(__VA_ARGS__); \
+    _RS_READ_ANY(__VA_ARGS__); \
 } while (0)
 
-#define RS_READ_PROCEED(...) \
+#define _RS_READ_ANY(...) \
     RS_MACRIFY_ARGC( \
         RS_256_16( \
             RS_A00, RS_A01, RS_A02, RS_A03, \

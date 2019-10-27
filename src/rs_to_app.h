@@ -19,7 +19,7 @@ rs_ret send_read_to_app(
     struct rs_worker * worker,
     union rs_peer const * peer,
     uint32_t peer_i,
-    uint64_t total_payload_size,
+    uint64_t data_size,
     enum rs_data_kind data_kind
 );
 
