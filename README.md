@@ -199,6 +199,14 @@ text (i.e., UTF-8) rather than a plain binary payload. RingSocket validates the
 UTF-8 encoding of all WebSocket messages of type text in advance, in conformance
 of [RFC 6455 Section 5.6](https://tools.ietf.org/html/rfc6455#section-5.6).
 
+##### RS_READ_ANY(*read_cb*[, *read_m1*[, *read_m2*[, ...]]])
+
+Like [`RS_READ_BIN(read_cb[, ...])`](#rs_read_binread_cb-read_m1-read_m2-) and
+[`RS_READ_UTF8(read_cb[, ...])`](#rs_read_utf8read_cb-read_m1-read_m2-), except
+that it allows *read_cb* to accept either text or binary WebSocket payload data.
+Use the `rs_get_read_data_kind(rs)` [helper function](#app-helper-functions) to
+find out which type of data a received message consists of.
+
 ##### RS_READ_SWITCH(*case_m1*[, *case_m2*[, ...]])
 
 By interpreting the 1st byte of any incoming WebSocket message payload as a
@@ -353,7 +361,7 @@ uint64_t rs_get_client_id(rs_t * rs);
 ```
 
 Obtains the client ID belonging to the WebSocket client connection that evoked
-the current `RS_OPEN()`, `RS_READ()`, or `RS_CLOSE()` callback function.
+the current `RS_OPEN()`, `RS_READ_...()`, or `RS_CLOSE()` callback function.
 I.e., every ID is mapped to one specific TCP socket file descriptor. Note that
 calling this function from an `RS_TIMER_...()` callback will result in a fatal
 error. Valid client ID values are always greater than 0, which means apps can
@@ -370,11 +378,19 @@ uint16_t rs_get_endpoint_id(rs_t * rs);
 ```
 
 Obtains the endpoint ID of the WebSocket client connection that evoked
-the current `RS_OPEN()`, `RS_READ()`, or `RS_CLOSE()` callback function.
+the current `RS_OPEN()`, `RS_READ_...()`, or `RS_CLOSE()` callback function.
 For apps with multiple [configured endpoint urls](#endpoint-configuration),
 this function allows the app to determine through which of those the WebSocket
 client established its connection. Note that calling this function from an
 `RS_TIMER_...()` callback will result in a fatal error.
+
+```C
+enum rs_data_kind rs_get_read_data_kind(rs_t * rs);
+```
+
+Obtains the data kind of the received WebSocket message: either `RS_BIN` or
+`RS_UTF8`. Only available during `RS_READ_...()` callbacks (and only useful when
+using `RS_READ_ANY()`).
 
 ```C
 struct rs_conf const * rs_get_conf(rs_t * rs);
@@ -559,7 +575,8 @@ doing":
   can store during each call to `epoll_wait()`. Default: `100`
 * `"update_queue_size"`: The number of ring buffer writes to deliberately
   queue in order to guard against CPU memory reordering (see
-  [ringsocket_ring.h](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_ring.h)). Default: `5`
+  [ringsocket_ring.h](https://github.com/wbudd/ringsocket/blob/master/src/ringsocket_ring.h)).
+  Default: `5`
 
 ### Port configuration
 
