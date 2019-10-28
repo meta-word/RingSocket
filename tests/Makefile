@@ -5,9 +5,13 @@ PRELOAD_NAME = rs_preload_sham_io
 PRELOAD_SRC = $(PRELOAD_NAME).c
 PRELOAD_SONAME = $(PRELOAD_NAME).so
 
-APP_NAME = rs_test_app_stress
-APP_SRC = $(APP_NAME).c
-APP_SONAME = $(APP_NAME).so
+APP_ECHO_NAME = rs_test_app_echo
+APP_ECHO_SRC = $(APP_ECHO_NAME).c
+APP_ECHO_SONAME = $(APP_ECHO_NAME).so
+
+APP_STRESS_NAME = rs_test_app_stress
+APP_STRESS_SRC = $(APP_STRESS_NAME).c
+APP_STRESS_SONAME = $(APP_STRESS_NAME).so
 
 RS_CACHE_LINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
 
@@ -16,7 +20,7 @@ FLAGS = -Wall -Wextra -Wpedantic -std=c11 -O3 -fpic -shared \
 	-Wl,-z,relro,-z,now -DRS_CACHE_LINE_SIZE=$(RS_CACHE_LINE_SIZE)
 
 .PHONY: all
-all: preload app
+all: preload echo stress
 
 .PHONY: preload
 preload: $(PRELOAD_SONAME)
@@ -24,13 +28,18 @@ preload: $(PRELOAD_SONAME)
 $(PRELOAD_SONAME):
 	$(CC) $(FLAGS) -o $(PRELOAD_SONAME) $(PRELOAD_SRC)
 
-.PHONY: app
-app: $(APP_SONAME)
+.PHONY: echo
+echo: $(APP_ECHO_SONAME)
 
-$(APP_SONAME):
-	$(CC) $(FLAGS) -o $(APP_SONAME) $(APP_SRC)
+$(APP_ECHO_SONAME):
+	$(CC) $(FLAGS) -o $(APP_ECHO_SONAME) $(APP_ECHO_SRC)
 
+.PHONY: stress
+stress: $(APP_STRESS_SONAME)
+
+$(APP_STRESS_SONAME):
+	$(CC) $(FLAGS) -o $(APP_STRESS_SONAME) $(APP_STRESS_SRC)
 
 .PHONY: clean
 clean:
-	rm -rf $(PRELOAD_SONAME) $(APP_SONAME)
+	rm -rf $(PRELOAD_SONAME) $(APP_ECHO_SONAME) $(APP_STRESS_SONAME)

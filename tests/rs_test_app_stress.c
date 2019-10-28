@@ -3,7 +3,7 @@
 
 #include <ringsocket.h>
 
-#define RS_TEST_MAX_READ_MSG_BYTE_C 536870912 // 512 MB
+#define RS_TEST_MAX_READ_MSG_BYTE_C 0x1000000 // 16 MB
 #define RS_TEST_MAX_CLIENT_C 1000
 
 typedef enum {
@@ -277,7 +277,7 @@ rs_test_ret timer_cb(
 ) {
     struct rs_stress * s = rs_get_app_data(rs);
     if (s->client_c) {
-        s->msg_byte_c = randrange(s->max_msg_byte_c / 10) + 1;
+        s->msg_byte_c = randrange(s->max_msg_byte_c / 100000) + 1;
         send_something(rs, s, false);
     }
     return s->interval = RS_MAX(10000 /* 0.01 sec */, s->interval - 1000);
