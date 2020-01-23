@@ -7,12 +7,12 @@ RUN cd /opt && \
 	cd jgrandson && \
 	make && \
 	make install && \
-	"Installed JSON library dependency: Jgrandson."
+	echo "Installed JSON library dependency: Jgrandson."
 RUN cd /opt && \
 	git clone https://github.com/wbudd/ringsocket.git && \
 	cd ringsocket && \
 	make && \
 	make install && \
-	"Installed RingSocket."
+	echo "Installed RingSocket."
 RUN pacman --noconfirm -S iproute2 python && \
 	echo "Installed Ringsocket test suite dependencies: python3 and iproute2."
