@@ -27,6 +27,7 @@ languages other than C such as
 ## Table of contents
 
 * [Installation](#installation)
+  * [Docker](#docker)
 * [Creating RingSocket server apps](#creating-ringsocket-server-apps)
   * [RS_APP](#rs_appm1-m2-m3-m4-m5)
   * [App callback return values](#app-callback-return-values)
@@ -47,10 +48,13 @@ languages other than C such as
 
 ## Installation
 
-Aside from needing a fairly recent Linux kernel and C compiler, RingSocket has
-only 2 external dependencies: OpenSSL and
+Aside from needing a fairly recent Linux kernel and C library with C11 support
+(e.g., glibc>=2.28), RingSocket only has 2 external dependencies: OpenSSL and
 [Jgrandson](https://github.com/wbudd/jgrandson/blob/master/src/jgrandson.h).
-Make sure these are installed first, then proceed with something like this:
+Some Linux distributions may lack `/usr/include/sys/capability.h`. In that case,
+try installing the libcap dev package (e.g., for Ubuntu:
+`apt-get install libcap-dev`). Once these are installed, proceed with something
+like:
 
     git clone https://github.com/wbudd/ringsocket.git
     cd ringsocket
@@ -60,6 +64,13 @@ Make sure these are installed first, then proceed with something like this:
 Note that if not already present, `make install` will attempt to create an
 unprivileged system user named `ringsock` (if not already present), for
 exclusive use by the RingSocket daemon.
+
+### Docker
+
+Because of the included Dockerfile, installation of RingSocket can be simplified
+to just running `docker build -t ringsocket .` in the root directory of this
+repository. The Dockerfile currently doesn't do anything else though: pull
+requests turning it into a more convenient execution environment are welcome.
 
 ## Creating RingSocket server apps
 
