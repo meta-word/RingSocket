@@ -707,7 +707,7 @@ static rs_ret parse_configuration(
                 "Unsuccessful sysconf(_SC_NPROCESSORS_ONLN)");
             return RS_FATAL;
         }
-        conf->worker_c = RS_MIN(1, ret - conf->app_c);
+        conf->worker_c = RS_MAX(1, ret - conf->app_c);
     }
     return RS_OK;
 }
