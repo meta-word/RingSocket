@@ -159,10 +159,10 @@ static rs_ret match_url(
         endpoint->is_encrypted == peer->is_encrypted) {
         return RS_OK;
     }
-    char * hostname = endpoint->hostname;
+    char * hostname = endpoint++->hostname;
     // The current endpoint did not match the url. Try remaining candidates.
     for (;;) {
-        while (++endpoint < app->endpoints + app->endpoint_c) {
+        for (;endpoint < app->endpoints + app->endpoint_c; endpoint++) {
             if (!strncmp(endpoint->url, url, url_strlen) &&
                 endpoint->is_encrypted == peer->is_encrypted &&
                 !(peer->http.hostname_was_parsed &&
