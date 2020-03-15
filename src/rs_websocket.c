@@ -280,7 +280,7 @@ static rs_ret parse_websocket_frame(
     struct rs_wsframe_parser * wsp
 ) {
     if (wsp->cur_read < wsp->frame->cs_large.payload) {
-        if (wsp->next_read < wsp->frame->sc_small.payload) {
+        if (wsp->next_read < wsp->frame->cs_small.payload) {
             return RS_AGAIN;
         }
         RS_GUARD(parse_websocket_frame_header(peer, wsp,
