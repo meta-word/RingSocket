@@ -15,12 +15,12 @@
 static void static_assert_wsframe_sizes(
     union rs_wsframe * frame
 ) {
-    static_assert(sizeof(frame->in_small) == 6);
-    static_assert(sizeof(frame->in_medium) == 8);
-    static_assert(sizeof(frame->in_large) == 14);
-    static_assert(sizeof(frame->out_small) == 2);
-    static_assert(sizeof(frame->out_medium) == 4);
-    static_assert(sizeof(frame->out_large) == 10);
+    static_assert(sizeof(frame->cs_small) == 6);
+    static_assert(sizeof(frame->cs_medium) == 8);
+    static_assert(sizeof(frame->cs_large) == 14);
+    static_assert(sizeof(frame->sc_small) == 2);
+    static_assert(sizeof(frame->sc_medium) == 4);
+    static_assert(sizeof(frame->sc_large) == 10);
     static_assert(sizeof(*frame) == 14);
 }
 
@@ -180,7 +180,7 @@ static rs_ret parse_websocket_frame_header(
         // The response pong is generated at the bottom of
         // parse_websocket_frame(), because the ping frame payload which it must
         // echo is not unmasked here yet.
-        wsp->payload = wsp->frame->in_small.payload;
+        wsp->payload = wsp->frame->cs_small.payload;
         wsp->payload_size = wsp->frame->payload_size_x7F & 0x7F;
         wsp->must_send_pong_response = true;
         return RS_OK;
@@ -206,7 +206,7 @@ static rs_ret parse_websocket_frame_header(
         //
         // Given that RingSocket never sends any pings, all pongs it receives
         // are by definition unsolicited, and can thus simply be ignored.
-        wsp->payload = wsp->frame->in_small.payload;
+        wsp->payload = wsp->frame->cs_small.payload;
         wsp->payload_size = wsp->frame->payload_size_x7F & 0x7F;
         return RS_OK;
     default:
@@ -215,27 +215,27 @@ static rs_ret parse_websocket_frame_header(
             "frame with an invalid opcode.", get_addr_str(peer));
         return RS_CLOSE_PEER;
     }
-    //  rs_get_wsframe_in_payload_and_payload_size() can't be used safely here
+    //  rs_get_wsframe_cs_payload_and_payload_size() can't be used safely here
     //  because there is no guarantee that all header bytes are read yet.
     unsigned payload_byte = wsp->frame->payload_size_x7F & 0x7F;
     switch (payload_byte) {
     default:
-        wsp->payload = wsp->frame->in_small.payload;
+        wsp->payload = wsp->frame->cs_small.payload;
         wsp->payload_size = payload_byte;
         break;
     case 126:
-        if (wsp->next_read < wsp->frame->in_medium.payload) {
+        if (wsp->next_read < wsp->frame->cs_medium.payload) {
             return RS_AGAIN;
         }
-        wsp->payload = wsp->frame->in_medium.payload;
-        wsp->payload_size = RS_R_NTOH16(wsp->frame->in_medium.payload_size);
+        wsp->payload = wsp->frame->cs_medium.payload;
+        wsp->payload_size = RS_R_NTOH16(wsp->frame->cs_medium.payload_size);
         break;
     case 127:
-        if (wsp->next_read < wsp->frame->in_large.payload) {
+        if (wsp->next_read < wsp->frame->cs_large.payload) {
             return RS_AGAIN;
         }
-        wsp->payload = wsp->frame->in_large.payload;
-        wsp->payload_size = RS_R_NTOH64(wsp->frame->in_large.payload_size);
+        wsp->payload = wsp->frame->cs_large.payload;
+        wsp->payload_size = RS_R_NTOH64(wsp->frame->cs_large.payload_size);
         break;
     }
     if (wsp->data_size + wsp->payload_size > max_ws_msg_size) {
@@ -279,8 +279,8 @@ static rs_ret parse_websocket_frame(
     union rs_peer * peer,
     struct rs_wsframe_parser * wsp
 ) {
-    if (wsp->cur_read < wsp->frame->in_large.payload) {
-        if (wsp->next_read < wsp->frame->in_small.payload) {
+    if (wsp->cur_read < wsp->frame->cs_large.payload) {
+        if (wsp->next_read < wsp->frame->sc_small.payload) {
             return RS_AGAIN;
         }
         RS_GUARD(parse_websocket_frame_header(peer, wsp,
@@ -440,21 +440,21 @@ static void load_websocket_parse_state(
 
     RS_FREE(peer->ws.storage);
     
-    if (wsp->next_read >= wsp->frame->in_large.payload) {
+    if (wsp->next_read >= wsp->frame->cs_large.payload) {
         // parse_websocket_frame_header() must have already been called during
         // the previous iteration of parse_websocket_frame() (which resulted in
         // RS_AGAIN). However, to save space, struct wsframe_storage omits the
         // .payload and .payload_size of struct websocket_peer; so regenerate
-        // them here with rs_get_wsframe_in_payload().
+        // them here with rs_get_wsframe_cs_payload().
         wsp->payload_size =
-            rs_get_wsframe_in_payload(wsp->frame, &wsp->payload);
+            rs_get_wsframe_cs_payload(wsp->frame, &wsp->payload);
     }
 }
 
 static rs_ret send_pong_response(
     struct rs_worker * worker,
     union rs_peer * peer,
-    struct rs_wsframe_out_small const * pong_response
+    struct rs_wsframe_sc_small const * pong_response
 ) {
     return peer->is_encrypted ?
         write_tls(worker, peer, pong_response,
@@ -468,12 +468,12 @@ static rs_ret send_pong_response_from_worker(
     union rs_peer * peer
 ) {
     rs_ret ret = send_pong_response(worker, peer,
-        (struct rs_wsframe_out_small *) &worker->pong_response);
+        (struct rs_wsframe_sc_small *) &worker->pong_response);
     if (ret != RS_AGAIN) {
         worker->pong_response.payload_size = 0;
         return ret;
     }
-    size_t pong_size = sizeof(struct rs_wsframe_out_small) +
+    size_t pong_size = sizeof(struct rs_wsframe_sc_small) +
         worker->pong_response.payload_size;
     worker->pong_response.payload_size = 0;
     // Because of the flexible array member .payload, use "raw" malloc() instead
@@ -556,7 +556,7 @@ static rs_ret read_websocket(
 static rs_ret write_websocket_control_frame(
     struct rs_worker * worker,
     union rs_peer * peer,
-    struct rs_wsframe_out_small * frame
+    struct rs_wsframe_sc_small * frame
 ) {
     size_t frame_size = sizeof(*frame) + frame->payload_size_x7F;
     RS_LOG(LOG_DEBUG, "Writing a WebSocket control frame to peer %s with a "
@@ -578,7 +578,7 @@ rs_ret handle_websocket_io(
         if (peer->continuation == RS_CONT_SENDING) {
             write_ws_close_msg:
             switch (write_websocket_control_frame(worker, peer,
-                (struct rs_wsframe_out_small *)
+                (struct rs_wsframe_sc_small *)
                 close_frames[RS_BOUNDS(0, peer->ws.close_frame, 3)])) {
             case RS_OK:
                 peer->continuation = RS_CONT_NONE;

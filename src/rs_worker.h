@@ -78,7 +78,7 @@ struct rs_worker {
     size_t * oldest_owref_i_by_app;
 
     // Defined in ringsocket_wsframe.h. Used by rs_websocket.c to buffer pongs.
-    struct rs_wsframe_out_pong pong_response;
+    struct rs_wsframe_sc_pong pong_response;
 
     // Used for OpenSSL's ERR_error_string_n(), and for passing on to RS_LOG().
     char log_buf[400]; // Enough to print a full control frame as hex, etc.
@@ -187,7 +187,7 @@ union rs_peer {
 
             // Applicable if .mortality == RS_MORTALITY_LIVE &&
             //            .continuation == RS_CONT_SENDING
-            struct rs_wsframe_out_small * pong_response; // See rs_websocket.c.
+            struct rs_wsframe_sc_small * pong_response; // See rs_websocket.c.
             
             // Applicable if .mortality == RS_MORTALITY_SHUTDOWN_WRITE &&
             //            .continuation == RS_CONT_SENDING

@@ -91,7 +91,7 @@ static inline void rs_send(
         1 + // uint8_t outbound_kind
         4 * (recipient_c > 1) + // if (recipient_c > 1): uint32_t recipient_c
         4 * recipient_c + // uint32_t array of recipients (peer_i elements)
-        rs_get_wsframe_out_size_from_payload_size(rs->wbuf_i);
+        rs_get_wsframe_sc_size_from_payload_size(rs->wbuf_i);
 
     struct rs_ring_producer * prod = rs->outbound_producers + worker_i;
     RS_GUARD_APP(rs_produce_ring_msg(&rs->ring_pairs[worker_i].outbound_ring,
@@ -113,7 +113,7 @@ static inline void rs_send(
     rs_set_wsframe_is_final(frame, true);
     rs_set_wsframe_opcode(frame, data_kind == RS_UTF8 ?
         RS_WSFRAME_OPC_TEXT : RS_WSFRAME_OPC_BIN);
-    prod->w += rs_set_wsframe_out_payload_and_get_frame_size(frame, rs->wbuf,
+    prod->w += rs_set_wsframe_sc_payload_and_get_frame_size(frame, rs->wbuf,
         rs->wbuf_i);
 
     RS_GUARD_APP(rs_enqueue_ring_update(rs->ring_queue, rs->ring_pairs,
@@ -275,6 +275,7 @@ static inline rs_wait_for_inbound_msg(
             &rs->ring_pairs[rs->inbound_worker_i].inbound_ring;
         struct rs_ring_consumer * cons =
             sched->inbound_consumers + rs->inbound_worker_i;
+        //RS_LOG(LOG_DEBUG, "cons->r: %p", cons->r);
         struct rs_consumer_msg * cmsg = rs_consume_ring_msg(inbound_ring, cons);
         if (cmsg) {
             *imsg = (struct rs_inbound_msg *) cmsg->msg;

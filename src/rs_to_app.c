@@ -26,13 +26,13 @@ static void copy_combined_websocket_payloads_to_inbound_ring(
     struct rs_ring_producer * prod,
     union rs_wsframe const * frame
 ) {
-    for (;; frame = rs_get_next_wsframe_in(frame)) {
+    for (;; frame = rs_get_next_wsframe_cs(frame)) {
         switch (rs_get_wsframe_opcode(frame)) {
         case RS_WSFRAME_OPC_PING:
         case RS_WSFRAME_OPC_PONG:
             continue;
         default:
-            prod->w += rs_copy_wsframe_in_payload(frame, prod->w);
+            prod->w += rs_copy_wsframe_cs_payload(frame, prod->w);
             if (rs_get_wsframe_is_final(frame)) {
                 return;
             }
