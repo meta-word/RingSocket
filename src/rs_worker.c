@@ -87,7 +87,7 @@ rs_ret enqueue_ring_update(
     size_t app_thread_i,
     bool is_write
 ) {
-    return rs_enqueue_ring_update(&worker->ring_queue, *worker->ring_pairs,
+    return rs_enqueue_ring_update(&worker->ring_queue, worker->ring_pairs,
         worker->app_sleep_states, NULL, new_ring_position, app_thread_i,
         is_write);
 }
@@ -95,6 +95,6 @@ rs_ret enqueue_ring_update(
 rs_ret flush_ring_updates(
     struct rs_worker * worker
 ) {
-    return rs_flush_ring_updates(&worker->ring_queue, *worker->ring_pairs,
+    return rs_flush_ring_updates(&worker->ring_queue, worker->ring_pairs,
         worker->app_sleep_states, NULL, worker->conf->app_c);
 }

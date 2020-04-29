@@ -635,7 +635,7 @@ static rs_ret write_http_error_response(
     struct rs_worker * worker,
     union rs_peer * peer
 ) {
-    unsigned error_i = RS_MAX(peer->http.error_i, 3);
+    unsigned error_i = RS_MIN(peer->http.error_i, 3);
     RS_LOG(LOG_NOTICE, "Writing HTTP_%s) to peer %s",
         (char *[]){"BAD_REQUEST (400", "FORBIDDEN (403", "NOT_FOUND (404",
         "METHOD_NOT_ALLOWED (405"}[error_i],

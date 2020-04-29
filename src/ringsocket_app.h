@@ -127,7 +127,7 @@ enum rs_callback {
 struct rs_app_cb_args { // AKA rs_t (typedef located in ringsocket_api.h)
     void * app_data;
     struct rs_conf const * conf;
-    struct rs_ring_pair * ring_pairs;
+    struct rs_ring_pair * * ring_pairs;
     struct rs_ring_producer * outbound_producers;
     struct rs_ring_queue * ring_queue;
     struct rs_sleep_state * worker_sleep_states;

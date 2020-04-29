@@ -94,7 +94,7 @@ static inline void rs_send(
         rs_get_wsframe_sc_size_from_payload_size(rs->wbuf_i);
 
     struct rs_ring_producer * prod = rs->outbound_producers + worker_i;
-    RS_GUARD_APP(rs_produce_ring_msg(&rs->ring_pairs[worker_i].outbound_ring,
+    RS_GUARD_APP(rs_produce_ring_msg(&rs->ring_pairs[worker_i]->outbound_ring,
         prod, rs->conf->realloc_multiplier, msg_size));
 
     *prod->w++ = (uint8_t) outbound_kind;
@@ -132,9 +132,9 @@ static inline rs_ret rs_init_outbound_producers(
         prod->ring_size = rs->conf->outbound_ring_buf_size;
         RS_CACHE_ALIGNED_CALLOC(prod->ring, prod->ring_size);
         prod->w = prod->ring;
-        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i].outbound_ring.w,
+        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i]->outbound_ring.w,
             (atomic_uintptr_t) prod->ring);
-        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i].outbound_ring.r,
+        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i]->outbound_ring.r,
             (atomic_uintptr_t) prod->ring);
     }
     // Inbound ring producers are initialized by worker threads in
@@ -152,7 +152,15 @@ static inline rs_ret rs_init_app_cb_args(
 
     // Allocate all ring buffer pairs between this app and each worker
     RS_CACHE_ALIGNED_CALLOC(*app_args->ring_pairs, conf->worker_c);
-    rs->ring_pairs = *app_args->ring_pairs;
+
+    // *app_args->ring_pairs cannot be assigned directly to rs->ring_pairs,
+    // because rs_enqueue_ring_update() and rs_flush_ring_updates() require one
+    // extra layer of indirection to accomodate (and to be consistent with)
+    // the format of worker threads' indirect ring pair arrays.
+    RS_CALLOC(rs->ring_pairs, conf->worker_c);
+    for (size_t i = 0; i < conf->worker_c; i++) {
+        rs->ring_pairs[i] = (*app_args->ring_pairs) + i;
+    }
  
     RS_GUARD(rs_init_outbound_producers(rs));
     
@@ -202,7 +210,7 @@ static inline rs_ret rs_get_consumers_from_producers(
         for (;;) {
             // Simply wait for sched->inbound_consumers[i].r to become non-NULL,
             // which is safe because the ring_pairs array was zeroed in advance.
-            RS_CASTED_ATOMIC_LOAD_RELAXED(&rs->ring_pairs[i].inbound_ring.r,
+            RS_CASTED_ATOMIC_LOAD_RELAXED(&rs->ring_pairs[i]->inbound_ring.r,
                 sched->inbound_consumers[i].r, (uint8_t const *));
             if (sched->inbound_consumers[i].r) {
                 RS_LOG(LOG_DEBUG, "Received inbound_consumers[%zu].r: %p",
@@ -272,10 +280,9 @@ static inline rs_wait_for_inbound_msg(
     size_t idle_c = 0;
     for (;;rs->inbound_worker_i++, rs->inbound_worker_i %= rs->conf->worker_c) {
         struct rs_ring_atomic * inbound_ring =
-            &rs->ring_pairs[rs->inbound_worker_i].inbound_ring;
+            &rs->ring_pairs[rs->inbound_worker_i]->inbound_ring;
         struct rs_ring_consumer * cons =
             sched->inbound_consumers + rs->inbound_worker_i;
-        //RS_LOG(LOG_DEBUG, "cons->r: %p", cons->r);
         struct rs_consumer_msg * cmsg = rs_consume_ring_msg(inbound_ring, cons);
         if (cmsg) {
             *imsg = (struct rs_inbound_msg *) cmsg->msg;
@@ -389,7 +396,7 @@ static inline rs_ret rs_close_peer(
     struct rs_ring_producer * prod =
         rs->outbound_producers + rs->inbound_worker_i;
     RS_GUARD(rs_produce_ring_msg(
-        &rs->ring_pairs[rs->inbound_worker_i].outbound_ring, prod,
+        &rs->ring_pairs[rs->inbound_worker_i]->outbound_ring, prod,
         rs->conf->realloc_multiplier, 9));
     *prod->w++ = RS_OUTBOUND_SINGLE;
     *((uint32_t *) prod->w) = rs->inbound_peer_i;
@@ -402,7 +409,7 @@ static inline rs_ret rs_close_peer(
 
     uint16_t net_bytes = 0;
     RS_W_HTON16(&net_bytes, ws_close_code);
-    prod->w += rs_set_wsframe_out_payload_and_get_frame_size(frame,
+    prod->w += rs_set_wsframe_sc_payload_and_get_frame_size(frame,
         &net_bytes, sizeof(net_bytes));
  
     RS_GUARD(rs_enqueue_ring_update(rs->ring_queue, rs->ring_pairs,

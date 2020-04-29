@@ -151,7 +151,7 @@ static inline rs_ret rs_wake_up_worker(
 
 static inline rs_ret rs_enqueue_ring_update(
     struct rs_ring_queue * queue,
-    struct rs_ring_pair * ring_pairs,
+    struct rs_ring_pair * * ring_pairs,
     struct rs_sleep_state * sleep_states,
     int const * eventfds,
     uint8_t * new_ring_position,
@@ -165,28 +165,28 @@ static inline rs_ret rs_enqueue_ring_update(
         if (eventfds) { // This function was called by an app thread.
             if (update->is_write) {
                 RS_ATOMIC_STORE_RELAXED(
-                    &ring_pairs[update->thread_i].outbound_ring.w,
+                    &ring_pairs[update->thread_i]->outbound_ring.w,
                     (atomic_uintptr_t) update->ring_position
                 );
                 RS_GUARD(rs_wake_up_worker(sleep_states + update->thread_i,
                     eventfds[update->thread_i], update->thread_i));
             } else {
                 RS_ATOMIC_STORE_RELAXED(
-                    &ring_pairs[update->thread_i].inbound_ring.r,
+                    &ring_pairs[update->thread_i]->inbound_ring.r,
                     (atomic_uintptr_t) update->ring_position
                 );
             }
         } else { // This function was called by a worker thread.
             if (update->is_write) {
                 RS_ATOMIC_STORE_RELAXED(
-                    &ring_pairs[update->thread_i].inbound_ring.w,
+                    &ring_pairs[update->thread_i]->inbound_ring.w,
                     (atomic_uintptr_t) update->ring_position
                 );
                 RS_GUARD(rs_wake_up_app(sleep_states + update->thread_i,
                     update->thread_i));
             } else {
                 RS_ATOMIC_STORE_RELAXED(
-                    &ring_pairs[update->thread_i].outbound_ring.r,
+                    &ring_pairs[update->thread_i]->outbound_ring.r,
                     (atomic_uintptr_t) update->ring_position
                 );
             }
@@ -201,31 +201,24 @@ static inline rs_ret rs_enqueue_ring_update(
 
 static inline rs_ret rs_flush_ring_updates(
     struct rs_ring_queue * queue,
-    struct rs_ring_pair * ring_pairs,
+    struct rs_ring_pair * * ring_pairs,
     struct rs_sleep_state * sleep_states,
     int const * eventfds,
     size_t dest_thread_c
 ) {
     size_t const newest_i = (queue->oldest_i + queue->size - 1) % queue->size;
-    //RS_LOG(LOG_DEBUG, "oldest_i: %zu", queue->oldest_i);
-    //RS_LOG(LOG_DEBUG, "newest_i: %zu", newest_i);
     for (size_t i = 0; i < dest_thread_c; i++) {
         bool updated_to_newer_r = false;
         bool updated_to_newer_w = false;
         size_t j = newest_i; 
         do {
             struct rs_ring_update * update = queue->updates + j;
-            //RS_LOG(LOG_DEBUG, "rq->queue[%zu]: .ring_position: %p, "
-            //    ".thread_i: %" PRIu32 ", .is_write: %d "
-            //    "(updated_to_newer_r: %d, updated_to_newer_w: %d)",
-            //    j, update->ring_position, update->thread_i, update->is_write,
-            //    updated_to_newer_r, updated_to_newer_w);
             if (update->ring_position && update->thread_i == i) {
                 if (eventfds) { // This function was called by an app thread.
                     if (update->is_write) {
                         if (!updated_to_newer_w) {
                             RS_ATOMIC_STORE_RELAXED(
-                                &ring_pairs[update->thread_i].outbound_ring.w,
+                                &ring_pairs[update->thread_i]->outbound_ring.w,
                                 (atomic_uintptr_t) update->ring_position
                             );
                             RS_GUARD(rs_wake_up_worker(sleep_states +
@@ -235,7 +228,7 @@ static inline rs_ret rs_flush_ring_updates(
                         }
                     } else if (!updated_to_newer_r) {
                         RS_ATOMIC_STORE_RELAXED(
-                            &ring_pairs[update->thread_i].inbound_ring.r,
+                            &ring_pairs[update->thread_i]->inbound_ring.r,
                             (atomic_uintptr_t) update->ring_position
                         );
                         updated_to_newer_r = true;
@@ -244,7 +237,7 @@ static inline rs_ret rs_flush_ring_updates(
                     if (update->is_write) {
                         if (!updated_to_newer_w) {
                             RS_ATOMIC_STORE_RELAXED(
-                                &ring_pairs[update->thread_i].inbound_ring.w,
+                                &ring_pairs[update->thread_i]->inbound_ring.w,
                                 (atomic_uintptr_t) update->ring_position
                             );
                             RS_GUARD(rs_wake_up_app(sleep_states +
@@ -253,7 +246,7 @@ static inline rs_ret rs_flush_ring_updates(
                         }
                     } else if (!updated_to_newer_r) {
                         RS_ATOMIC_STORE_RELAXED(
-                            &ring_pairs[update->thread_i].outbound_ring.r,
+                            &ring_pairs[update->thread_i]->outbound_ring.r,
                             (atomic_uintptr_t) update->ring_position
                         );
                         updated_to_newer_r = true;
