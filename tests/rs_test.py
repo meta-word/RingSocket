@@ -7,6 +7,7 @@ TEST_PATH = "/tmp/ringsocket_test"
 
 APP_ECHO = "rs_test_app_echo.so"
 APP_STRESS = "rs_test_app_stress.so"
+ECHO_CLIENT = "rs_echo_client"
 SHAM_IO = "rs_preload_sham_io.so"
 
 JSCLIENT_SRC = "rs_test_client.html"
@@ -38,13 +39,15 @@ def getRandomPortNumber():
             # the port is in fact currently not in use, so try it out.
             return random_port
 
-def launchRingSocket(port, includeShamIO, includeAutobahn, includeStress):
+def launchRingSocket(port, includeShamIO, includeAutobahn, worker_c,
+                     stressApp_c):
     subprocess.run(["sudo", "killall", "ringsocket"], capture_output=True)
     subprocess.run(["make"]).check_returncode()
     path = pathlib.Path(f"{TEST_PATH}/rs_test.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     conf = {
         "log_level": "debug",
+        "worker_c": worker_c,
         "ports": [{"port_number": port, "is_unencrypted": True}],
         "apps": []
     }
@@ -63,14 +66,14 @@ def launchRingSocket(port, includeShamIO, includeAutobahn, includeStress):
                 "url": f"ws://localhost:{port}/echo"
             }]
         })
-    if includeStress:
+    for i in range(stressApp_c):
         shutil.copy2(APP_STRESS, f"{TEST_PATH}")
         conf["apps"].append({
-            "name": "Stress",
+            "name": f"Stress#{i + 1}",
             "app_path": f"{TEST_PATH}/{APP_STRESS}",
             "endpoints": [{
-                "endpoint_id": 1,
-                "url": f"ws://localhost:{port}/stress",
+                "endpoint_id": i + 1,
+                "url": f"ws://localhost:{port}/stress{i + 1}",
                 "allowed_origins": ["file://"]
             }]
         })
@@ -81,21 +84,49 @@ def launchRingSocket(port, includeShamIO, includeAutobahn, includeStress):
     print(f"RingSocket launched with "
           f"\"sudo {preloadEnv}ringsocket {TEST_PATH}/rs_test.json\".")
 
+def launchEchoClient(port, app_c, client_c):
+    import time
+    time.sleep(1)
+    shutil.copy2(ECHO_CLIENT, f"{TEST_PATH}")
+    path = pathlib.Path(f"{TEST_PATH}/{ECHO_CLIENT}.json")
+    conf = {
+        "routes": [],
+        "epoll_buf_elem_c": 1000,
+        "rwbuf_size": 10000000
+    }
+    for i in range(app_c):
+        conf["routes"].append({
+            "url": f"ws://localhost:{port}/stress{i + 1}",
+            "client_c": client_c
+        })
+    path.write_text(json.dumps(conf, indent=1) + '\n')
+    out = subprocess.run([f"{TEST_PATH}/{ECHO_CLIENT}",
+        f"{TEST_PATH}/{ECHO_CLIENT}.json"])
+    out.check_returncode()
+    print(f"Echo client launched with {client_c} clients for each of "
+          f"{app_c} backend stress test apps.")
+
+def launchBrowser(port):
+    with open(JSCLIENT_SRC, "r") as f:
+        client_html = f.read()
+    sub_html = re.sub("PORT_PLACEHOLDER", f"{port}", client_html)
+    with open(JSCLIENT_DST, "w") as f:
+        f.write(sub_html)
+    print(f"You can now open (or reload) file://{JSCLIENT_DST} in a browser to "
+          f"interactively spawn any number of test client connections. "
+          f"Go crazy. To shut the current RingSocket server instance down, "
+          f"issue \"sudo killall ringsocket\" (or run this script again).")
+
 def launchAutobahn(port):
     path = pathlib.Path(f"{TEST_PATH}/autobahn_config/fuzzingclient.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "outdir": "./reports",
-        "servers": [{"url": f"ws://localhost:{port}"}],
+        "servers": [{"url": f"ws://localhost:{port}/echo"}],
         "cases": ["*"],
         "exclude-cases": [
             # See https://github.com/crossbario/autobahn-testsuite/issues/101
-            "2.10", "2.11",
-            # See https://github.com/crossbario/autobahn-testsuite/issues/102
-            "3.2", "3.3", "3.4", "4.1.3", "4.1.4", "4.2.3", "4.2.4", "4.2.5",
-            "5.15",
-            # See https://github.com/wbudd/ringsocket/tests/README.md
-            "5.19", "5.20"
+            "2.10", "2.11", "5.19", "5.20"
         ],
     }, indent=1) + '\n')
     pathlib.Path(f"{TEST_PATH}/autobahn_reports").mkdir(exist_ok=True)
@@ -113,38 +144,26 @@ def launchAutobahn(port):
     if re.search(".html\">fail</a>", report, re.IGNORECASE):
         print("RingSocket seems to have failed one or more included "
               "autobahn-testsuite cases.")
-    elif re.search(".html\">non-strict</a>", report, re.IGNORECASE):
-        print("RingSocket's handling of one or more included "
-              "autobahn-testsuite cases seems to be considered \"non-strict\".")
     else:
         print("Success: RingSocket seems to have passed all included "
               "autobahn-testsuite cases.")
-    print(f"The complete report can be viewed at: {REPORT_PATH}")
-
-def launchStress(port):
-    with open(JSCLIENT_SRC, "r") as f:
-        client_html = f.read()
-    sub_html = re.sub("PORT_PLACEHOLDER", f"{port}", client_html)
-    with open(JSCLIENT_DST, "w") as f:
-        f.write(sub_html)
-    print(f"You can now open (or reload) file://{JSCLIENT_DST} in a browser to "
-          f"interactively spawn any number of test client connections. "
-          f"Go crazy. To shut the current RingSocket server instance down, "
-          f"issue \"sudo killall ringsocket\" (or run this script again).")
+    print(f"The complete report can be viewed at: file://{REPORT_PATH}")
 
 def main():
     argp = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Test descriptions:\n"
-               "\"all\": Run all available tests\n"
-               "\"stress\": Interactively spawn WebSocket clients from a "
-               "browser to stress test RingSocket's concurrent IO handling.\n"
+               "\"stress\": Stress test RingSocket's concurrent IO handling "
+                           "accross multiple backend app's by bouncing off "
+                           "rs_echo_client.\n"
+               "\"browser\": Interactively spawn WebSocket clients from a "
+                            "browser to test RingSocket's IO handling.\n"
                "\"autobahn\": Test RingSocket's conformance to every aspect of "
-               "the WebSocket protocol (RFC 6455) through use of a fuzzing "
-               "client provided by crossbar.io's autobahn-testsuite. Requires "
-               "docker.")
+                             "the WebSocket protocol (RFC 6455) through use of "
+                             "a fuzzing client provided by crossbar.io's "
+                             "autobahn-testsuite. Requires docker.")
     argp.add_argument("test",
-        choices=("all", "stress", "autobahn"),
+        choices=("stress", "browser", "autobahn"),
         help="test to perform: see below.")
     argp.add_argument("-p", "--port",
         type=int, choices=range(1, 65535), metavar="[1-65535]",
@@ -156,19 +175,51 @@ def main():
         help="use LD_PRELOAD=rs_preload_sham_io.so to inject simulated "
              "\"would block\" and partial read/write events in between "
              "RingSocket and the actual read() and write() calls")
+    argp.add_argument("-w", "--worker_c",
+        type=int, choices=range(1, 255), metavar="[1-255]",
+        help="The number of worker threads the RingSocket process should "
+             "spawn. Default: 1")
+    argp.add_argument("--app_c",
+        type=int, choices=range(1, 255), metavar="[1-255]",
+        help="Stress test only: the number of backend stress test apps to "
+             "deploy. Default: 1")
+    argp.add_argument("--client_c",
+        type=int, choices=range(1, 65535), metavar="[1-65535]",
+        help="Stress test only: the number of echo clients to deploy per "
+             "stress test backend app. Default: 1")
+    
     if len(sys.argv) < 2:
         argp.print_help()
         argp.exit()
     args = argp.parse_args()
+
     if not args.port:
         args.port = getRandomPortNumber()
-    includeAutobahn = args.test == "autobahn" or args.test == "all"
-    includeStress = args.test == "stress" or args.test == "all"
-    launchRingSocket(args.port, args.sham_io, includeAutobahn, includeStress)
-    if includeAutobahn:
+    
+    if not args.worker_c:
+        args.worker_c = 1
+
+    if args.test == "stress":
+        if not args.app_c:
+            args.app_c = 1
+        if not args.client_c:
+            args.client_c = 1
+    else:
+        if args.app_c:
+            parser.error('--app_c can only be set for mode "stress".')
+        if args.client_c:
+            parser.error('--client_c can only be set for mode "stress".')
+        args.app_c = 0
+        args.client_c = 0
+    
+    launchRingSocket(args.port, args.sham_io, args.test == "autobahn",
+        args.worker_c, args.app_c)
+    if args.test == "stress":
+        launchEchoClient(args.port, args.app_c, args.client_c)
+    elif args.test == "browser":
+        launchBrowser(args.port)
+    else:
         launchAutobahn(args.port)
-    if includeStress:
-        launchStress(args.port)
 
 if __name__ == "__main__":
     main()

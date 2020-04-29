@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright © 2019 William Budd
 
-CLIENT_NAME = rs_test_client
+CLIENT_NAME = rs_echo_client
 CLIENT_SRC = $(CLIENT_NAME).c
 CLIENT_LIBS = -ljgrandson
 
