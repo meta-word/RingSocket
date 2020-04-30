@@ -344,9 +344,13 @@ static rs_ret parse_websocket_frame_header(
     case RS_WSFRAME_OPC_TEXT:
     case RS_WSFRAME_OPC_BIN:
         break;
-    //case RS_WSFRAME_OPC_CLOSE: todo
-    //    return RS_CLOSE_PEER;
+    case RS_WSFRAME_OPC_CLOSE:
+        RS_LOG(LOG_WARNING, "Received WebSocket Close frame for fd %d: "
+            "shutting down...", client->fd);
+        return RS_FATAL; // Todo: return RS_CLOSE_PEER and handle that somehow?
     default:
+        RS_LOG(LOG_WARNING, "Received unexpected opcode %d for fd %d: "
+            "shutting down...", rs_get_wsframe_opcode(frame), client->fd);
         return RS_FATAL;
     }
     if (client->next_read < frame->sc_small.payload) {
@@ -633,8 +637,15 @@ static rs_ret _main(
                         (union rs_wsframe *) client->storage,
                         &header_size, &payload_size);
                     uint64_t frame_size = header_size + 4 + payload_size;
-                    RS_GUARD(write_websocket(client, client->storage +
-                        client->old_wsize, frame_size - client->old_wsize));
+                    switch (write_websocket(client, client->storage +
+                        client->old_wsize, frame_size - client->old_wsize)) {
+                    case RS_OK:
+                        break;
+                    case RS_AGAIN:
+                        continue;
+                    default:
+                        return RS_FATAL;
+                    }
                     uint8_t * next_frame = (uint8_t *) rwbuf + frame_size;
                     if (client->next_read > next_frame) {
                         memcpy(rwbuf + 4, client->storage + frame_size,
