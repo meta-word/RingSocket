@@ -169,7 +169,11 @@ static inline rs_ret rs_init_app_cb_args(
     if (!app_args->app_i) {
         RS_CACHE_ALIGNED_CALLOC(*app_args->worker_sleep_states, conf->worker_c);
     }
-    rs->worker_sleep_states = *app_args->worker_sleep_states;
+    // worker_sleep_states must not be assigned to rs->worker_sleep_states here;
+    // because for apps other than the 1st, there is no guarantee yet that the
+    // source array has been allocated already by the 1st app. Instead, do this
+    // after rs_get_consumers_from_producers() has returned to ringsocket_app().
+    
     rs->worker_eventfds = app_args->worker_eventfds;
 
     // Don't allocate rs->wbuf yet, but do so instead during the 1st rs_w_...()
@@ -339,6 +343,7 @@ static inline rs_wait_for_inbound_msg(
         RS_GUARD(rs_get_cur_time_microsec(&timestamp_microsec));
         if (timestamp_microsec <
             sched->timestamp_microsec + sched->interval_microsec) {
+            RS_LOG(LOG_DEBUG, "Waiting for worker...");
             switch (rs_wait_for_worker(sched->sleep_state,
                 sched->timestamp_microsec + sched->interval_microsec -
                 timestamp_microsec)) {

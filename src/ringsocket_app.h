@@ -191,6 +191,9 @@ rs_ret ringsocket_app( \
     }; \
     RS_GUARD_APP(rs_get_consumers_from_producers(&rs, &sched)); \
     \
+    /* See rs_init_app_cb_args() for why this assignment must occur here */ \
+    rs.worker_sleep_states = *app_args->worker_sleep_states; \
+    \
     _##timer_macro; /* Should expand _RS_TIMER_[NONE|SLEEP|WAKE] */ \
     \
     struct rs_inbound_msg * imsg = NULL; \
