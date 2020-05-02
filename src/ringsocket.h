@@ -123,7 +123,7 @@ static inline void rs_w_uint32(
 
 static inline void rs_w_uint64(
     rs_t * rs,
-    uint32_t u64
+    uint64_t u64
 ) {
     rs_guard_cb(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
