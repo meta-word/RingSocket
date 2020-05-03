@@ -223,9 +223,18 @@ static inline void rs_to_multi(
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
             uint32_t * u32 = (uint32_t *) (client_ids + j);
-            if (*u32++ - 1 == i) {
-                cur_clients[cur_client_c++] = *u32;
+            if (*u32++ - 1 != i) {
+                continue;
             }
+            for (size_t k = 0; k < cur_client_c; k++) {
+                if (cur_clients[k] == *u32) {
+                    RS_LOG(LOG_WARNING, "Ignoring duplicate client_id %" PRIu64
+                        ": please fix your app code!", client_ids[j]);
+                    goto next_client;
+                }
+            }
+            cur_clients[cur_client_c++] = *u32;
+            next_client:;
         }
         switch (cur_client_c) {
         case 0:
@@ -290,9 +299,18 @@ static inline void rs_to_every_except_multi(
         size_t cur_client_c = 0;
         for (size_t j = 0; j < client_c; j++) {
             uint32_t * u32 = (uint32_t *) (client_ids + j);
-            if (*u32++ - 1 == i) {
-                cur_clients[cur_client_c++] = *u32;
+            if (*u32++ - 1 != i) {
+                continue;
             }
+            for (size_t k = 0; k < cur_client_c; k++) {
+                if (cur_clients[k] == *u32) {
+                    RS_LOG(LOG_WARNING, "Ignoring duplicate client_id %" PRIu64
+                        ": please fix your app code!", client_ids[j]);
+                    goto next_client;
+                }
+            }
+            cur_clients[cur_client_c++] = *u32;
+            next_client:;
         }
         switch (cur_client_c) {
         case 0:
