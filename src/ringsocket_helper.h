@@ -343,7 +343,6 @@ static inline rs_wait_for_inbound_msg(
         RS_GUARD(rs_get_cur_time_microsec(&timestamp_microsec));
         if (timestamp_microsec <
             sched->timestamp_microsec + sched->interval_microsec) {
-            RS_LOG(LOG_DEBUG, "Waiting for worker...");
             switch (rs_wait_for_worker(sched->sleep_state,
                 sched->timestamp_microsec + sched->interval_microsec -
                 timestamp_microsec)) {

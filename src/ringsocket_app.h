@@ -200,6 +200,9 @@ rs_ret ringsocket_app( \
     size_t payload_size = 0; \
     while (rs_wait_for_inbound_msg(&rs, &sched, &imsg, &payload_size) == \
         RS_OK) { \
+        rs.inbound_peer_i = imsg->peer_i; \
+        rs.inbound_socket_fd = imsg->socket_fd; \
+        rs.inbound_endpoint_id = imsg->endpoint_id; \
         switch (imsg->inbound_kind) { \
         case RS_INBOUND_OPEN: \
             RS_ENQUEUE_APP_READ_UPDATE; \
