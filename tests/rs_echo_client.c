@@ -15,11 +15,16 @@
 #include <stdbool.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 // Preserve space at the head of rwbuf when parsing WebSocket to allow replying
 // in-place, which results in messages that are exactly 4 mask bytes longer.
 #define RSC_PREBUF_SIZE 4 // Total of 4 WebSocket mask bytes
+
+#define RSC_CONNECT_ATTEMPT_C 100
+#define RSC_COOL_OFF_INIT_NS 10000000 // 0.01s
+#define RSC_COOL_OFF_MULT 1.5
 
 RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.
 
@@ -253,29 +258,54 @@ static rs_ret send_upgrade_request(
                 route->host, route->port_str, gai_strerror(ret));
         }
     }
-    for (struct addrinfo * ai = ai_first; ai; ai = ai->ai_next) {
+    int connect_attempt_c = RSC_CONNECT_ATTEMPT_C;
+    static struct timespec cool_off_time = {0, RSC_COOL_OFF_INIT_NS};
+    struct addrinfo * ai = ai_first;
+    for (;;) {
         // To keep things simple, don't set the new socket to non-blocking mode
         // until after the HTTP upgrade request is written.
         client->fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (client->fd == -1) {
             RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful socket(...)");
-            continue;
+        } else {
+            if (connect(client->fd, ai->ai_addr, ai->ai_addrlen) != -1) {
+                freeaddrinfo(ai_first);
+                return write_http_upgrade_request(rwbuf, epoll_fd, route,
+                    client);
+            }
+            if (errno == ECONNREFUSED) {
+                uint64_t ns =
+                    1000000000 * cool_off_time.tv_sec + cool_off_time.tv_nsec;
+                RS_LOG(LOG_WARNING, "Unsuccessful connect(%d, ...): "
+                    "connection refused: sleeping %fs before retrying...",
+                    client->fd, ns / 1000000000.);
+                nanosleep(&cool_off_time, NULL);
+                // Next time, sleep RSC_COOL_OFF_MULT times as long
+                ns *= RSC_COOL_OFF_MULT;
+                cool_off_time.tv_sec = ns / 1000000000;
+                cool_off_time.tv_nsec = ns % 1000000000;
+            } else {
+                RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful connect(%d, ...)",
+                    client->fd);
+            }
+            if (close(client->fd) == -1) {
+                RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful close(%d)", client->fd);
+                freeaddrinfo(ai_first);
+                return RS_FATAL;
+            }
         }
-        if (!connect(client->fd, ai->ai_addr, ai->ai_addrlen)) {
-            freeaddrinfo(ai_first);
-            return write_http_upgrade_request(rwbuf, epoll_fd, route, client);
-        }
-        RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful connect(%d, ...)", client->fd);
-        if (close(client->fd) == -1) {
-            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful close(%d)", client->fd);
-            freeaddrinfo(ai_first);
-            return RS_FATAL;
+        ai = ai->ai_next;
+        if (!ai) {
+            if (!--connect_attempt_c) {
+                freeaddrinfo(ai_first);
+                RS_LOG_ERRNO(LOG_ERR,
+                    "All getaddrinfo(%s, %s, ...) results failed",
+                    route->host, route->port_str);
+                return RS_FATAL;
+            }
+            ai = ai_first;
         }
     }
-    freeaddrinfo(ai_first);
-    RS_LOG_ERRNO(LOG_ERR, "All getaddrinfo(%s, %s, ...) results failed",
-        route->host, route->port_str);
-    return RS_FATAL;
 }
 
 static rs_ret read_http(
@@ -439,7 +469,7 @@ static rs_ret mask_and_write_websocket(
     case sizeof(struct rs_wsframe_sc_large): default:
         *((uint32_t *) (wsbuf - 4)) = *((uint32_t *) wsbuf);
         *((uint32_t *) wsbuf) = *((uint32_t *) (wsbuf + 4));
-        *((uint16_t *) (wsbuf + 4)) = *((uint16_t *) (wsbuf + 6));
+        *((uint32_t *) (wsbuf + 4)) = *((uint32_t *) (wsbuf + 8));
         mask = wsbuf + 6;
     }
     wsbuf[-3] |= 0x80; // Set the mask bit
@@ -461,7 +491,10 @@ static rs_ret read_websocket(
     bool parse_is_complete = true;
     if (client->storage) {
         parse_is_complete = false;
-        memcpy(wsbuf, client->storage, client->next_read - wsbuf);
+        size_t size = client->next_read - wsbuf;
+        RS_LOG(LOG_DEBUG, "Retrieving %zu byte read from storage for fd %d",
+            size, client->fd);
+        memcpy(wsbuf, client->storage, size);
         RS_FREE(client->storage);
     } else {
         client->next_read = wsbuf;
@@ -481,6 +514,8 @@ static rs_ret read_websocket(
             store_buf:
             {
                 size_t size = client->next_read - wsbuf;
+                RS_LOG(LOG_DEBUG, "Storing %zu byte read to storage for fd %d",
+                    size, client->fd);
                 client->storage = malloc(size);
                 if (!client->storage) {
                     RS_LOG(LOG_ERR, "Unsuccessful malloc(%zu)",
@@ -491,7 +526,7 @@ static rs_ret read_websocket(
             }
             return RS_AGAIN;
         case 0:
-            RS_LOG_ERRNO(LOG_ERR, "read(%d, ...) 0 bytes", client->fd);
+            RS_LOG(LOG_ERR, "read(%d, ...) 0 bytes", client->fd);
             return RS_FATAL;
         default:
             RS_LOG(LOG_DEBUG, "Read %zu bytes from RingSocket for fd %d",
@@ -515,6 +550,7 @@ static rs_ret read_websocket(
                     }
                     uint8_t * next_frame = wsbuf + header_size + payload_size;
                     if (next_frame == client->next_read) {
+                        client->next_read = wsbuf;
                         parse_is_complete = true;
                         break;
                     }
@@ -594,7 +630,8 @@ static rs_ret _main(
                         client->fd);
                     return RS_FATAL;
                 }
-                continue;
+                //continue;
+                return RS_FATAL;
             }
             if (e->events & EPOLLHUP) {
                 RS_LOG(LOG_WARNING, "Received EPOLLHUP for fd %d", client->fd);
@@ -631,12 +668,10 @@ static rs_ret _main(
                     continue;
                 }
                 {
-                    unsigned header_size = 0;
-                    uint64_t payload_size = 0;
-                    parse_websocket_frame_header(client,
-                        (union rs_wsframe *) client->storage,
-                        &header_size, &payload_size);
-                    uint64_t frame_size = header_size + 4 + payload_size;
+                    uint64_t frame_size = rs_get_wsframe_cs_size(
+                        (union rs_wsframe *) client->storage);
+                    RS_LOG(LOG_DEBUG, "Resuming %zu byte frame write from "
+                        "storage for fd %d", frame_size, client->fd);
                     switch (write_websocket(client, client->storage +
                         client->old_wsize, frame_size - client->old_wsize)) {
                     case RS_OK:
@@ -648,8 +683,11 @@ static rs_ret _main(
                     }
                     uint8_t * next_frame = (uint8_t *) rwbuf + frame_size;
                     if (client->next_read > next_frame) {
+                        size_t tail_size = client->next_read - next_frame;
+                        RS_LOG(LOG_DEBUG, "Retrieving %zu byte tail from "
+                            "storage for fd %d", tail_size, client->fd);
                         memcpy(rwbuf + 4, client->storage + frame_size,
-                            client->next_read - next_frame);
+                            tail_size);
                     }
                     RS_FREE(client->storage);
                 }
