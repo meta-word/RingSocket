@@ -39,14 +39,14 @@ def getRandomPortNumber():
             # the port is in fact currently not in use, so try it out.
             return random_port
 
-def launchRingSocket(port, includeShamIO, includeAutobahn, worker_c,
+def launchRingSocket(log_level, port, includeShamIO, includeAutobahn, worker_c,
                      stressApp_c):
     subprocess.run(["sudo", "killall", "ringsocket"], capture_output=True)
     subprocess.run(["make"]).check_returncode()
     path = pathlib.Path(f"{TEST_PATH}/rs_test.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     conf = {
-        "log_level": "debug",
+        "log_level": log_level,
         "worker_c": worker_c,
         "ports": [{"port_number": port, "is_unencrypted": True}],
         "apps": []
@@ -84,15 +84,15 @@ def launchRingSocket(port, includeShamIO, includeAutobahn, worker_c,
     print(f"RingSocket launched with "
           f"\"sudo {preloadEnv}ringsocket {TEST_PATH}/rs_test.json\".")
 
-def launchEchoClient(port, app_c, client_c):
-    import time
+def launchEchoClient(log_level, port, app_c, client_c):
     time.sleep(1)
     shutil.copy2(ECHO_CLIENT, f"{TEST_PATH}")
     path = pathlib.Path(f"{TEST_PATH}/{ECHO_CLIENT}.json")
     conf = {
+        "log_level": log_level,
         "routes": [],
         "epoll_buf_elem_c": 1000,
-        "rwbuf_size": 10000000
+        "rwbuf_size": 100000000
     }
     for i in range(app_c):
         conf["routes"].append({
@@ -165,6 +165,9 @@ def main():
     argp.add_argument("test",
         choices=("stress", "browser", "autobahn"),
         help="test to perform: see below.")
+    argp.add_argument("--log",
+        choices=("debug", "info", "notice", "warning", "error"),
+        help="The minimum message importance level to log to syslog/journalctl")
     argp.add_argument("-p", "--port",
         type=int, choices=range(1, 65535), metavar="[1-65535]",
         help="TCP port on which RingSocket should listen for WebSocket "
@@ -192,6 +195,9 @@ def main():
         argp.print_help()
         argp.exit()
     args = argp.parse_args()
+    
+    if not args.log:
+        args.log = "debug"
 
     if not args.port:
         args.port = getRandomPortNumber()
@@ -212,10 +218,10 @@ def main():
         args.app_c = 0
         args.client_c = 0
     
-    launchRingSocket(args.port, args.sham_io, args.test == "autobahn",
+    launchRingSocket(args.log, args.port, args.sham_io, args.test == "autobahn",
         args.worker_c, args.app_c)
     if args.test == "stress":
-        launchEchoClient(args.port, args.app_c, args.client_c)
+        launchEchoClient(args.log, args.port, args.app_c, args.client_c)
     elif args.test == "browser":
         launchBrowser(args.port)
     else:
