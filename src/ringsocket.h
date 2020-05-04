@@ -44,6 +44,15 @@ static inline uint64_t rs_get_client_id(
     });
 }
 
+static inline int rs_get_client_addr(
+    rs_t const * rs,
+    struct sockaddr_storage * addr
+) {
+    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
+    return getpeername(rs->inbound_socket_fd, (struct sockaddr *) addr,
+        &(socklen_t){sizeof(struct sockaddr_storage)});
+}
+
 static inline uint64_t rs_get_endpoint_id(
     rs_t const * rs
 ) {

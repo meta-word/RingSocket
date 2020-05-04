@@ -384,6 +384,15 @@ Using an ID after the corresponding `RS_CLOSE()` callback function has returned
 may result in errors and security vulnerabilities, given that RingSocket may
 then assign the same ID to an unrelated future client connection.
 
+```
+int rs_get_client_addr(rs_t * rs, struct sockaddr_storage * addr);
+```
+
+Attempts to obtain socket address information of the remote client, storing the
+result in `addr`. IP-version agnostic. Returns 0 on success, or -1 on error.
+Actually just wraps `getpeername()`, so refer to `man 2 getpeername` for any
+`errno` details.
+
 ```C
 uint16_t rs_get_endpoint_id(rs_t * rs);
 ```
