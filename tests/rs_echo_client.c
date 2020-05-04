@@ -104,30 +104,18 @@ static rs_ret get_conf(
 }
 
 static rs_ret get_local_port(
-    struct rsc_client * client,
-    bool is_ipv6
+    struct rsc_client * client
 ) {
-    if (is_ipv6) {
-        struct sockaddr_in6 ipv6_addr;
-        socklen_t addr_size = sizeof(ipv6_addr);
-        if (getsockname(client->fd, (struct sockaddr *) &ipv6_addr,
-            &addr_size) == -1) {
-            RS_LOG_ERRNO(LOG_ERR,
-                "Unsuccessful getsockname(%d, &ipv6_addr, ...)", client->fd);
-            return RS_FATAL;
-        }
-        client->port = RS_NTOH16(ipv6_addr.sin6_port);
-    } else {
-        struct sockaddr_in ipv4_addr;
-        socklen_t addr_size = sizeof(ipv4_addr);
-        if (getsockname(client->fd, (struct sockaddr *) &ipv4_addr,
-            &addr_size) == -1) {
-            RS_LOG_ERRNO(LOG_ERR,
-                "Unsuccessful getsockname(%d, &ipv4_addr, ...)", client->fd);
-            return RS_FATAL;
-        }
-        client->port = RS_NTOH16(ipv4_addr.sin_port);
+    struct sockaddr_storage addr = {0};
+    if (getsockname(client->fd, (struct sockaddr *) &addr,
+        &(socklen_t){sizeof(addr)}) == -1) {
+        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful getsockname(%d, ...)", client->fd);
+        return RS_FATAL;
     }
+    client->port = RS_NTOH16(addr.ss_family == AF_INET6 ?
+        ((struct sockaddr_in6 *) &addr)->sin6_port :
+        ((struct sockaddr_in *) &addr)->sin_port
+    );
     return RS_OK;
 }
 
@@ -215,9 +203,8 @@ static rs_ret send_upgrade_request(
             RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful socket(...)");
         } else {
             if (connect(client->fd, ai->ai_addr, ai->ai_addrlen) != -1) {
-                RS_GUARD(get_local_port(client,
-                    ai->ai_addr->sa_family == AF_INET6));
                 freeaddrinfo(ai_first);
+                RS_GUARD(get_local_port(client));
                 return write_http_upgrade_request(rwbuf, epoll_fd, endpoint,
                     client);
             }
