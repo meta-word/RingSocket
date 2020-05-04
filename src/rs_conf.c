@@ -123,73 +123,6 @@ static rs_ret add_ip_addrs_from_strs(
     return RS_OK;
 }
 
-static rs_ret parse_url(
-    char const * url,
-    struct rs_conf_endpoint * endpoint
-) {
-    char const * str = url;
-    if (*str++ == 'w') {
-        if (*str++ == 's') {
-            if (*str == 's') {
-                endpoint->is_encrypted = true;
-                str++;
-            }
-            if (*str++ == ':') {
-                if (*str++ == '/') {
-                    if (*str++ == '/') {
-                        goto parse_url_hostname;
-                    }
-                }
-            }
-        }
-    }
-    RS_LOG(LOG_ERR, "WebSocket URL \"%s\" does not start with the required "
-        "scheme \"wss://\" or \"ws://\"", url);
-    return RS_FATAL;
-    parse_url_hostname:
-    if (*str == '\0') {
-        RS_LOG(LOG_ERR, "WebSocket URL \"%s\" seems to be missing a hostname",
-            url);
-        return RS_FATAL;
-    }
-    char * slash = strchr(str, '/');
-    {
-        char * colon = strchr(str, ':');
-        if (colon) {
-            if (slash && colon > slash) {
-                RS_LOG(LOG_ERR, "WebSocket URL \"%s\" seems to contain a stray "
-                    "colon in its path. A colon is only allowed in the "
-                    "hostname section as a port number designator.", url);
-                return RS_FATAL;
-            }
-            long i = strtol(++colon, NULL, 10);
-            if (i < 0 || i > UINT16_MAX) {
-                RS_LOG(LOG_ERR, "WebSocket URL \"%s\" contains an invalid port "
-                    "number. Port numbers must be integers within the range "
-                    "0 through 65535.", url);
-                return RS_FATAL;
-            }
-            endpoint->port_number = i;
-        } else if (endpoint->is_encrypted) {
-            endpoint->port_number = 443;
-        } else {
-            endpoint->port_number = 80;
-        }
-    }
-    if (slash) {
-        RS_CALLOC(endpoint->hostname, slash - str + 1);
-        memcpy(endpoint->hostname, str, slash - str);
-        if (*++slash != '\0') {
-            RS_CALLOC(endpoint->url, strlen(slash) + 1);
-            strcpy(endpoint->url, slash); 
-        }
-    } else {
-        RS_CALLOC(endpoint->hostname, strlen(str) + 1);
-        strcpy(endpoint->hostname, str);
-    }
-    return RS_OK;
-}
-
 static rs_ret check_if_endpoint_is_duplicate(
     struct rs_conf_endpoint const * old,
     struct rs_conf_endpoint const * new,
@@ -240,7 +173,7 @@ static rs_ret parse_endpoint(
         &(jg_obj_str){
             .max_byte_c = RS_URL_MAX_STRLEN
         }, &url));
-    RS_GUARD(parse_url(url, endpoint));
+    RS_GUARD(rs_parse_canon_ws_url(url, endpoint));
     for (struct rs_conf_app *a = conf->apps; a < app; a++) {
         for (struct rs_conf_endpoint *e = a->endpoints;
              e < a->endpoints + a->endpoint_c; e++) {
@@ -535,22 +468,7 @@ static rs_ret parse_configuration(
                 .defa = "notice",
                 .max_byte_c = RS_CONST_STRLEN("notice"),
             }, log_level));
-        if (!strcmp(log_level, "error")) {
-            _rs_log_max = LOG_ERR;
-        } else if (!strcmp(log_level, "warning")) {
-            _rs_log_max = LOG_WARNING;
-        } else if (!strcmp(log_level, "info")) {
-            _rs_log_max = LOG_INFO;
-            RS_LOG(LOG_INFO, "Syslog log priority set to \"info\"");
-        } else if (!strcmp(log_level, "debug")) {
-            _rs_log_max = LOG_DEBUG;
-            RS_LOG(LOG_INFO, "Syslog log priority set to \"debug\"");
-        } else if (strcmp(log_level, "notice")) {
-            RS_LOG(LOG_ERR, "Unrecognized configuration value for "
-                "\"log_level\": \"%s\". The value must be one of: \"error\", "
-                "\"warning\", \"notice\", \"info\", or \"debug\".", log_level);
-            return RS_FATAL;
-        }
+        RS_GUARD(rs_set_log_level(log_level));
     }
     RS_GUARD_JG(jg_obj_get_uint32(jg, root_obj, "fd_alloc_c",
         &(jg_obj_uint32){

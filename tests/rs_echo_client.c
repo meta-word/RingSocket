@@ -45,83 +45,7 @@ struct rsc_client {
     enum rsc_state state;
 };
 
-struct rsc_route {
-    char * host;     // The "example.com" part of "wss://example.com:12345/foo"
-    char * port_str; // The       "12345" part of "wss://example.com:12345/foo"
-    char * url;      // The         "foo" part of "wss://example.com:12345/foo"
-    struct rsc_client * clients;
-    uint32_t client_c;
-    bool is_encrypted;
-};
-
 static char const default_conf_path[] = "rs_client.json";
-
-static rs_ret parse_url(
-    char const * full_url,
-    struct rsc_route * route
-) {
-    char const * host = full_url;
-    if (*host++ == 'w') {
-        if (*host++ == 's') {
-            if (*host == 's') {
-                route->is_encrypted = true;
-                host++;
-            }
-            if (*host++ == ':') {
-                if (*host++ == '/') {
-                    if (*host++ == '/') {
-                        goto parse_url_host;
-                    }
-                }
-            }
-        }
-    }
-    RS_LOG(LOG_ERR, "WebSocket URL \"%s\" does not start with the required "
-        "scheme \"wss://\" or \"ws://\"", full_url);
-    return RS_FATAL;
-    parse_url_host:
-    if (*host == '\0') {
-        RS_LOG(LOG_ERR, "WebSocket URL \"%s\" seems to be missing a hostname",
-            full_url);
-        return RS_FATAL;
-    }
-    char * slash = strchr(host, '/');
-    char * colon = strchr(host, ':');
-    if (colon) {
-        size_t _strlen = colon - host;
-        RS_CALLOC(route->host, _strlen + 1);
-        memcpy(route->host, host, _strlen);
-        if (slash) {
-            if (colon > slash) {
-                RS_LOG(LOG_ERR, "WebSocket URL \"%s\" seems to contain a stray "
-                    "colon in its path. A colon is only allowed in the "
-                    "hostname section as a port number designator.", full_url);
-                return RS_FATAL;
-            }
-            _strlen = slash - ++colon;
-            if (*++slash != '\0') {
-                RS_CALLOC(route->url, strlen(slash) + 1);
-                strcpy(route->url, slash); 
-            }
-        } else {
-            _strlen = strlen(++colon);
-        }
-        RS_CALLOC(route->port_str, _strlen + 1);
-        memcpy(route->port_str, colon, _strlen);
-    } else if (slash) {
-        size_t _strlen = slash - host;
-        RS_CALLOC(route->host, _strlen + 1);
-        memcpy(route->host, host, _strlen);
-        if (*++slash != '\0') {
-            RS_CALLOC(route->url, strlen(slash) + 1);
-            strcpy(route->url, slash); 
-        }
-    } else {
-        RS_CALLOC(route->host, strlen(host) + 1);
-        strcpy(route->host, host);
-    }
-    return RS_OK;
-}
 
 #define RS_GUARD_JG(_jg_ret) do { \
     if ((_jg_ret) != JG_OK) { \
@@ -134,9 +58,11 @@ static rs_ret parse_url(
 static rs_ret get_conf(
     char const * conf_path,
     size_t * rwbuf_size,
-    size_t * epoll_buf_elem_c, 
-    struct rsc_route * * routes,
-    size_t * route_c
+    size_t * epoll_buf_elem_c,
+    struct rs_conf_endpoint * * endpoints,
+    size_t * endpoint_c,
+    struct rsc_client * * clients,
+    size_t * client_c
 ) {
     jg_t * jg = jg_init();
     RS_GUARD_JG(jg_parse_file(jg, conf_path ? conf_path : default_conf_path));
@@ -151,22 +77,7 @@ static rs_ret get_conf(
                 .defa = "debug",
                 .max_byte_c = RS_CONST_STRLEN("notice"),
             }, log_level));
-        if (!strcmp(log_level, "error")) {
-            _rs_log_max = LOG_ERR;
-        } else if (!strcmp(log_level, "warning")) {
-            _rs_log_max = LOG_WARNING;
-        } else if (!strcmp(log_level, "info")) {
-            _rs_log_max = LOG_INFO;
-            RS_LOG(LOG_INFO, "Syslog log priority set to \"info\"");
-        } else if (!strcmp(log_level, "debug")) {
-            _rs_log_max = LOG_DEBUG;
-            RS_LOG(LOG_INFO, "Syslog log priority set to \"debug\"");
-        } else if (strcmp(log_level, "notice")) {
-            RS_LOG(LOG_ERR, "Unrecognized configuration value for "
-                "\"log_level\": \"%s\". The value must be one of: \"error\", "
-                "\"warning\", \"notice\", \"info\", or \"debug\".", log_level);
-            return RS_FATAL;
-        }
+        RS_GUARD(rs_set_log_level(log_level));
     }
 
     RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "rwbuf_size", NULL, rwbuf_size));
@@ -174,21 +85,18 @@ static rs_ret get_conf(
         epoll_buf_elem_c));
 
     jg_arr_get_t * arr = NULL;
-    RS_GUARD_JG(jg_obj_get_arr(jg, root_obj, "routes", NULL, &arr, route_c));
-    RS_CALLOC(*routes, *route_c);
-    for (size_t i = 0; i < *route_c; i++) {
-        jg_obj_get_t * obj = NULL;
-        RS_GUARD_JG(jg_arr_get_obj(jg, arr, i, NULL, &obj));
-
-        char * full_url = NULL;
-        RS_GUARD_JG(jg_obj_get_str(jg, obj, "url", NULL, &full_url));
-        RS_GUARD(parse_url(full_url, *routes + i));
-        free(full_url);
-        
-        RS_GUARD_JG(jg_obj_get_uint32(jg, obj, "client_c", NULL,
-            &(*routes)[i].client_c));
-        RS_CALLOC((*routes)[i].clients, (*routes)[i].client_c);
+    RS_GUARD_JG(jg_obj_get_arr(jg, root_obj, "urls", NULL, &arr,
+        endpoint_c));
+    RS_CALLOC(*endpoints, *endpoint_c);
+    for (size_t i = 0; i < *endpoint_c; i++) {
+        char * url = NULL;
+        RS_GUARD_JG(jg_arr_get_str(jg, arr, i, NULL, &url));
+        RS_GUARD(rs_parse_canon_ws_url(url, *endpoints + i));
+        RS_FREE(url);
     }
+
+    RS_GUARD_JG(jg_obj_get_sizet(jg, root_obj, "client_c", NULL, client_c));
+    RS_CALLOC(*clients, *client_c);
 
     jg_free(jg);
     return RS_OK;
@@ -197,23 +105,21 @@ static rs_ret get_conf(
 static rs_ret write_http_upgrade_request(
     char * rwbuf,
     int epoll_fd,
-    struct rsc_route const * route,
+    struct rs_conf_endpoint const * endpoint,
     struct rsc_client * client
 ) {
     // Send a dummy WebSocket key in flagrant disregard of RFC6455, because
     // that's not the aspect of the standard we're interested in testing here.
     int http_strlen = sprintf(rwbuf, // sizeof(rwbuf) > 1000 guaranteed
         "GET /%s HTTP/1.1\r\n"
-        "Host: %s%s%s\r\n"
+        "Host: %s\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         "Sec-WebSocket-Key: 1234567890123456789012==\r\n"
         "Sec-WebSocket-Version: 13\r\n"
         "\r\n",
-        route->url,
-        route->host,
-        route->port_str ? ":" : "",
-        route->port_str ? route->port_str : ""
+        endpoint->url,
+        endpoint->hostname
     );
     if (write(client->fd, rwbuf, http_strlen) != http_strlen) {
         RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, rwbuf, %d)",
@@ -243,19 +149,29 @@ static rs_ret write_http_upgrade_request(
 static rs_ret send_upgrade_request(
     char * rwbuf,
     int epoll_fd,
-    struct rsc_route const * route,
+    struct rs_conf_endpoint const * endpoint,
     struct rsc_client * client
 ) {
     struct addrinfo * ai_first;
     {
-        int ret = getaddrinfo(route->host, route->port_str ? route->port_str :
-            (route->is_encrypted ? "443" : "80"), &(struct addrinfo){
+        int ret = -1;
+        struct addrinfo ai_preset = {
             .ai_family = AF_UNSPEC,
             .ai_socktype = SOCK_STREAM
-        }, &ai_first);
+        };
+        char * colon = strchr(endpoint->hostname, ':');
+        if (colon) {
+            *colon = '\0';
+            ret = getaddrinfo(endpoint->hostname,
+                colon + 1, &ai_preset, &ai_first);
+            *colon = ':';
+        } else {
+            ret = getaddrinfo(endpoint->hostname,
+                endpoint->is_encrypted ? "443" : "80", &ai_preset, &ai_first);
+        }
         if (ret) {
-            RS_LOG(LOG_ERR, "Unsuccessful getaddrinfo(%s, %s, ...): %s",
-                route->host, route->port_str, gai_strerror(ret));
+            RS_LOG(LOG_ERR, "Unsuccessful getaddrinfo() for %s",
+                endpoint->hostname, gai_strerror(ret));
         }
     }
     int connect_attempt_c = RSC_CONNECT_ATTEMPT_C;
@@ -270,7 +186,7 @@ static rs_ret send_upgrade_request(
         } else {
             if (connect(client->fd, ai->ai_addr, ai->ai_addrlen) != -1) {
                 freeaddrinfo(ai_first);
-                return write_http_upgrade_request(rwbuf, epoll_fd, route,
+                return write_http_upgrade_request(rwbuf, epoll_fd, endpoint,
                     client);
             }
             if (errno == ECONNREFUSED) {
@@ -299,8 +215,8 @@ static rs_ret send_upgrade_request(
             if (!--connect_attempt_c) {
                 freeaddrinfo(ai_first);
                 RS_LOG_ERRNO(LOG_ERR,
-                    "All getaddrinfo(%s, %s, ...) results failed",
-                    route->host, route->port_str);
+                    "All getaddrinfo() results for %s were unsuccessful",
+                    endpoint->hostname);
                 return RS_FATAL;
             }
             ai = ai_first;
@@ -377,7 +293,7 @@ static rs_ret parse_websocket_frame_header(
     case RS_WSFRAME_OPC_CLOSE:
         RS_LOG(LOG_WARNING, "Received WebSocket Close frame for fd %d: "
             "shutting down...", client->fd);
-        return RS_FATAL; // Todo: return RS_CLOSE_PEER and handle that somehow?
+        return RS_CLOSE_PEER;
     default:
         RS_LOG(LOG_WARNING, "Received unexpected opcode %d for fd %d: "
             "shutting down...", rs_get_wsframe_opcode(frame), client->fd);
@@ -565,6 +481,8 @@ static rs_ret read_websocket(
                 case RS_AGAIN:
                     parse_is_complete = false;
                     break;
+                case RS_CLOSE_PEER:
+                    return RS_CLOSE_PEER;
                 default:
                     return RS_FATAL;
                 }
@@ -587,10 +505,12 @@ static rs_ret _main(
 
     size_t rwbuf_size = 0;
     size_t epoll_buf_elem_c = 0;
-    struct rsc_route * routes = NULL;
-    size_t route_c = 0;
+    struct rs_conf_endpoint * endpoints = NULL;
+    size_t endpoint_c = 0;
+    struct rsc_client * clients = NULL;
+    size_t client_c = 0;
     RS_GUARD(get_conf(arg_c > 1 ? args[1] : NULL, &rwbuf_size,
-        &epoll_buf_elem_c, &routes, &route_c));
+        &epoll_buf_elem_c, &endpoints, &endpoint_c, &clients, &client_c));
 
     char * rwbuf = NULL;
     RS_CALLOC(rwbuf, rwbuf_size);
@@ -602,12 +522,9 @@ static rs_ret _main(
     }
     srand((unsigned) time(NULL));
 
-    for (size_t i = 0; i < route_c; i++) {
-        struct rsc_route * route = routes + i;
-        for (size_t j = 0; j < route->client_c; j++) {
-            RS_GUARD(send_upgrade_request(rwbuf, epoll_fd, route,
-                route->clients + j));
-        }
+    for (size_t i = 0, j = 0; i < client_c; i++, j++, j %= endpoint_c) {
+        RS_GUARD(send_upgrade_request(rwbuf, epoll_fd, endpoints + j,
+            clients + i));
     }
 
     struct epoll_event * epoll_buf = NULL;
@@ -630,8 +547,12 @@ static rs_ret _main(
                         client->fd);
                     return RS_FATAL;
                 }
-                //continue;
-                return RS_FATAL;
+                if (--client_c) {
+                    continue;
+                }
+                RS_LOG(LOG_NOTICE,
+                    "Shutting down because all clients have been closed.");
+                return RS_OK;
             }
             if (e->events & EPOLLHUP) {
                 RS_LOG(LOG_WARNING, "Received EPOLLHUP for fd %d", client->fd);
@@ -697,6 +618,8 @@ static rs_ret _main(
             case RS_OK:
             case RS_AGAIN:
                 continue;
+            case RS_CLOSE_PEER:
+                goto close_client;
             default:
                 return RS_FATAL;
             }
@@ -705,7 +628,7 @@ static rs_ret _main(
 }
 
 int main(
-    int arg_c, // 1 or 2 
+    int arg_c, // 1 or 2
     char * * args // "rs_test_client" and optionally the path to the conf file
 ) {
     openlog(args[0], LOG_PID, LOG_USER);

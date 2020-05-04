@@ -30,8 +30,6 @@
 //    |
 //    \-------------------------------> [ Any RingSocket app translation units ]
 
-#include <stdbool.h> // bool
-
 // RingSocket's atomic interface to its single producer single consumer ring
 // buffers, as shared between its threads.
 struct rs_ring_atomic { // C11 atomic types with C11 alignas

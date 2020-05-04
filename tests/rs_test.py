@@ -90,15 +90,11 @@ def launchEchoClient(log_level, port, app_c, client_c):
     path = pathlib.Path(f"{TEST_PATH}/{ECHO_CLIENT}.json")
     conf = {
         "log_level": log_level,
-        "routes": [],
         "epoll_buf_elem_c": 1000,
-        "rwbuf_size": 100000000
+        "rwbuf_size": 100000000,
+        "urls": [f"ws://localhost:{port}/stress{i + 1}" for i in range(app_c)],
+        "client_c": client_c
     }
-    for i in range(app_c):
-        conf["routes"].append({
-            "url": f"ws://localhost:{port}/stress{i + 1}",
-            "client_c": client_c
-        })
     path.write_text(json.dumps(conf, indent=1) + '\n')
     out = subprocess.run([f"{TEST_PATH}/{ECHO_CLIENT}",
         f"{TEST_PATH}/{ECHO_CLIENT}.json"])
