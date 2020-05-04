@@ -42,7 +42,8 @@ struct rsc_client {
     uint8_t * next_read;
     size_t old_wsize;
     int fd;
-    enum rsc_state state;
+    uint16_t port;
+    uint16_t state;
 };
 
 static char const default_conf_path[] = "rs_client.json";
@@ -102,6 +103,34 @@ static rs_ret get_conf(
     return RS_OK;
 }
 
+static rs_ret get_local_port(
+    struct rsc_client * client,
+    bool is_ipv6
+) {
+    if (is_ipv6) {
+        struct sockaddr_in6 ipv6_addr;
+        socklen_t addr_size = sizeof(ipv6_addr);
+        if (getsockname(client->fd, (struct sockaddr *) &ipv6_addr,
+            &addr_size) == -1) {
+            RS_LOG_ERRNO(LOG_ERR,
+                "Unsuccessful getsockname(%d, &ipv6_addr, ...)", client->fd);
+            return RS_FATAL;
+        }
+        client->port = RS_NTOH16(ipv6_addr.sin6_port);
+    } else {
+        struct sockaddr_in ipv4_addr;
+        socklen_t addr_size = sizeof(ipv4_addr);
+        if (getsockname(client->fd, (struct sockaddr *) &ipv4_addr,
+            &addr_size) == -1) {
+            RS_LOG_ERRNO(LOG_ERR,
+                "Unsuccessful getsockname(%d, &ipv4_addr, ...)", client->fd);
+            return RS_FATAL;
+        }
+        client->port = RS_NTOH16(ipv4_addr.sin_port);
+    }
+    return RS_OK;
+}
+
 static rs_ret write_http_upgrade_request(
     char * rwbuf,
     int epoll_fd,
@@ -122,14 +151,14 @@ static rs_ret write_http_upgrade_request(
         endpoint->hostname
     );
     if (write(client->fd, rwbuf, http_strlen) != http_strlen) {
-        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, rwbuf, %d)",
-            client->fd, http_strlen);
+        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, rwbuf, %d) on port %"
+            PRIu16, client->fd, http_strlen, client->port);
         return RS_FATAL;
     }
     // Time to switch the socket to non-blocking mode
     if (fcntl(client->fd, F_SETFL, O_NONBLOCK) == -1) {
-        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful fcntl(%d, F_SETFL, O_NONBLOCK)",
-            client->fd);
+        RS_LOG_ERRNO(LOG_ERR, "Unsuccessful fcntl(%d, F_SETFL, O_NONBLOCK) "
+            "on port %" PRIu16, client->fd, client->port);
         return RS_FATAL;
     }
     struct epoll_event event = {
@@ -138,11 +167,11 @@ static rs_ret write_http_upgrade_request(
     };
     if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client->fd, &event) == -1) {
         RS_LOG_ERRNO(LOG_ERR, "Unsuccessful epoll_ctl(%d, EPOLL_CTL_ADD, "
-            "%d, &event)", epoll_fd, client->fd);
+            "%d, &event) on port %" PRIu16, epoll_fd, client->fd, client->port);
         return RS_FATAL;
     }
-    RS_LOG(LOG_DEBUG, "Upgrade request sent for socket fd %d:\n%.*s",
-        client->fd, http_strlen, rwbuf);
+    RS_LOG(LOG_DEBUG, "Upgrade request sent for socket fd %d on port %" PRIu16
+        ":\n%.*s", client->fd, client->port, http_strlen, rwbuf);
     return RS_OK;
 }
 
@@ -172,6 +201,7 @@ static rs_ret send_upgrade_request(
         if (ret) {
             RS_LOG(LOG_ERR, "Unsuccessful getaddrinfo() for %s",
                 endpoint->hostname, gai_strerror(ret));
+            return RS_FATAL;
         }
     }
     int connect_attempt_c = RSC_CONNECT_ATTEMPT_C;
@@ -185,6 +215,8 @@ static rs_ret send_upgrade_request(
             RS_LOG_ERRNO(LOG_WARNING, "Unsuccessful socket(...)");
         } else {
             if (connect(client->fd, ai->ai_addr, ai->ai_addrlen) != -1) {
+                RS_GUARD(get_local_port(client,
+                    ai->ai_addr->sa_family == AF_INET6));
                 freeaddrinfo(ai_first);
                 return write_http_upgrade_request(rwbuf, epoll_fd, endpoint,
                     client);
@@ -236,10 +268,12 @@ static rs_ret read_http(
             if (errno == EAGAIN) {
                 return RS_AGAIN;
             }
-            RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, ...)", client->fd);
+            RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, ...) on port %" PRIu16,
+                client->fd, client->port);
             return RS_FATAL;
         case 0:
-            RS_LOG_ERRNO(LOG_ERR, "read(%d, ...) 0 bytes", client->fd);
+            RS_LOG_ERRNO(LOG_ERR, "read(%d, ...) 0 bytes on port %" PRIu16,
+                client->fd, client->port);
             return RS_FATAL;
         default:
             for (ssize_t i = 0; i < rsize;) {
@@ -263,7 +297,7 @@ static rs_ret read_http(
                         continue;
                     case RSC_READ_HTTP_LF:
                         RS_LOG(LOG_DEBUG, "HTTP handshake completed for socket "
-                            "fd: %d", client->fd);
+                            "fd %d on port %" PRIu16, client->fd, client->port);
                         client->state = RSC_READ_WS;
                         if (i < rsize) {
                             memmove(rwbuf, rwbuf + i, rsize - i);
@@ -291,12 +325,13 @@ static rs_ret parse_websocket_frame_header(
     case RS_WSFRAME_OPC_BIN:
         break;
     case RS_WSFRAME_OPC_CLOSE:
-        RS_LOG(LOG_WARNING, "Received WebSocket Close frame for fd %d: "
-            "shutting down...", client->fd);
+        RS_LOG(LOG_WARNING, "Received WebSocket Close frame for fd %d on port %"
+            PRIu16 ": shutting down...", client->fd, client->port);
         return RS_CLOSE_PEER;
     default:
-        RS_LOG(LOG_WARNING, "Received unexpected opcode %d for fd %d: "
-            "shutting down...", rs_get_wsframe_opcode(frame), client->fd);
+        RS_LOG(LOG_WARNING, "Received unexpected opcode %d for fd %d on port %"
+            PRIu16": shutting down...", rs_get_wsframe_opcode(frame),
+            client->fd, client->port);
         return RS_FATAL;
     }
     if (client->next_read < frame->sc_small.payload) {
@@ -345,8 +380,8 @@ static rs_ret write_websocket(
     ssize_t ret = write(client->fd, wbuf, wbuf_size);
     if (ret > 0) {
         size_t wsize = ret;
-        RS_LOG(LOG_DEBUG, "Echoed %zu byte chunk back to RingSocket for fd "
-            "%d", wsize, client->fd);
+        RS_LOG(LOG_DEBUG, "Echoed %zu byte chunk back to RingSocket for fd %d "
+            "on port %" PRIu16, wsize, client->fd, client->port);
         if (wsize == wbuf_size) {
             client->old_wsize = 0;
             client->state = RSC_READ_WS;
@@ -358,8 +393,8 @@ static rs_ret write_websocket(
     if (errno == EAGAIN) {
         return RS_AGAIN;
     }
-    RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, wbuf, %zu)",
-        client->fd, wbuf_size);
+    RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, wbuf, %zu) on port %" PRIu16,
+        client->fd, wbuf_size, client->port);
     return RS_FATAL; // Todo: handle this more gracefully
 }
 
@@ -369,8 +404,9 @@ static rs_ret mask_and_write_websocket(
     unsigned header_size,
     uint64_t payload_size
 ) {
-    RS_LOG(LOG_DEBUG, "Masking %zu+4+%zu=%zu bytes received frame for fd %d",
-        header_size, payload_size, header_size + 4 + payload_size, client->fd);
+    RS_LOG(LOG_DEBUG, "Masking %zu+4+%zu=%zu bytes received frame for fd %d on "
+        "port %" PRIu16, header_size, payload_size,
+        header_size + 4 + payload_size, client->fd, client->port);
     client->state = RSC_WRITE_WS;
     uint8_t * mask = NULL;
     switch (header_size) {
@@ -408,8 +444,8 @@ static rs_ret read_websocket(
     if (client->storage) {
         parse_is_complete = false;
         size_t size = client->next_read - wsbuf;
-        RS_LOG(LOG_DEBUG, "Retrieving %zu byte read from storage for fd %d",
-            size, client->fd);
+        RS_LOG(LOG_DEBUG, "Retrieving %zu byte read from storage for fd %d on "
+            "port %" PRIu16, size, client->fd, client->port);
         memcpy(wsbuf, client->storage, size);
         RS_FREE(client->storage);
     } else {
@@ -421,7 +457,8 @@ static rs_ret read_websocket(
         switch (rsize) {
         case -1:
             if (errno != EAGAIN) {
-                RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, ...)", client->fd);
+                RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, ...) on port %"
+                    PRIu16, client->fd, client->port);
                 return RS_FATAL;
             }
             if (parse_is_complete) {
@@ -430,8 +467,8 @@ static rs_ret read_websocket(
             store_buf:
             {
                 size_t size = client->next_read - wsbuf;
-                RS_LOG(LOG_DEBUG, "Storing %zu byte read to storage for fd %d",
-                    size, client->fd);
+                RS_LOG(LOG_DEBUG, "Storing %zu byte read to storage for fd %d "
+                    "on port %" PRIu16, size, client->fd, client->port);
                 client->storage = malloc(size);
                 if (!client->storage) {
                     RS_LOG(LOG_ERR, "Unsuccessful malloc(%zu)",
@@ -442,11 +479,12 @@ static rs_ret read_websocket(
             }
             return RS_AGAIN;
         case 0:
-            RS_LOG(LOG_ERR, "read(%d, ...) 0 bytes", client->fd);
+            RS_LOG(LOG_ERR, "read(%d, ...) 0 bytes on port %" PRIu16,
+                client->fd, client->port);
             return RS_FATAL;
         default:
-            RS_LOG(LOG_DEBUG, "Read %zu bytes from RingSocket for fd %d",
-                (size_t) rsize, client->fd);
+            RS_LOG(LOG_DEBUG, "Read %zu bytes from RingSocket for fd %d on "
+                "port %" PRIu16, (size_t) rsize, client->fd, client->port);
             client->next_read += rsize;
             for (;;) {
                 unsigned header_size = 0;
@@ -540,11 +578,12 @@ static rs_ret _main(
         for (struct epoll_event * e = epoll_buf; e < epoll_buf + event_c; e++) {
             struct rsc_client * client = e->data.ptr;
             if (e->events & EPOLLERR) {
-                RS_LOG(LOG_ERR, "Received EPOLLERR for fd %d", client->fd);
+                RS_LOG(LOG_ERR, "Received EPOLLERR for fd %d on port %" PRIu16,
+                    client->fd, client->port);
                 close_client:
                 if (close(client->fd) == -1) {
-                    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful close(%d)",
-                        client->fd);
+                    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful close(%d) on port %"
+                        PRIu16, client->fd, client->port);
                     return RS_FATAL;
                 }
                 if (--client_c) {
@@ -555,11 +594,13 @@ static rs_ret _main(
                 return RS_OK;
             }
             if (e->events & EPOLLHUP) {
-                RS_LOG(LOG_WARNING, "Received EPOLLHUP for fd %d", client->fd);
+                RS_LOG(LOG_WARNING, "Received EPOLLHUP for fd %d on port %"
+                    PRIu16, client->fd, client->port);
                 goto close_client;
             }
             if (e->events & EPOLLRDHUP) {
-                RS_LOG(LOG_INFO, "Received EPOLLRDHUP for fd %d", client->fd);
+                RS_LOG(LOG_INFO, "Received EPOLLRDHUP for fd %d on port %"
+                    PRIu16, client->fd, client->port);
                 goto close_client;
             }
             switch (client->state) {
@@ -592,7 +633,8 @@ static rs_ret _main(
                     uint64_t frame_size = rs_get_wsframe_cs_size(
                         (union rs_wsframe *) client->storage);
                     RS_LOG(LOG_DEBUG, "Resuming %zu byte frame write from "
-                        "storage for fd %d", frame_size, client->fd);
+                        "storage for fd %d on port %" PRIu16, frame_size,
+                        client->fd, client->port);
                     switch (write_websocket(client, client->storage +
                         client->old_wsize, frame_size - client->old_wsize)) {
                     case RS_OK:
@@ -606,7 +648,8 @@ static rs_ret _main(
                     if (client->next_read > next_frame) {
                         size_t tail_size = client->next_read - next_frame;
                         RS_LOG(LOG_DEBUG, "Retrieving %zu byte tail from "
-                            "storage for fd %d", tail_size, client->fd);
+                            "storage for fd %d on port %" PRIu16, tail_size,
+                            client->fd, client->port);
                         memcpy(rwbuf + 4, client->storage + frame_size,
                             tail_size);
                     }
