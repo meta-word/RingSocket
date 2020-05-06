@@ -3,7 +3,7 @@
 
 #include <ringsocket.h>
 
-#define RS_TEST_MAX_ECHO_BYTE_C 0x1000000 // 16 MB (based on ...nothing really)
+#define RST_MAX_ECHO_BYTE_C 0x1000000 // 16 MB (based on ...nothing really)
 
 int echo(
     rs_t * rs,
@@ -18,7 +18,7 @@ int echo(
 RS_APP(
     RS_INIT_NONE,
     RS_OPEN_NONE,
-    RS_READ_ANY(echo, RS_NET_STA(uint8_t, 0, RS_TEST_MAX_ECHO_BYTE_C)),
+    RS_READ_ANY(echo, RS_NET_STA(uint8_t, 0, RST_MAX_ECHO_BYTE_C)),
     RS_CLOSE_NONE,
     RS_TIMER_NONE
 );

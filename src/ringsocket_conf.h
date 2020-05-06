@@ -120,7 +120,7 @@ struct rs_conf_endpoint {
 
 // #############################################################################
 // # The following functions are defined here instead of in rs_conf.c mainly to
-// # allow their reuse outside of RingSocket itself (e.g., by rs_echo_client.c).
+// # allow their reuse outside of RingSocket itself (e.g., by rst_client_echo.c)
 
 static inline rs_ret rs_set_log_level(
     char const * log_level_str

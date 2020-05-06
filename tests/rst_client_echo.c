@@ -20,24 +20,24 @@
 
 // Preserve space at the head of rwbuf when parsing WebSocket to allow replying
 // in-place, which results in messages that are exactly 4 mask bytes longer.
-#define RSC_PREBUF_SIZE 4 // Total of 4 WebSocket mask bytes
+#define RST_PREBUF_SIZE 4 // Total of 4 WebSocket mask bytes
 
-#define RSC_CONNECT_ATTEMPT_C 100
-#define RSC_COOL_OFF_INIT_NS 10000000 // 0.01s
-#define RSC_COOL_OFF_MULT 1.5
+#define RST_CONNECT_ATTEMPT_C 100
+#define RST_COOL_OFF_INIT_NS 10000000 // 0.01s
+#define RST_COOL_OFF_MULT 1.5
 
 RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.
 
-enum rsc_state {
-    RSC_READ_HTTP_CRLFCRLF = 0,
-    RSC_READ_HTTP_LFCRLF = 1,
-    RSC_READ_HTTP_CRLF = 2,
-    RSC_READ_HTTP_LF = 3,
-    RSC_READ_WS = 4,
-    RSC_WRITE_WS = 5
+enum rst_state {
+    RST_READ_HTTP_CRLFCRLF = 0,
+    RST_READ_HTTP_LFCRLF = 1,
+    RST_READ_HTTP_CRLF = 2,
+    RST_READ_HTTP_LF = 3,
+    RST_READ_WS = 4,
+    RST_WRITE_WS = 5
 };
 
-struct rsc_client {
+struct rst_client {
     uint8_t * storage;
     uint8_t * next_read;
     size_t old_wsize;
@@ -62,7 +62,7 @@ static rs_ret get_conf(
     size_t * epoll_buf_elem_c,
     struct rs_conf_endpoint * * endpoints,
     size_t * endpoint_c,
-    struct rsc_client * * clients,
+    struct rst_client * * clients,
     size_t * client_c
 ) {
     jg_t * jg = jg_init();
@@ -104,7 +104,7 @@ static rs_ret get_conf(
 }
 
 static rs_ret get_local_port(
-    struct rsc_client * client
+    struct rst_client * client
 ) {
     struct sockaddr_storage addr = {0};
     if (getsockname(client->fd, (struct sockaddr *) &addr,
@@ -123,7 +123,7 @@ static rs_ret write_http_upgrade_request(
     char * rwbuf,
     int epoll_fd,
     struct rs_conf_endpoint const * endpoint,
-    struct rsc_client * client
+    struct rst_client * client
 ) {
     // Send a dummy WebSocket key in flagrant disregard of RFC6455, because
     // that's not the aspect of the standard we're interested in testing here.
@@ -167,7 +167,7 @@ static rs_ret send_upgrade_request(
     char * rwbuf,
     int epoll_fd,
     struct rs_conf_endpoint const * endpoint,
-    struct rsc_client * client
+    struct rst_client * client
 ) {
     struct addrinfo * ai_first;
     {
@@ -192,8 +192,8 @@ static rs_ret send_upgrade_request(
             return RS_FATAL;
         }
     }
-    int connect_attempt_c = RSC_CONNECT_ATTEMPT_C;
-    static struct timespec cool_off_time = {0, RSC_COOL_OFF_INIT_NS};
+    int connect_attempt_c = RST_CONNECT_ATTEMPT_C;
+    static struct timespec cool_off_time = {0, RST_COOL_OFF_INIT_NS};
     struct addrinfo * ai = ai_first;
     for (;;) {
         // To keep things simple, don't set the new socket to non-blocking mode
@@ -215,8 +215,8 @@ static rs_ret send_upgrade_request(
                     "connection refused: sleeping %fs before retrying...",
                     client->fd, ns / 1000000000.);
                 nanosleep(&cool_off_time, NULL);
-                // Next time, sleep RSC_COOL_OFF_MULT times as long
-                ns *= RSC_COOL_OFF_MULT;
+                // Next time, sleep RST_COOL_OFF_MULT times as long
+                ns *= RST_COOL_OFF_MULT;
                 cool_off_time.tv_sec = ns / 1000000000;
                 cool_off_time.tv_nsec = ns % 1000000000;
             } else {
@@ -244,7 +244,7 @@ static rs_ret send_upgrade_request(
 }
 
 static rs_ret read_http(
-    struct rsc_client * client,
+    struct rst_client * client,
     char * rwbuf,
     size_t rwbuf_size
 ) {
@@ -267,11 +267,11 @@ static rs_ret read_http(
                 switch (rwbuf[i++]) {
                 case '\r':
                     switch (client->state) {
-                    case RSC_READ_HTTP_CRLFCRLF:
-                        client->state = RSC_READ_HTTP_LFCRLF;
+                    case RST_READ_HTTP_CRLFCRLF:
+                        client->state = RST_READ_HTTP_LFCRLF;
                         continue;
-                    case RSC_READ_HTTP_CRLF:
-                        client->state = RSC_READ_HTTP_LF;
+                    case RST_READ_HTTP_CRLF:
+                        client->state = RST_READ_HTTP_LF;
                         continue;
                     default:
                         break;
@@ -279,13 +279,13 @@ static rs_ret read_http(
                     break;
                 case '\n':
                     switch (client->state) {
-                    case RSC_READ_HTTP_LFCRLF:
-                        client->state = RSC_READ_HTTP_CRLF;
+                    case RST_READ_HTTP_LFCRLF:
+                        client->state = RST_READ_HTTP_CRLF;
                         continue;
-                    case RSC_READ_HTTP_LF:
+                    case RST_READ_HTTP_LF:
                         RS_LOG(LOG_DEBUG, "HTTP handshake completed for socket "
                             "fd %d on port %" PRIu16, client->fd, client->port);
-                        client->state = RSC_READ_WS;
+                        client->state = RST_READ_WS;
                         if (i < rsize) {
                             memmove(rwbuf, rwbuf + i, rsize - i);
                         }
@@ -294,14 +294,14 @@ static rs_ret read_http(
                         break;
                     }
                 }
-                client->state = RSC_READ_HTTP_CRLFCRLF;
+                client->state = RST_READ_HTTP_CRLFCRLF;
             }
         }
     }
 }
 
 static rs_ret parse_websocket_frame_header(
-    struct rsc_client * client,
+    struct rst_client * client,
     union rs_wsframe const * frame,
     unsigned * header_size,
     uint64_t * payload_size
@@ -347,7 +347,7 @@ static rs_ret parse_websocket_frame_header(
 }
 
 static rs_ret parse_websocket_frame(
-    struct rsc_client * client,
+    struct rst_client * client,
     uint8_t const * wsbuf,
     unsigned * header_size,
     uint64_t * payload_size
@@ -360,7 +360,7 @@ static rs_ret parse_websocket_frame(
 }
 
 static rs_ret write_websocket(
-    struct rsc_client * client,
+    struct rst_client * client,
     uint8_t const * wbuf,
     size_t wbuf_size
 ) {
@@ -371,7 +371,7 @@ static rs_ret write_websocket(
             "on port %" PRIu16, wsize, client->fd, client->port);
         if (wsize == wbuf_size) {
             client->old_wsize = 0;
-            client->state = RSC_READ_WS;
+            client->state = RST_READ_WS;
             return RS_OK;
         }
         client->old_wsize += wsize;
@@ -386,7 +386,7 @@ static rs_ret write_websocket(
 }
 
 static rs_ret mask_and_write_websocket(
-    struct rsc_client * client,
+    struct rst_client * client,
     uint8_t * wsbuf,
     unsigned header_size,
     uint64_t payload_size
@@ -394,7 +394,7 @@ static rs_ret mask_and_write_websocket(
     RS_LOG(LOG_DEBUG, "Masking %zu+4+%zu=%zu bytes received frame for fd %d on "
         "port %" PRIu16, header_size, payload_size,
         header_size + 4 + payload_size, client->fd, client->port);
-    client->state = RSC_WRITE_WS;
+    client->state = RST_WRITE_WS;
     uint8_t * mask = NULL;
     switch (header_size) {
     case sizeof(struct rs_wsframe_sc_small):
@@ -422,7 +422,7 @@ static rs_ret mask_and_write_websocket(
 }
 
 static rs_ret read_websocket(
-    struct rsc_client * client,
+    struct rst_client * client,
     uint8_t * wsbuf,
     size_t wsbuf_size
 ) {
@@ -532,7 +532,7 @@ static rs_ret _main(
     size_t epoll_buf_elem_c = 0;
     struct rs_conf_endpoint * endpoints = NULL;
     size_t endpoint_c = 0;
-    struct rsc_client * clients = NULL;
+    struct rst_client * clients = NULL;
     size_t client_c = 0;
     RS_GUARD(get_conf(arg_c > 1 ? args[1] : NULL, &rwbuf_size,
         &epoll_buf_elem_c, &endpoints, &endpoint_c, &clients, &client_c));
@@ -563,7 +563,7 @@ static rs_ret _main(
             return RS_FATAL;
         }
         for (struct epoll_event * e = epoll_buf; e < epoll_buf + event_c; e++) {
-            struct rsc_client * client = e->data.ptr;
+            struct rst_client * client = e->data.ptr;
             if (e->events & EPOLLERR) {
                 RS_LOG(LOG_ERR, "Received EPOLLERR for fd %d on port %" PRIu16,
                     client->fd, client->port);
@@ -591,10 +591,10 @@ static rs_ret _main(
                 goto close_client;
             }
             switch (client->state) {
-            case RSC_READ_HTTP_CRLFCRLF:
-            case RSC_READ_HTTP_LFCRLF:
-            case RSC_READ_HTTP_CRLF:
-            case RSC_READ_HTTP_LF:
+            case RST_READ_HTTP_CRLFCRLF:
+            case RST_READ_HTTP_LFCRLF:
+            case RST_READ_HTTP_CRLF:
+            case RST_READ_HTTP_LF:
                 if (!(e->events & EPOLLIN)) {
                     continue;
                 }
@@ -607,12 +607,12 @@ static rs_ret _main(
                     return RS_FATAL;
                 }
                 break;
-            case RSC_READ_WS:
+            case RST_READ_WS:
                 if (!(e->events & EPOLLIN)) {
                     continue;
                 }
                 break;
-            case RSC_WRITE_WS: default:
+            case RST_WRITE_WS: default:
                 if (!(e->events & EPOLLOUT)) {
                     continue;
                 }
@@ -644,7 +644,7 @@ static rs_ret _main(
                 }
             }
             switch (read_websocket(client, (uint8_t *) rwbuf +
-                RSC_PREBUF_SIZE, rwbuf_size - RSC_PREBUF_SIZE)) {
+                RST_PREBUF_SIZE, rwbuf_size - RST_PREBUF_SIZE)) {
             case RS_OK:
             case RS_AGAIN:
                 continue;

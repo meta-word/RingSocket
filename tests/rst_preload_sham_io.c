@@ -35,10 +35,10 @@
 #include <dlfcn.h> // dlsym()
 #include <sys/epoll.h>
 
-#define RS_SHAM_IO_REALLOC_FACTOR 1.5
-#define RS_SHAM_IO_INIT_ELEM_C 1000
+#define RST_SHAM_IO_REALLOC_FACTOR 1.5
+#define RST_SHAM_IO_INIT_ELEM_C 1000
 
-#define RS_MAPPED_PEER_NONE UINT32_MAX // Returned by get_mapped_peer_i() below
+#define RST_MAPPED_PEER_NONE UINT32_MAX // Returned by get_mapped_peer_i() below
 
 RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.
 
@@ -68,12 +68,12 @@ thread_local static struct {
     } write;
 } orig = {0};
 
-struct rs_fd_peer_map {
+struct rst_fd_peer_map {
     int fd; // The socket file descriptor for which sham IO events are created
     uint32_t peer_i; // Worker thread's rs_event.c peer_i (needed as epoll data)
 };
 
-thread_local static struct rs_fd_peer_map * map = NULL;
+thread_local static struct rst_fd_peer_map * map = NULL;
 thread_local static size_t map_elem_c = 0;
 
 thread_local static struct epoll_event * sham_events = NULL;
@@ -100,7 +100,7 @@ static rs_ret init_sham(
     RS_GUARD(set_original_function_symbol("epoll_wait", &orig.epoll_wait.sym));
     RS_GUARD(set_original_function_symbol("read", &orig.read.sym));
     RS_GUARD(set_original_function_symbol("write", &orig.write.sym));
-    map_elem_c = sham_events_elem_c = RS_SHAM_IO_INIT_ELEM_C;
+    map_elem_c = sham_events_elem_c = RST_SHAM_IO_INIT_ELEM_C;
     RS_CALLOC(map, map_elem_c);
     RS_CALLOC(sham_events, sham_events_elem_c);
     return RS_OK;
@@ -109,9 +109,9 @@ static rs_ret init_sham(
 static void remove_mapping_if_any(
     int fd
 ) {
-    for (struct rs_fd_peer_map * m = map; m < map + map_elem_c; m++) {
+    for (struct rst_fd_peer_map * m = map; m < map + map_elem_c; m++) {
         if (m->fd == fd) {
-            memset(m, 0, sizeof(struct rs_fd_peer_map));
+            memset(m, 0, sizeof(struct rst_fd_peer_map));
             return;
         }
     }
@@ -121,7 +121,7 @@ static rs_ret add_mapping(
     int fd,
     uint32_t peer_i
 ) {
-    for (struct rs_fd_peer_map * m = map; m < map + map_elem_c; m++) {
+    for (struct rst_fd_peer_map * m = map; m < map + map_elem_c; m++) {
         if (!m->fd) {
             // This element is vacant, so occupy it.
             m->fd = fd;
@@ -130,12 +130,12 @@ static rs_ret add_mapping(
         }
     }
     size_t map_i = map_elem_c;
-    map_elem_c *= RS_SHAM_IO_REALLOC_FACTOR;
+    map_elem_c *= RST_SHAM_IO_REALLOC_FACTOR;
     RS_REALLOC(map, map_elem_c);
     map[map_i].fd = fd;
     map[map_i].peer_i = peer_i;
     while (++map_i < map_elem_c) {
-        memset(map + map_i, 0, sizeof(struct rs_fd_peer_map));
+        memset(map + map_i, 0, sizeof(struct rst_fd_peer_map));
     }
     return RS_OK;
 }
@@ -143,12 +143,12 @@ static rs_ret add_mapping(
 static uint32_t get_mapped_peer_i(
     int fd
 ) {
-    for (struct rs_fd_peer_map * m = map; m < map + map_elem_c; m++) {
+    for (struct rst_fd_peer_map * m = map; m < map + map_elem_c; m++) {
         if (m->fd == fd) {
             return m->peer_i;
         }
     }
-    return RS_MAPPED_PEER_NONE;
+    return RST_MAPPED_PEER_NONE;
 }
 
 static struct epoll_event * get_sham_events(
@@ -171,7 +171,7 @@ static rs_ret add_sham_event(
     uint32_t sham_event
 ) {
     if ((size_t) sham_event_c >= sham_events_elem_c) {
-        sham_events_elem_c *= RS_SHAM_IO_REALLOC_FACTOR;
+        sham_events_elem_c *= RST_SHAM_IO_REALLOC_FACTOR;
         RS_REALLOC(sham_events, sham_events_elem_c);
     }
     sham_events[sham_event_c].data.u64 =
@@ -279,7 +279,7 @@ ssize_t read(
         exit(5);
     }
     uint32_t mapped_peer_i = get_mapped_peer_i(fd);
-    if (mapped_peer_i == RS_MAPPED_PEER_NONE) {
+    if (mapped_peer_i == RST_MAPPED_PEER_NONE) {
         //RS_LOG(LOG_DEBUG, "[%d] read(fd=%d, buf=%p, byte_c=%zu): "
         //    "not mapped.", thrd_current(), fd, buf, byte_c);
         return orig.read.func(fd, buf, byte_c);
@@ -339,7 +339,7 @@ ssize_t write(
         exit(7);
     }
     uint32_t mapped_peer_i = get_mapped_peer_i(fd);
-    if (mapped_peer_i == RS_MAPPED_PEER_NONE) {
+    if (mapped_peer_i == RST_MAPPED_PEER_NONE) {
         //RS_LOG(LOG_DEBUG, "[%d] write(fd=%d, buf=%p, byte_c=%zu): "
         //    "not mapped.",
         //    thrd_current(), fd, buf, byte_c);
