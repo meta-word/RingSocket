@@ -3,15 +3,16 @@
 RANDOM_PORT_MIN = 1024
 RANDOM_PORT_MAX = 65535
 
-TEST_PATH = "/tmp/ringsocket_test"
+TEST_PATH = "/tmp/rst"
 
-APP_ECHO = "rs_test_app_echo.so"
-APP_STRESS = "rs_test_app_stress.so"
-ECHO_CLIENT = "rs_echo_client"
-SHAM_IO = "rs_preload_sham_io.so"
+SHAM_IO = "rst_preload_sham_io.so"
 
-JSCLIENT_SRC = "rs_test_client.html"
-JSCLIENT_DST = "/tmp/rs.html"
+CLIENT_ECHO = "rst_client_echo"
+CLIENT_BROWSER = "rst_client.html"
+CLIENT_BROWSER_DST = "/tmp/rs.html"
+
+APP_ECHO = "rst_app_echo.so"
+APP_STRESS = "rst_app_stress.so"
 
 import argparse
 import json
@@ -43,7 +44,7 @@ def launchRingSocket(log_level, port, includeShamIO, includeAutobahn, worker_c,
                      stressApp_c):
     subprocess.run(["sudo", "killall", "ringsocket"], capture_output=True)
     subprocess.run(["make"]).check_returncode()
-    path = pathlib.Path(f"{TEST_PATH}/rs_test.json")
+    path = pathlib.Path(f"{TEST_PATH}/rst.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     conf = {
         "log_level": log_level,
@@ -79,15 +80,15 @@ def launchRingSocket(log_level, port, includeShamIO, includeAutobahn, worker_c,
         })
     path.write_text(json.dumps(conf, indent=1) + '\n')
     out = subprocess.run(["sudo"] + ([preloadEnv[:-1]] if preloadEnv else []) +
-        ["ringsocket", f"{TEST_PATH}/rs_test.json"])
+        ["ringsocket", f"{TEST_PATH}/rst.json"])
     out.check_returncode()
     print(f"RingSocket launched with "
-          f"\"sudo {preloadEnv}ringsocket {TEST_PATH}/rs_test.json\".")
+          f"\"sudo {preloadEnv}ringsocket {TEST_PATH}/rst.json\".")
 
-def launchEchoClient(log_level, port, app_c, client_c):
+def launchClientEcho(log_level, port, app_c, client_c):
     time.sleep(1)
-    shutil.copy2(ECHO_CLIENT, f"{TEST_PATH}")
-    path = pathlib.Path(f"{TEST_PATH}/{ECHO_CLIENT}.json")
+    shutil.copy2(CLIENT_ECHO, f"{TEST_PATH}")
+    path = pathlib.Path(f"{TEST_PATH}/{CLIENT_ECHO}.json")
     conf = {
         "log_level": log_level,
         "epoll_buf_elem_c": 1000,
@@ -96,24 +97,24 @@ def launchEchoClient(log_level, port, app_c, client_c):
         "client_c": client_c
     }
     path.write_text(json.dumps(conf, indent=1) + '\n')
-    out = subprocess.run([f"{TEST_PATH}/{ECHO_CLIENT}",
-        f"{TEST_PATH}/{ECHO_CLIENT}.json"])
+    out = subprocess.run([f"{TEST_PATH}/{CLIENT_ECHO}",
+        f"{TEST_PATH}/{CLIENT_ECHO}.json"])
     out.check_returncode()
     print(f"Echo client launched with {client_c} clients for each of "
           f"{app_c} backend stress test apps.")
 
-def launchBrowser(port):
-    with open(JSCLIENT_SRC, "r") as f:
+def launchClientBrowser(port):
+    with open(CLIENT_BROWSER, "r") as f:
         client_html = f.read()
     sub_html = re.sub("PORT_PLACEHOLDER", f"{port}", client_html)
-    with open(JSCLIENT_DST, "w") as f:
+    with open(CLIENT_BROWSER_DST, "w") as f:
         f.write(sub_html)
-    print(f"You can now open (or reload) file://{JSCLIENT_DST} in a browser to "
-          f"interactively spawn any number of test client connections. "
-          f"Go crazy. To shut the current RingSocket server instance down, "
+    print(f"You can now open (or reload) file://{CLIENT_BROWSER_DST} in a "
+          f"browser to interactively spawn any number of test client "
+          f"connections. To shut the current RingSocket server instance down, "
           f"issue \"sudo killall ringsocket\" (or run this script again).")
 
-def launchAutobahn(port):
+def launchClientAutobahn(port):
     path = pathlib.Path(f"{TEST_PATH}/autobahn_config/fuzzingclient.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
@@ -217,11 +218,11 @@ def main():
     launchRingSocket(args.log, args.port, args.sham_io, args.test == "autobahn",
         args.worker_c, args.app_c)
     if args.test == "stress":
-        launchEchoClient(args.log, args.port, args.app_c, args.client_c)
+        launchClientEcho(args.log, args.port, args.app_c, args.client_c)
     elif args.test == "browser":
-        launchBrowser(args.port)
+        launchClientBrowser(args.port)
     else:
-        launchAutobahn(args.port)
+        launchClientAutobahn(args.port)
 
 if __name__ == "__main__":
     main()
