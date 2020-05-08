@@ -19,8 +19,8 @@
 #include <unistd.h>
 
 // Preserve space at the head of rwbuf when parsing WebSocket to allow replying
-// in-place, which results in messages that are exactly 4 mask bytes longer.
-#define RST_PREBUF_SIZE 4 // Total of 4 WebSocket mask bytes
+// in-place, which results in messages that are exactly 4 mask key bytes longer.
+#define RST_WS_MASK_KEY_SIZE 4
 
 #define RST_CONNECT_ATTEMPT_C 100
 #define RST_COOL_OFF_INIT_NS 10000000 // 0.01s
@@ -193,7 +193,10 @@ static rs_ret send_upgrade_request(
         }
     }
     int connect_attempt_c = RST_CONNECT_ATTEMPT_C;
-    static struct timespec cool_off_time = {0, RST_COOL_OFF_INIT_NS};
+    static struct timespec cool_off_time = {
+        .tv_sec = 0,
+        .tv_nsec = RST_COOL_OFF_INIT_NS
+    };
     struct addrinfo * ai = ai_first;
     for (;;) {
         // To keep things simple, don't set the new socket to non-blocking mode
@@ -303,7 +306,7 @@ static rs_ret read_http(
 static rs_ret parse_websocket_frame_header(
     struct rst_client * client,
     union rs_wsframe const * frame,
-    unsigned * header_size,
+    uint64_t * header_size,
     uint64_t * payload_size
 ) {
     switch (rs_get_wsframe_opcode(frame)) {
@@ -317,7 +320,7 @@ static rs_ret parse_websocket_frame_header(
         return RS_CLOSE_PEER;
     default:
         RS_LOG(LOG_WARNING, "Received unexpected opcode %d for fd %d on port %"
-            PRIu16": shutting down...", rs_get_wsframe_opcode(frame),
+            PRIu16 ": shutting down...", rs_get_wsframe_opcode(frame),
             client->fd, client->port);
         return RS_FATAL;
     }
@@ -349,14 +352,15 @@ static rs_ret parse_websocket_frame_header(
 static rs_ret parse_websocket_frame(
     struct rst_client * client,
     uint8_t const * wsbuf,
-    unsigned * header_size,
-    uint64_t * payload_size
+    uint64_t * header_size,
+    uint64_t * payload_size,
+    uint64_t * frame_size
 ) {
     union rs_wsframe const * frame = (union rs_wsframe const *) wsbuf;
     RS_GUARD(parse_websocket_frame_header(client, frame, header_size,
         payload_size));
-    return client->next_read < wsbuf + *header_size + *payload_size ?
-        RS_AGAIN : RS_OK;
+    *frame_size = *header_size + *payload_size;
+    return client->next_read < wsbuf + *frame_size ? RS_AGAIN : RS_OK;
 }
 
 static rs_ret write_websocket(
@@ -367,13 +371,20 @@ static rs_ret write_websocket(
     ssize_t ret = write(client->fd, wbuf, wbuf_size);
     if (ret > 0) {
         size_t wsize = ret;
-        RS_LOG(LOG_DEBUG, "Echoed %zu byte chunk back to RingSocket for fd %d "
-            "on port %" PRIu16, wsize, client->fd, client->port);
         if (wsize == wbuf_size) {
+            RS_LOG(LOG_DEBUG, "Written all bytes of last %zu byte portion of "
+                "%zu byte message to RingSocket for fd %d on port %" PRIu16,
+                wsize, client->old_wsize + wsize, client->fd, client->port,
+                wbuf_size - wsize);
             client->old_wsize = 0;
             client->state = RST_READ_WS;
             return RS_OK;
         }
+        //RS_LOG(LOG_DEBUG, "Written %zu bytes of %zu byte portion of %zu byte "
+        //    "message to RingSocket for fd %d on port %" PRIu16
+        //    ", with %zu bytes remaining",
+        //    wsize, wbuf_size, client->old_wsize + wbuf_size, client->fd,
+        //    client->port, wbuf_size - wsize);
         client->old_wsize += wsize;
         return RS_AGAIN;
     }
@@ -382,18 +393,16 @@ static rs_ret write_websocket(
     }
     RS_LOG_ERRNO(LOG_ERR, "Unsuccessful write(%d, wbuf, %zu) on port %" PRIu16,
         client->fd, wbuf_size, client->port);
-    return RS_FATAL; // Todo: handle this more gracefully
+    return RS_FATAL;
 }
 
 static rs_ret mask_and_write_websocket(
     struct rst_client * client,
     uint8_t * wsbuf,
-    unsigned header_size,
-    uint64_t payload_size
+    uint64_t header_size,
+    uint64_t payload_size,
+    uint64_t frame_size
 ) {
-    RS_LOG(LOG_DEBUG, "Masking %zu+4+%zu=%zu bytes received frame for fd %d on "
-        "port %" PRIu16, header_size, payload_size,
-        header_size + 4 + payload_size, client->fd, client->port);
     client->state = RST_WRITE_WS;
     uint8_t * mask = NULL;
     switch (header_size) {
@@ -415,10 +424,30 @@ static rs_ret mask_and_write_websocket(
     *((uint16_t *) mask) = UINT16_MAX * (rand() / (RAND_MAX + 1.));
     *((uint16_t *) (mask + 2)) = UINT16_MAX * (rand() / (RAND_MAX + 1.));
     uint8_t * payload = mask + 4;
+    RS_LOG(LOG_DEBUG, "Masking %zu+4+(16+%zu)=%zu bytes with ID %" PRIu64
+        " received frame for fd %d on port %" PRIu16,
+        header_size, payload_size - 16, frame_size + 4, RS_R_NTOH64(payload),
+        client->fd, client->port);
     for (size_t i = 0; i < payload_size; i++) {
         payload[i] ^= mask[i % 4];
     }
-    return write_websocket(client, wsbuf - 4, header_size + 4 + payload_size);
+    return write_websocket(client, wsbuf - 4, frame_size + 4);
+}
+
+static rs_ret save_to_storage(
+    struct rst_client * client,
+    uint8_t const * buf
+) {
+    size_t size = client->next_read - buf;
+    //RS_LOG(LOG_DEBUG, "Storing %zu bytes to storage for fd %d on port %"
+    //  PRIu16, size, client->fd, client->port);
+    client->storage = malloc(size);
+    if (!client->storage) {
+        RS_LOG(LOG_ERR, "Unsuccessful malloc(%zu)", client->storage);
+        return RS_FATAL;
+    }
+    memcpy(client->storage, buf, size);
+    return RS_AGAIN;
 }
 
 static rs_ret read_websocket(
@@ -426,93 +455,80 @@ static rs_ret read_websocket(
     uint8_t * wsbuf,
     size_t wsbuf_size
 ) {
-    uint8_t * const wsbuf_over = wsbuf + wsbuf_size;
-    bool parse_is_complete = true;
-    if (client->storage) {
-        parse_is_complete = false;
-        size_t size = client->next_read - wsbuf;
-        RS_LOG(LOG_DEBUG, "Retrieving %zu byte read from storage for fd %d on "
-            "port %" PRIu16, size, client->fd, client->port);
-        memcpy(wsbuf, client->storage, size);
-        RS_FREE(client->storage);
-    } else {
-        client->next_read = wsbuf;
-    }
     for (;;) {
         ssize_t rsize = read(client->fd, client->next_read,
-            wsbuf_over - client->next_read);
+            wsbuf + wsbuf_size - client->next_read);
         switch (rsize) {
         case -1:
-            if (errno != EAGAIN) {
-                RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, ...) on port %"
-                    PRIu16, client->fd, client->port);
-                return RS_FATAL;
+            if (errno == EAGAIN) {
+                return client->next_read == wsbuf ? RS_AGAIN : RS_OK;
             }
-            if (parse_is_complete) {
-                return RS_OK;
-            }
-            store_buf:
-            {
-                size_t size = client->next_read - wsbuf;
-                RS_LOG(LOG_DEBUG, "Storing %zu byte read to storage for fd %d "
-                    "on port %" PRIu16, size, client->fd, client->port);
-                client->storage = malloc(size);
-                if (!client->storage) {
-                    RS_LOG(LOG_ERR, "Unsuccessful malloc(%zu)",
-                        client->storage);
-                    return RS_FATAL;
-                }
-                memcpy(client->storage, wsbuf, size);
-            }
-            return RS_AGAIN;
+            RS_LOG_ERRNO(LOG_ERR, "Unsuccessful read(%d, ...) on port %" PRIu16,
+                client->fd, client->port);
+            return RS_FATAL;
         case 0:
             RS_LOG(LOG_ERR, "read(%d, ...) 0 bytes on port %" PRIu16,
                 client->fd, client->port);
             return RS_FATAL;
         default:
-            RS_LOG(LOG_DEBUG, "Read %zu bytes from RingSocket for fd %d on "
-                "port %" PRIu16, (size_t) rsize, client->fd, client->port);
             client->next_read += rsize;
-            for (;;) {
-                unsigned header_size = 0;
-                uint64_t payload_size = 0;
-                switch (parse_websocket_frame(client, wsbuf, &header_size,
-                    &payload_size)) {
-                case RS_OK:
-                    switch (mask_and_write_websocket(client, wsbuf,
-                        header_size, payload_size)) {
-                    case RS_OK:
-                        break;
-                    case RS_AGAIN:
-                        wsbuf -= 4;
-                        goto store_buf;
-                    default:
-                        return RS_FATAL;
-                    }
-                    uint8_t * next_frame = wsbuf + header_size + payload_size;
-                    if (next_frame == client->next_read) {
-                        client->next_read = wsbuf;
-                        parse_is_complete = true;
-                        break;
-                    }
-                    size_t remaining_size = client->next_read - next_frame;
-                    if (remaining_size > header_size + payload_size) {
-                        memmove(wsbuf, next_frame, remaining_size);
-                    } else {
-                        memcpy(wsbuf, next_frame, remaining_size);
-                    }
-                    client->next_read = wsbuf + remaining_size;
-                    continue;
-                case RS_AGAIN:
-                    parse_is_complete = false;
-                    break;
-                case RS_CLOSE_PEER:
-                    return RS_CLOSE_PEER;
-                default:
-                    return RS_FATAL;
-                }
-                break;
+            if (client->next_read > wsbuf + (wsbuf_size * 3 / 4)) {
+                RS_LOG(LOG_ERR, "The configured rwbuf size of %zu is too "
+                    "small for the amount of traffic it sees. If possible, "
+                    "try doubling its size.",
+                    RST_WS_MASK_KEY_SIZE + wsbuf_size);
+                return RS_FATAL;
             }
+            continue;
+        }
+    }
+}
+
+static rs_ret echo_websocket(
+    struct rst_client * client,
+    uint8_t * wsbuf,
+    size_t wsbuf_size
+) {
+    if (client->storage) {
+        size_t size = client->next_read - wsbuf;
+        //RS_LOG(LOG_DEBUG, "Retrieving %zu byte read from storage for fd %d "
+        //  "on port %" PRIu16, size, client->fd, client->port);
+        memcpy(wsbuf, client->storage, size);
+        RS_FREE(client->storage);
+    }
+    RS_GUARD(read_websocket(client, wsbuf, wsbuf_size));
+    for (uint64_t header_size = 0, payload_size = 0, frame_size = 0;;) {
+        switch (parse_websocket_frame(client, wsbuf, &header_size,
+            &payload_size, &frame_size)) {
+        case RS_OK:
+            switch (mask_and_write_websocket(client, wsbuf, header_size,
+                payload_size, frame_size)) {
+            case RS_OK:
+                break;
+            case RS_AGAIN:
+                return save_to_storage(client, wsbuf - RST_WS_MASK_KEY_SIZE);
+            default:
+                return RS_FATAL;
+            }
+            uint8_t * next_frame = wsbuf + frame_size;
+            if (next_frame == client->next_read) {
+                client->next_read = wsbuf;
+                return RS_OK;
+            }
+            size_t remaining_size = client->next_read - next_frame;
+            if (remaining_size > frame_size) {
+                memmove(wsbuf, next_frame, remaining_size);
+            } else {
+                memcpy(wsbuf, next_frame, remaining_size);
+            }
+            client->next_read = wsbuf + remaining_size;
+            continue;
+        case RS_AGAIN:
+            return save_to_storage(client, wsbuf);
+        case RS_CLOSE_PEER:
+            return RS_CLOSE_PEER;
+        default:
+            return RS_FATAL;
         }
     }
 }
@@ -590,6 +606,8 @@ static rs_ret _main(
                     PRIu16, client->fd, client->port);
                 goto close_client;
             }
+            uint8_t * wsbuf = (uint8_t *) rwbuf + RST_WS_MASK_KEY_SIZE;
+            size_t wsbuf_size = rwbuf_size - RST_WS_MASK_KEY_SIZE;
             switch (client->state) {
             case RST_READ_HTTP_CRLFCRLF:
             case RST_READ_HTTP_LFCRLF:
@@ -600,6 +618,7 @@ static rs_ret _main(
                 }
                 switch (read_http(client, rwbuf, rwbuf_size)) {
                 case RS_OK:
+                    client->next_read = wsbuf;
                     break;
                 case RS_AGAIN:
                     continue;
@@ -619,9 +638,9 @@ static rs_ret _main(
                 {
                     uint64_t frame_size = rs_get_wsframe_cs_size(
                         (union rs_wsframe *) client->storage);
-                    RS_LOG(LOG_DEBUG, "Resuming %zu byte frame write from "
-                        "storage for fd %d on port %" PRIu16, frame_size,
-                        client->fd, client->port);
+                    //RS_LOG(LOG_DEBUG, "Resuming %zu byte frame write from "
+                    //    "storage for fd %d on port %" PRIu16, frame_size,
+                    //    client->fd, client->port);
                     switch (write_websocket(client, client->storage +
                         client->old_wsize, frame_size - client->old_wsize)) {
                     case RS_OK:
@@ -632,19 +651,19 @@ static rs_ret _main(
                         return RS_FATAL;
                     }
                     uint8_t * next_frame = (uint8_t *) rwbuf + frame_size;
-                    if (client->next_read > next_frame) {
-                        size_t tail_size = client->next_read - next_frame;
-                        RS_LOG(LOG_DEBUG, "Retrieving %zu byte tail from "
-                            "storage for fd %d on port %" PRIu16, tail_size,
-                            client->fd, client->port);
-                        memcpy(rwbuf + 4, client->storage + frame_size,
-                            tail_size);
+                    size_t tail_size = client->next_read - next_frame;
+                    client->next_read = wsbuf;
+                    if (tail_size) {
+                        //RS_LOG(LOG_DEBUG, "Retrieving %zu byte tail from "
+                        //    "storage for fd %d on port %" PRIu16, tail_size,
+                        //    client->fd, client->port);
+                        memcpy(wsbuf, client->storage + frame_size, tail_size);
+                        client->next_read += tail_size;
                     }
                     RS_FREE(client->storage);
                 }
             }
-            switch (read_websocket(client, (uint8_t *) rwbuf +
-                RST_PREBUF_SIZE, rwbuf_size - RST_PREBUF_SIZE)) {
+            switch (echo_websocket(client, wsbuf, wsbuf_size)) {
             case RS_OK:
             case RS_AGAIN:
                 continue;
