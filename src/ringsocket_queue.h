@@ -72,8 +72,8 @@
 //
 // The minimum safe queue length depends on CPU architecture and the nature of
 // CPU instructions performed in between each atomic load/store, and are best
-// tested empirically (see rs_test_ring.c in the "tests" directory).
-// RingSocket's default settings err on the side of caution in that regard.
+// tested empirically (see rst_ring.c in the "tests" directory). RingSocket's
+// default settings err on the side of caution in that regard.
 // 
 // Furthermore, to ensure that no ring buffer update remains unnoticed to a
 // dormant thread, calls to epoll_wait() and futex_wait() are doubled: first

@@ -199,18 +199,19 @@ rs_ret receive_from_app(
             case RS_OUTBOUND_EVERY:
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
-                        p_i, frame, cmsg->size - head_size));
+                    if (worker->peers[p_i].app_i == app_i) {
+                        RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                            p_i, frame, cmsg->size - head_size));
+                    }
                 }
                 break;
             case RS_OUTBOUND_EVERY_EXCEPT_SINGLE:
                 head_size += 4;
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    if (p_i != *peer_i) {
-                        RS_GUARD(send_newest_msg(worker,
-                            &remaining_recipient_c, p_i, frame,
-                            cmsg->size - head_size));
+                    if (worker->peers[p_i].app_i == app_i && p_i != *peer_i) {
+                        RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                            p_i, frame, cmsg->size - head_size));
                     }
                 }
                 break;
@@ -219,12 +220,14 @@ rs_ret receive_from_app(
                 head_size += 4 + 4 * peer_c;
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    for (size_t i = 0; peer_i[i] != p_i; i++) {
-                        if (i == peer_c) {
-                            RS_GUARD(send_newest_msg(worker,
-                                &remaining_recipient_c, p_i, frame,
-                                cmsg->size - head_size));
-                            break;
+                    if (worker->peers[p_i].app_i == app_i) {
+                        for (size_t i = 0; peer_i[i] != p_i; i++) {
+                            if (i == peer_c) {
+                                RS_GUARD(send_newest_msg(worker,
+                                    &remaining_recipient_c, p_i, frame,
+                                    cmsg->size - head_size));
+                                break;
+                            }
                         }
                     }
                 }
