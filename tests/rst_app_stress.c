@@ -8,8 +8,8 @@
 
 #define RST_MAX_CLIENT_C 1000
 #define RST_MAX_SIMUL_MSG_PER_CLIENT_C 3
-#define RST_MAX_MSG_CONTENT_SIZE 0x1000000 // 16 MB
-#define RST_MAX_SIMUL_TOTAL_MSG_BYTE_C 0x10000000 // 256 MB
+#define RST_MAX_MSG_CONTENT_SIZE 0x800000 // 8 MB
+#define RST_MAX_SIMUL_TOTAL_MSG_BYTE_C 0x4000000 // 64 MB
 
 typedef enum {
     RST_FATAL = -1,
@@ -33,6 +33,7 @@ struct rst_stress {
     int client_c;
     int avail_client_c;
     unsigned max_msg_content_size;
+    bool is_read_only_phase;
     char recip_ports_str[RST_MAX_CLIENT_C * RS_CONST_STRLEN("12345, ")];
 };
 
@@ -87,7 +88,7 @@ static rst_ret send_anything_anywhere(
         s->clients + s->client_c - s->avail_client_c;
     shuffle_clients(avail_clients, s->avail_client_c);
 
-    int recipient_c = randrange(randrange(s->avail_client_c) + 1) + 1;
+    int recipient_c = randrange(s->avail_client_c) + 1;
 
     uint64_t msg_id = s->msg_id_c++;
     rs_w_uint64_hton(rs, msg_id);
@@ -124,10 +125,6 @@ static rst_ret send_anything_anywhere(
         content_size = randrange(
             RS_MIN(content_size / recipient_c, s->max_msg_content_size) + 1
         );
-        content_size = randrange(content_size + 1);
-        content_size = randrange(content_size + 1);
-        content_size = randrange(content_size + 1);
-        content_size = randrange(content_size + 1);
     }
     rs_w_uint64_hton(rs, content_size);
     // Write a cheap predictable sequence of data that should nonetheless
@@ -138,6 +135,14 @@ static rst_ret send_anything_anywhere(
         rs_w_uint8(rs, 255 - i % 256);
     }
     s->total_msg_byte_c += recipient_c * (16 + content_size);
+    if (10 * s->total_msg_byte_c >= 9 * RST_MAX_SIMUL_TOTAL_MSG_BYTE_C) {
+        RS_LOG(LOG_INFO, "Total size of all messages for which their echo "
+            "responses are yet to be verified amounts to %zu bytes, which "
+            "is 90%% or more of the maximum of %zu bytes. Enabling a "
+            "read-only phase until all responses have been verified.",
+            s->total_msg_byte_c, RST_MAX_SIMUL_TOTAL_MSG_BYTE_C);
+        s->is_read_only_phase = true;
+    }
     
     if (recipient_c > (s->client_c + 1) / 2) {
         if (recipient_c == s->client_c) {
@@ -194,12 +199,10 @@ static rst_ret send_anything_anywhere(
 }
 
 rst_ret init_cb(
-    rs_t * rs,
-    size_t app_i
+    rs_t * rs
 ) {
     struct rs_conf const * conf = rs_get_conf(rs);
     struct rst_stress * s = rs_get_app_data(rs);
-    s->msg_id_c = ((uint64_t) app_i) << 24;
     s->max_msg_content_size = RS_MIN(conf->max_ws_msg_size - sizeof(uint64_t),
         RST_MAX_MSG_CONTENT_SIZE);
     RS_LOG(LOG_DEBUG, "s->max_msg_content_size: %zu", s->max_msg_content_size);
@@ -235,7 +238,8 @@ rst_ret open_cb(
     s->avail_client_c++;
     RS_LOG(LOG_DEBUG, "Connection established with new client on remote port "
         "%d: client_c is now %" PRIu32, client->port, s->client_c);
-    return send_anything_anywhere(rs, s, client->client_id);
+    return s->is_read_only_phase ? RS_OK :
+        send_anything_anywhere(rs, s, client->client_id);
 }
 
 rst_ret read_cb(
@@ -251,36 +255,6 @@ rst_ret read_cb(
         RS_LOG(LOG_CRIT, "get_client() failed unexpectedly. Shutting down...");
         return RST_FATAL;
     }
-    // rs_to_every*() calls may cause worker threads to include new recipients
-    // for which open_cb() has not been called yet. In that case, the
-    // corresponding echo responses from those new clients obviously do not have
-    // a corresponding client->msg_ids entry, so only try to find such an entry
-    // if client->earliest_msg_id_seen < msg_id.
-    if (client->earliest_msg_id_seen < msg_id) {
-        for (int i = 0; i < client->msg_c; i++) {
-            if (client->msg_ids[i] == msg_id) {
-                while (++i < client->msg_c) {
-                    client->msg_ids[i - 1] = client->msg_ids[i];
-                }
-                if (client->msg_c-- == RST_MAX_SIMUL_MSG_PER_CLIENT_C) {
-                    struct rst_client * last_unavail_client =
-                        s->clients + s->client_c - ++s->avail_client_c;
-                    struct rst_client client_backup = *client;
-                    *client = *last_unavail_client;
-                    *last_unavail_client = client_backup;
-                    client = last_unavail_client;
-                }
-                client->msg_ids[client->msg_c] = 0;
-                goto size_validation;
-            }
-        }
-        RS_LOG(LOG_ERR, "Received a message from remote port %d with an ID of %"
-            PRIu64 " not included in its array of size %d of pending "
-            "verifications (client->earliest_msg_id_seen: %" PRIu64 ")",
-            client->port, msg_id, client->msg_c, client->earliest_msg_id_seen);
-        return RST_FATAL;
-    }
-    size_validation:
     if (declared_size != content_size) {
         RS_LOG(LOG_ERR, "Received a message from remote port %d with a "
             "declared content size of %zu despite its actual content size of "
@@ -295,11 +269,50 @@ rst_ret read_cb(
             return RST_FATAL;
         }
     }
-    s->total_msg_byte_c -= 16 + content_size;
+    }
+    // rs_to_every*() calls may cause worker threads to include new recipients
+    // for which open_cb() has not been called yet. In that case, the
+    // corresponding echo responses from those new clients obviously do not have
+    // a corresponding client->msg_ids entry, so only try to find such an entry
+    // if client->earliest_msg_id_seen <= msg_id.
+    if (client->earliest_msg_id_seen <= msg_id) {
+        for (int i = 0; i < client->msg_c; i++) {
+            if (client->msg_ids[i] == msg_id) {
+                while (++i < client->msg_c) {
+                    client->msg_ids[i - 1] = client->msg_ids[i];
+                }
+                if (client->msg_c-- == RST_MAX_SIMUL_MSG_PER_CLIENT_C) {
+                    struct rst_client * last_unavail_client =
+                        s->clients + s->client_c - ++s->avail_client_c;
+                    struct rst_client client_backup = *client;
+                    *client = *last_unavail_client;
+                    *last_unavail_client = client_backup;
+                    client = last_unavail_client;
+                }
+                client->msg_ids[client->msg_c] = 0;
+                s->total_msg_byte_c -= 16 + content_size;
+                goto validated;
+            }
+        }
+        RS_LOG(LOG_ERR, "Received a message from remote port %d with an ID of %"
+            PRIu64 " not included in its array of size %d of pending "
+            "verifications (client->earliest_msg_id_seen: %" PRIu64 ")",
+            client->port, msg_id, client->msg_c, client->earliest_msg_id_seen);
+        return RST_FATAL;
+    }
+    validated:
     RS_LOG(LOG_DEBUG, "Validated 16+%zu byte message with ID %" PRIu64
         " from remote port %d. Total message byte count is now %" PRIu64,
         content_size, msg_id, client->port, s->total_msg_byte_c);
-
+    if (s->is_read_only_phase) {
+        if (s->total_msg_byte_c) {
+            return RS_OK;
+        }
+        RS_LOG(LOG_INFO, "Received and verified echo responses to every "
+            "message sent. Re-enabling message writing.");
+        s->is_read_only_phase = false;
+        return send_anything_anywhere(rs, s, client->client_id);
+    }
     return client->msg_c > RST_MAX_SIMUL_MSG_PER_CLIENT_C / 2 ?
         RS_OK : send_anything_anywhere(rs, s, client->client_id);
 }
