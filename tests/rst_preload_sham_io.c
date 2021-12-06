@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Copyright © 2019 William Budd
+// Copyright © 2021 MetaWord Inc
+// Copyright © 2019-2021 William Budd
 
 // This file is intended to be compiled as a shared object that should be
 // preloaded by RingSocket by executing it with a command such as:

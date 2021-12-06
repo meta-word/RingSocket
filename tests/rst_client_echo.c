@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Copyright © 2020 William Budd
+// Copyright © 2021 MetaWord Inc
+// Copyright © 2019-2021 William Budd
 
 // This program is a barebones WebSocket echo client intended for efficiently
 // stress testing RingSocket in parallel. It is NOT a full-fledged client,

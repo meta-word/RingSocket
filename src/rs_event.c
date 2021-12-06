@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Copyright © 2019 William Budd
+// Copyright © 2021 MetaWord Inc
+// Copyright © 2019-2021 William Budd
 
 #include "rs_event.h"
 #include "rs_from_app.h" // receive_from_app(), remove_pending_owrefs()

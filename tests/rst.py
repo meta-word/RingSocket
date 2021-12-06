@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+# SPDX-License-Identifier: MIT
+# Copyright © 2021 MetaWord Inc
+# Copyright © 2019-2021 William Budd
+
 RANDOM_PORT_MIN = 1024
 RANDOM_PORT_MAX = 65535
 

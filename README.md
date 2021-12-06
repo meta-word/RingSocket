@@ -742,17 +742,3 @@ following keys:
 
 Pull requests and other contributions are always welcome! License:
 [MIT](https://github.com/wbudd/jgrandson/blob/master/LICENSE).
-
-## Email me
-
-Feel free to send me email at the address below, *especially* if you might be
-interested in offering me employment or contractual work. Based in Osaka, Japan;
-but also happy to work remotely.
-
-           _               _               _     _                   
-          | |             | |             | |   | |                  
-     _ _ _| |__      _ _ _| |__  _   _  __| | __| |  ____ ___  ____  
-    | | | |  _ \    | | | |  _ \| | | |/ _  |/ _  | / ___) _ \|    \ 
-    | | | | |_) ) @ | | | | |_) ) |_| ( (_| ( (_| |( (__| |_| | | | |
-     \___/|____/     \___/|____/|____/ \____|\____(_)____)___/|_|_|_|
-（2010年に日本語能力試験N1に合格／2017年に日本永住権を取得）

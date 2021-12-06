@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Copyright © 2019 William Budd
+// Copyright © 2021 MetaWord Inc
+// Copyright © 2019-2021 William Budd
 
 #define _POSIX_C_SOURCE 201112L // CLOCK_MONOTONIC_COARSE
 
