@@ -144,8 +144,10 @@ rs_ret bind_to_ports(
             RS_LOG(LOG_DEBUG, "Obtaining listen_fds for worker#%d...", i + 1);
             RS_CALLOC(port->listen_fds[i], port->listen_fd_c);
             int * fd = port->listen_fds[i];
-            // See bind_socket() for the significance of a worker_c of 0
-            size_t worker_c = i ? 0 : conf->worker_c;
+            // This worker_c variable needs to be non-zero when there will be
+            // multiple workers, with the current one being the first of those.
+            // (For use with BPF creation in bind_socket() above.)
+            size_t worker_c = conf->worker_c > 1 && !i ? conf->worker_c : 0;
             // It would arguably be cleaner to use INADDR_ANY and
             // IN6ADDR_ANY_INIT instead of just initializing the in(6)_addr
             // structs to zero, but they're de facto equivalent.
