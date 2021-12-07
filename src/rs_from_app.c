@@ -57,7 +57,7 @@ static rs_ret send_newest_msg(
     if (peer->app_i != app_i ||
         peer->layer != RS_LAYER_WEBSOCKET ||
         peer->mortality != RS_MORTALITY_LIVE ||
-        peer->owref_c == RS_AWAITING_APP_OPEN_ACK) {
+        peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK) {
         return RS_OK;
     }
     if (peer->continuation != RS_CONT_NONE) {

@@ -12,7 +12,7 @@ rs_ret init_inbound_producers(
 
 rs_ret send_open_to_app(
     struct rs_worker * worker,
-    union rs_peer const * peer,
+    union rs_peer * peer,
     uint32_t peer_i
 );
 

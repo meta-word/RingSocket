@@ -178,6 +178,7 @@ union rs_peer {
         uint16_t:16; // Pad past .shutdown_deadline of the shared struct above.
         // owref: "Outbound Write REFerence" (see struct rs_owref below)
         uint16_t owref_c; // Pending outbound write count (see rs_from_app.c)
+                          // An owref_c of UINT16_MAX is special. See below.
         uint32_t owref_i; // This peer's lowest index among worker->owrefs
 
         // 4th (max-)64-bit block
@@ -236,6 +237,9 @@ struct rs_owref {
     uint16_t head_size;
     uint16_t app_i;
 };
+
+// A peer->ws.owref_c with a value of UINT16_MAX has a special meaning:
+#define RS_AWAITING_APP_OPEN_ACK UINT16_MAX
 
 // rs_worker.c prototypes
 
