@@ -152,7 +152,7 @@ union rs_peer {
         uint64_t:64; uint64_t:64; // Pad past the anonymous shared struct above.
         
         // 3rd 64-bit block
-        uint16_t:16; // Pad past .shutdown_deadline of the shared struct above;
+        uint16_t:16; // Pad past .shutdown_deadline of the shared struct above.
         struct {
             uint8_t hostname_was_parsed: 1;
             uint8_t origin_was_parsed: 1;
@@ -161,7 +161,7 @@ union rs_peer {
             uint8_t wsversion_was_parsed: 1;
             uint8_t error_i: 3;
         };
-        uint8_t jump_distance; 
+        uint8_t jump_distance;
         uint16_t partial_strlen;
         uint16_t origin_i;
 
@@ -175,7 +175,7 @@ union rs_peer {
         uint64_t:64; uint64_t:64; // Pad past the anonymous shared struct above.
 
         // 3rd  64-bit block
-        uint16_t:16; // Pad past .shutdown_deadline of the shared struct above;
+        uint16_t:16; // Pad past .shutdown_deadline of the shared struct above.
         // owref: "Outbound Write REFerence" (see struct rs_owref below)
         uint16_t owref_c; // Pending outbound write count (see rs_from_app.c)
         uint32_t owref_i; // This peer's lowest index among worker->owrefs

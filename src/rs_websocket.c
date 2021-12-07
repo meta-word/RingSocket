@@ -608,7 +608,8 @@ rs_ret handle_websocket_io(
     case RS_CONT_PARSING:
             switch (read_websocket(worker, peer, peer_i)) {
             case RS_OK:
-                if (!peer->ws.owref_c) {
+                if (!peer->ws.owref_c ||
+                    peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK) {
                     peer->continuation = RS_CONT_NONE;
                     return RS_OK;
                 }

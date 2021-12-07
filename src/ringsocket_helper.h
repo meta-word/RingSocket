@@ -394,6 +394,24 @@ static inline rs_wait_for_inbound_msg(
     }
 }
 
+static inline rs_ret rs_ack_peer_open(
+    rs_t * rs
+) {
+    struct rs_ring_producer * prod =
+        rs->outbound_producers + rs->inbound_worker_i;
+    RS_GUARD(rs_produce_ring_msg(
+        &rs->ring_pairs[rs->inbound_worker_i]->outbound_ring, prod,
+        rs->conf->realloc_multiplier, 5));
+    *prod->w++ = RS_OUTBOUND_OPEN_ACK;
+    *((uint32_t *) prod->w) = rs->inbound_peer_i;
+    prod->w += 4;
+
+    RS_GUARD(rs_enqueue_ring_update(rs->ring_queue, rs->ring_pairs,
+        rs->worker_sleep_states, rs->worker_eventfds, prod->w,
+        rs->inbound_worker_i, true));
+    return RS_OK;
+}
+
 static inline rs_ret rs_close_peer(
     rs_t * rs,
     uint16_t ws_close_code

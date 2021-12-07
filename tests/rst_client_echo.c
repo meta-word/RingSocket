@@ -425,10 +425,13 @@ static rs_ret mask_and_write_websocket(
     *((uint16_t *) mask) = UINT16_MAX * (rand() / (RAND_MAX + 1.));
     *((uint16_t *) (mask + 2)) = UINT16_MAX * (rand() / (RAND_MAX + 1.));
     uint8_t * payload = mask + 4;
+    static size_t total_payload_size = 0;
+    total_payload_size += payload_size;
     RS_LOG(LOG_DEBUG, "Masking %zu+4+(16+%zu)=%zu bytes with ID %" PRIu64
-        " received frame for fd %d on port %" PRIu16,
+        " received frame for fd %d on port %" PRIu16 " (total size of all seen "
+        "payloads: %zu)",
         header_size, payload_size - 16, frame_size + 4, RS_R_NTOH64(payload),
-        client->fd, client->port);
+        client->fd, client->port, total_payload_size);
     for (size_t i = 0; i < payload_size; i++) {
         payload[i] ^= mask[i % 4];
     }

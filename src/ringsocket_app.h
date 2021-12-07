@@ -75,11 +75,12 @@ struct rs_inbound_msg {
 // with the following enum, packed into a single uint8_t:
 
 enum rs_outbound_kind { // The outbound message format depends on the enum value
-    RS_OUTBOUND_SINGLE = 0, // uint8_t kind, uint32_t peer_i
-    RS_OUTBOUND_ARRAY = 1, // uint8_t kind, uint32_t peer_c, uint32_t peer_i[]
-    RS_OUTBOUND_EVERY = 2, // uint8_t kind
-    RS_OUTBOUND_EVERY_EXCEPT_SINGLE = 3, // Same format as RS_OUTBOUND_SINGLE
-    RS_OUTBOUND_EVERY_EXCEPT_ARRAY = 4 // Same format as RS_OUTBOUND_ARRAY
+    RS_OUTBOUND_OPEN_ACK = 0, // uint8_t kind, uint32_t peer_i
+    RS_OUTBOUND_SINGLE = 1, // uint8_t kind, uint32_t peer_i
+    RS_OUTBOUND_ARRAY = 2, // uint8_t kind, uint32_t peer_c, uint32_t peer_i[]
+    RS_OUTBOUND_EVERY = 3, // uint8_t kind
+    RS_OUTBOUND_EVERY_EXCEPT_SINGLE = 4, // Same format as RS_OUTBOUND_SINGLE
+    RS_OUTBOUND_EVERY_EXCEPT_ARRAY = 5 // Same format as RS_OUTBOUND_ARRAY
 };
 
 // Following the enum byte and any uint32_t peer_c/peer_i sequence; every
@@ -273,6 +274,7 @@ do { \
 
 #define _RS_OPEN(open_cb) \
 do { \
+    RS_GUARD_APP(rs_ack_peer_open(&rs)); \
     rs.cb = RS_CB_OPEN; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs))); \
 } while (0)

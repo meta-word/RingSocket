@@ -85,9 +85,12 @@ rs_ret send_open_to_app(
     union rs_peer const * peer,
     uint32_t peer_i
 ) {
-    return worker->conf->apps[peer->app_i].wants_open_notification ?
-        send_msg_to_app(worker, peer, peer_i, 0, RS_BIN, RS_INBOUND_OPEN) :
-        RS_OK;
+    if (!worker->conf->apps[peer->app_i].wants_open_notification) {
+        return RS_OK;
+    }
+    RS_GUARD(send_msg_to_app(worker, peer, peer_i, 0, RS_BIN, RS_INBOUND_OPEN));
+    peer->ws.owref_c = RS_AWAITING_APP_OPEN_ACK;
+    return RS_OK;
 }
 
 rs_ret send_read_to_app(

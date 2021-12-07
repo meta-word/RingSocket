@@ -36,25 +36,35 @@ rs_ret init_owrefs(
     return RS_OK;
 }
 
+static void set_peer_open(
+    union rs_peer * peer,
+    unsigned app_i
+) {
+    if (peer->app_i == app_i && peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK) {
+        peer->ws.owref_c = 0;
+    }
+}
+
 static rs_ret send_newest_msg(
     struct rs_worker * worker,
     size_t * remaining_recipient_c,
+    unsigned app_i,
     uint32_t peer_i,
     union rs_wsframe * frame,
     uint64_t frame_size
 ) {
     union rs_peer * peer = worker->peers + peer_i;
-    if (peer->layer != RS_LAYER_WEBSOCKET ||
-        peer->mortality != RS_MORTALITY_LIVE) {
-        //RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
-        //    "peer %" PRIu32 ", because it's not live on the WebSocket layer.",
-        //    frame_size, peer_i);
+    if (peer->app_i != app_i ||
+        peer->layer != RS_LAYER_WEBSOCKET ||
+        peer->mortality != RS_MORTALITY_LIVE ||
+        peer->owref_c == RS_AWAITING_APP_OPEN_ACK) {
         return RS_OK;
     }
     if (peer->continuation != RS_CONT_NONE) {
-        if (peer->ws.owref_c == UINT16_MAX) {
+        if (peer->ws.owref_c == UINT16_MAX - 1) {
+            // UINT16_MAX - 1 because RS_AWAITING_APP_OPEN_ACK == UINT16_MAX
             RS_LOG(LOG_WARNING, "More outbound write references are pending "
-                "for peer %s than the maximum supported number of 65535: "
+                "for peer %s than the maximum supported number of 65534: "
                 "shutting the peer down", get_addr_str(peer));
             goto close_peer;
         }
@@ -64,7 +74,7 @@ static rs_ret send_newest_msg(
         (*remaining_recipient_c)++;
         //RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
         //    "peer %" PRIu32 " yet, because its continuation state is "
-        //    "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu8 ").",
+        //    "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu16 ").",
         //    frame_size, peer_i, peer->continuation == RS_CONT_PARSING ?
         //    "PARS" : "SEND", peer->ws.owref_c);
         return RS_OK;
@@ -137,7 +147,8 @@ static rs_ret reallocate_owrefs(
         // Update every peer for which ws.owref_i corresponds to a moved index.
         for (union rs_peer * p = worker->peers;
             p <= worker->peers + worker->highest_peer_i; p++) {
-            if (p->ws.owref_c && p->ws.owref_i < worker->newest_owref_i) {
+            if (p->ws.owref_c && p->ws.owref_c != RS_AWAITING_APP_OPEN_ACK &&
+                p->ws.owref_i < worker->newest_owref_i) {
                 p->ws.owref_i += worker->owrefs_elem_c;
             }
         }
@@ -153,7 +164,7 @@ static rs_ret reallocate_owrefs(
         // Update every peer for which ws.owref_i corresponds to a moved index.
         for (union rs_peer * p = worker->peers;
             p <= worker->peers + worker->highest_peer_i; p++) {
-            if (p->ws.owref_c) {
+            if (p->ws.owref_c && p->ws.owref_c != RS_AWAITING_APP_OPEN_ACK) {
                 if (p->ws.owref_i < added_ref_c) {
                     p->ws.owref_i += worker->owrefs_elem_c;
                 } else if (p->ws.owref_i < worker->newest_owref_i) {
@@ -182,11 +193,14 @@ rs_ret receive_from_app(
             uint32_t * peer_i = (uint32_t *) (cmsg->msg + 1);
             union rs_wsframe * frame = NULL;
             switch (*cmsg->msg) {
+            case RS_OUTBOUND_OPEN_ACK:
+                set_peer_open(worker->peers + *peer_i, app_i);
+                break;
             case RS_OUTBOUND_SINGLE:
                 head_size += 4;
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
-                    *peer_i, frame, cmsg->size - head_size));
+                    app_i, *peer_i, frame, cmsg->size - head_size));
                 break;
             case RS_OUTBOUND_ARRAY:
                 peer_c = *peer_i++;
@@ -194,26 +208,22 @@ rs_ret receive_from_app(
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t i = 0; i < peer_c; i++) {
                     RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
-                        peer_i[i], frame, cmsg->size - head_size));
+                        app_i, peer_i[i], frame, cmsg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY:
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    if (worker->peers[p_i].app_i == app_i) {
-                        RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
-                            p_i, frame, cmsg->size - head_size));
-                    }
+                    RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                        app_i, p_i, frame, cmsg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY_EXCEPT_SINGLE:
                 head_size += 4;
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    if (worker->peers[p_i].app_i == app_i && p_i != *peer_i) {
-                        RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
-                            p_i, frame, cmsg->size - head_size));
-                    }
+                    RS_GUARD(send_newest_msg(worker, &remaining_recipient_c,
+                        app_i, p_i, frame, cmsg->size - head_size));
                 }
                 break;
             case RS_OUTBOUND_EVERY_EXCEPT_ARRAY: default:
@@ -221,14 +231,12 @@ rs_ret receive_from_app(
                 head_size += 4 + 4 * peer_c;
                 frame = (union rs_wsframe *) (cmsg->msg + head_size);
                 for (size_t p_i = 0; p_i <= worker->highest_peer_i; p_i++) {
-                    if (worker->peers[p_i].app_i == app_i) {
-                        for (size_t i = 0; peer_i[i] != p_i; i++) {
-                            if (i == peer_c) {
-                                RS_GUARD(send_newest_msg(worker,
-                                    &remaining_recipient_c, p_i, frame,
-                                    cmsg->size - head_size));
-                                break;
-                            }
+                    for (size_t i = 0; peer_i[i] != p_i; i++) {
+                        if (i == peer_c) {
+                            RS_GUARD(send_newest_msg(worker,
+                                &remaining_recipient_c, app_i, p_i, frame,
+                                cmsg->size - head_size));
+                            break;
                         }
                     }
                 }
@@ -455,7 +463,7 @@ rs_ret send_pending_owrefs(
             return RS_FATAL;
         }
         decrement_pending_owref_count(worker, peer->ws.owref_i);
-        if (!--peer->ws.owref_c) {
+        if (!peer->ws.owref_c || peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK) {
             return RS_OK;
         }
         peer->ws.owref_i = find_next_owref_for_peer(worker, peer_i,
@@ -468,7 +476,7 @@ void remove_pending_owrefs(
     union rs_peer * peer,
     uint32_t peer_i
 ) {
-    if (!peer->ws.owref_c) {
+    if (!peer->ws.owref_c || peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK) {
         return;
     }
     for (size_t owref_i = peer->ws.owref_i;;) {
