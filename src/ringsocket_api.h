@@ -36,6 +36,7 @@
 #include <stdatomic.h> // C11: atomic_[load|store]_explicit()
 #include <stddef.h> // size_t and NULL for heap memory macros below
 #include <stdint.h> // (u)int[8|16|32|64]_t, size_t, etc
+#include <stdio.h> // (f)printf() (for when syslog() isn't being used)
 #include <stdlib.h> // calloc(), realloc(), free() for heap memory macros below
 #include <string.h> // memset() for RS_CACHE_ALIGNED_CALLOC()
 #include <syslog.h> // syslog() for RS_LOG()
@@ -150,10 +151,10 @@ enum rs_data_kind {
 // #############################################################################
 // # RS_LOG() & Co. ############################################################
 
-// These macros are syslog() wrappers that prepend the translation unit's
+// These macros are log printing wrappers that prepend the translation unit's
 // function name and line_number of the location where the macro is invoked.
 
-// 1st arg: syslog priority level (required)
+// 1st arg: syslog-style priority level (required)
 // 2nd arg: format string (optional)
 // 3rd arg, etc: any parameters corresponding to the format string (optional)
 #define RS_LOG(...) \
@@ -179,7 +180,14 @@ RS_MACRIFY_LOG( \
     __VA_ARGS__ \
 )
 
-// RingSocket's only two variables with external linkage:
+// RingSocket makes use of 3 variables with external linkage:
+
+// These values determine what logging facility RS_LOG() statements should use.
+enum rs_log_facility {
+ RS_LOG_TO_STDOUT_AND_STDERR = 0, // The default at program startup.
+ RS_LOG_TO_SYSLOG = 1 // Set when/if RingSocket daemonizes.
+};
+extern int _rs_log_facility;
 
 // Used instead of setlogmask() in order to optimize out the overhead of calling
 // syslog() and evaluating its arguments for each logging statement beyond the
@@ -200,31 +208,51 @@ extern thread_local char _rs_thread_id_str[];
 // is taken care of during RS_APP() macro expansion; whereas RingSocket itself
 // invokes this macro in rs_conf.c.
 #define RS_LOG_VARS \
+int _rs_log_facility = RS_LOG_TO_STDOUT_AND_STDERR; \
 int _rs_log_max = LOG_NOTICE; \
 thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 
 // The log wrapper core:
-#define _RS_SYSLOG(lvl, ...) \
+#define _RS_LOG(lvl, fmt, ...) \
 do { \
     if ((lvl) <= _rs_log_max) { \
-        syslog((lvl), "%s%s():" RS_STRINGIFY(__LINE__) __VA_ARGS__); \
+        if (_rs_log_facility == RS_LOG_TO_SYSLOG) { \
+            syslog((lvl), "%s%s():" RS_STRINGIFY(__LINE__) fmt, __VA_ARGS__); \
+        } else { \
+            switch (lvl) { \
+            case LOG_ALERT: default: fprintf(stderr, "ALERT:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
+            case LOG_CRIT: fprintf(stderr, "CRITICAL:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
+            case LOG_ERR: fprintf(stderr, "ERROR:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
+            case LOG_WARNING: printf("WARNING:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
+            case LOG_NOTICE: printf("NOTICE:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
+            case LOG_INFO: printf("INFO:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
+            case LOG_DEBUG: printf("DEBUG:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); \
+            } \
+        } \
     } \
 } while (0)
 
 #define _RS_LOG_1(lvl) \
-    _RS_SYSLOG((lvl), , _rs_thread_id_str, __func__)
+    _RS_LOG((lvl), , _rs_thread_id_str, __func__)
 #define _RS_LOG_2(lvl, fmt) \
-    _RS_SYSLOG((lvl), ": " fmt, _rs_thread_id_str, __func__)
+    _RS_LOG((lvl), ": " fmt, _rs_thread_id_str, __func__)
 #define _RS_LOG_MORE(lvl, fmt, ...) \
-    _RS_SYSLOG((lvl), ": " fmt, _rs_thread_id_str, __func__, __VA_ARGS__)
+    _RS_LOG((lvl), ": " fmt, _rs_thread_id_str, __func__, __VA_ARGS__)
 
 #define _RS_LOG_ERRNO_1(lvl) \
-    _RS_SYSLOG((lvl), ": %s", _rs_thread_id_str, __func__, strerror(errno))
+    _RS_LOG((lvl), ": %s", _rs_thread_id_str, __func__, strerror(errno))
 #define _RS_LOG_ERRNO_2(lvl, fmt) \
-    _RS_SYSLOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
+    _RS_LOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
         strerror(errno))
 #define _RS_LOG_ERRNO_MORE(lvl, fmt, ...) \
-    _RS_SYSLOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
+    _RS_LOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
         __VA_ARGS__, strerror(errno))
 
 // #############################################################################

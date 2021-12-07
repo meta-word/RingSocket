@@ -635,8 +635,12 @@ rs_ret get_configuration(
     struct rs_conf * conf,
     char const * conf_path
 ) {
+    if (!conf_path) {
+        conf_path = default_conf_path;
+    }
+    RS_LOG(LOG_NOTICE, "Attempting to read configuration from: %s", conf_path);
     jg_t * jg = jg_init();
-    RS_GUARD_JG(jg_parse_file(jg, conf_path ? conf_path : default_conf_path));
+    RS_GUARD_JG(jg_parse_file(jg, conf_path));
     RS_GUARD(parse_configuration(jg, conf));
     jg_free(jg);
     return RS_OK;

@@ -183,7 +183,7 @@ static rs_ret set_credentials_and_capabilities(
 }
 
 // Daemonize the traditional way
-static rs_ret daemonize(
+static rs_ret daemonize_and_close_standard_streams(
     void
 ) {
     switch (fork()) {
@@ -383,40 +383,92 @@ static rs_ret spawn_app_and_worker_threads(
     }
 }
 
+#define RS_USAGE \
+    "Usage: ringsocket [-d] [PATH/TO/CONF/FILE]\n" \
+    "\n" \
+    "-d Daemonize and remove unneeded capabilities. Does the traditional\n" \
+    "   fork() => setsid() => fork() to completely detach from the current\n" \
+    "   TTY. Closes STDIN, STDOUT and STDERR; after which all logging takes\n" \
+    "   place via calls to syslog(). This is the most hardened/secure way\n" \
+    "   of running RingSocket. Especially recommended when not running\n" \
+    "   Ringsocket inside a dedicated virtual machine or container.\n" \
+    "   (This was the default for earlier versions of RingSocket, but made\n" \
+    "   optional for the sake of flexibility. For example, when inside a \n" \
+    "   Docker container, it's usually more convenient to omit this flag.)\n" \
+    "\n" \
+    "PATH/TO/CONF/FILE Specifies a custom configuration file path.\n" \
+    "                  The default path is: /etc/ringsocket.json\n"
+
 static rs_ret start(
     int arg_c,
     char * const * args
 ) {
-    openlog("RingSocket", LOG_PID, LOG_DAEMON);
-    if (arg_c > 2) {
-        RS_LOG(LOG_WARNING, "RingSocket received %d command-line arguments, "
-            "but can handle only one: the path to the RingSocket configuration "
-            "file -- which in this case is assumed to be: \"%s\". "
-            "Ignoring all other arguments!",
-            arg_c, args[1]);
+    bool daemonize = false;
+    char const * conf_path = NULL;
+    switch (arg_c) {
+    case 1:
+        break;
+    case 2:
+        if (strcmp(args[1], "-d")) {
+            conf_path = args[1];
+        } else {
+            daemonize = true;
+        }
+        break;
+    case 3:
+        if (strcmp(args[1], "-d")) {
+            if (strcmp(args[2], "-d")) {
+                RS_LOG(LOG_ERR, "RingSocket received 2 command-line arguments, "
+                "but neither of those is the -d daemonize flag.\n\n" RS_USAGE);
+                return RS_FATAL;
+            }
+            conf_path = args[1];
+        } else {
+            conf_path = args[2];
+        }
+        daemonize = true;
+        break;
+    default:
+        RS_LOG(LOG_ERR, "RingSocket received %d command-line arguments, but\n"
+            "can handle only a maximum of two optional arguments.\n\n"
+            RS_USAGE, arg_c - 1);
+        return RS_FATAL;
     }
-    RS_GUARD(set_credentials_and_capabilities());
-    RS_GUARD(daemonize());
-    // All capabilities have now been removed, except for those still needed by
-    // the next few functions.
+
+    if (daemonize) {
+        RS_LOG(LOG_NOTICE, "Daemonizing. All subsequent log messages will be "
+            "logged to syslog exclusively.");
+        _rs_log_facility = RS_LOG_TO_SYSLOG;
+        openlog("RingSocket", LOG_PID, LOG_DAEMON);
+        RS_GUARD(set_credentials_and_capabilities());
+        RS_GUARD(daemonize_and_close_standard_streams());
+        // All capabilities have now been removed, except for those still needed
+        // by the next few functions.
+    } else {
+        RS_LOG(LOG_NOTICE, "Not daemonizing. Hopefully equivalent security "
+            "measures have been put in place externally instead?\n(To "
+            "daemonize, restart RingSocket with the -d command line flag.)");
+    }
     struct rs_conf conf = {0};
-    RS_GUARD(get_configuration(&conf, arg_c > 1 ? args[1] : NULL));
+    RS_GUARD(get_configuration(&conf, conf_path));
     RS_GUARD(set_limits(&conf));
     RS_GUARD(bind_to_ports(&conf));
     int (*app_cbs[conf.app_c])(void *); // VLA of function pointers to each app
     memset(app_cbs, 0, sizeof(app_cbs));
     RS_GUARD(get_app_callbacks(&conf, app_cbs));
-    // All operations requiring the capabilities that were retained in
-    // set_credentials_and_capabilities() have now been completed; so remove
-    // remove those too now, to ensure that app and worker threads will be
-    // created without any privileges at all (with a UID and GID of "ringsock").
-    RS_GUARD(remove_all_capabilities_except(NULL, 0));
+    if (daemonize) {
+        // All operations requiring the capabilities that were retained in
+        // set_credentials_and_capabilities() have now been completed; so remove
+        // remove those too now, to ensure that app and worker threads will be
+        // created without any privileges at all (with a UID/GID of "ringsock").
+        RS_GUARD(remove_all_capabilities_except(NULL, 0));
+    }
     return spawn_app_and_worker_threads(&conf, app_cbs);
 }
     
 int main(
-    int arg_c, // 1 or 2
-    char * * args // "ringsocket" and optionally the path to the conf file
+    int arg_c,
+    char * * args
 ) {
     // todo: start() currently isn't capable of returning RS_OK, because there
     // is no code yet to catch any signal needed to shutdown gracefully...
