@@ -270,7 +270,6 @@ rst_ret read_cb(
             return RST_FATAL;
         }
     }
-    }
     // rs_to_every*() calls may cause worker threads to include new recipients
     // for which open_cb() has not been called yet. In that case, the
     // corresponding echo responses from those new clients obviously do not have

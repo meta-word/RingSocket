@@ -61,11 +61,11 @@ static inline rs_ret rs_check_app_wsize(
     size_t incr_size
 ) {
     if (!rs->wbuf) {
-        RS_CALLOC(rs->wbuf, rs->wbuf_size);
+        RS_CASTED_CALLOC(rs->wbuf, uint8_t, rs->wbuf_size);
     }
     if (rs->wbuf_i + incr_size >= rs->wbuf_size) {
         rs->wbuf_size = rs->conf->realloc_multiplier * (rs->wbuf_i + incr_size);
-        RS_REALLOC(rs->wbuf, rs->wbuf_size);
+        RS_CASTED_REALLOC(rs->wbuf, uint8_t, rs->wbuf_size);
     }
     return RS_OK;
 }
@@ -127,16 +127,20 @@ static inline void rs_send(
 static inline rs_ret rs_init_outbound_producers(
     rs_t * rs
 ) {
-    RS_CALLOC(rs->outbound_producers, rs->conf->worker_c);
+    RS_CASTED_CALLOC(rs->outbound_producers, rs_ring_producer,
+        rs->conf->worker_c);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         struct rs_ring_producer * prod = rs->outbound_producers + i;
         prod->ring_size = rs->conf->outbound_ring_buf_size;
-        RS_CACHE_ALIGNED_CALLOC(prod->ring, prod->ring_size);
+        RS_CASTED_CACHE_ALIGNED_CALLOC(prod->ring, uint8_t, prod->ring_size);
         prod->w = prod->ring;
-        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i]->outbound_ring.w,
-            (atomic_uintptr_t) prod->ring);
-        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i]->outbound_ring.r,
-            (atomic_uintptr_t) prod->ring);
+#ifdef __cplusplus
+        uintptr_t ring = reinterpret_cast<uintptr_t>(prod->ring);
+#else
+        atomic_uintptr_t ring = (atomic_uintptr_t) prod->ring;
+#endif
+        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i]->outbound_ring.w, ring);
+        RS_ATOMIC_STORE_RELAXED(&rs->ring_pairs[i]->outbound_ring.r, ring);
     }
     // Inbound ring producers are initialized by worker threads in
     // init_inbound_producers() of rs_to_app.c
@@ -152,13 +156,14 @@ static inline rs_ret rs_init_app_cb_args(
     rs->conf = conf;
 
     // Allocate all ring buffer pairs between this app and each worker
-    RS_CACHE_ALIGNED_CALLOC(*app_args->ring_pairs, conf->worker_c);
+    RS_CASTED_CACHE_ALIGNED_CALLOC(*app_args->ring_pairs, rs_ring_pair,
+        conf->worker_c);
 
     // *app_args->ring_pairs cannot be assigned directly to rs->ring_pairs,
     // because rs_enqueue_ring_update() and rs_flush_ring_updates() require one
     // extra layer of indirection to accomodate (and to be consistent with)
     // the format of worker threads' indirect ring pair arrays.
-    RS_CALLOC(rs->ring_pairs, conf->worker_c);
+    RS_CASTED_CALLOC(rs->ring_pairs, rs_ring_pair *, conf->worker_c);
     for (size_t i = 0; i < conf->worker_c; i++) {
         rs->ring_pairs[i] = (*app_args->ring_pairs) + i;
     }
@@ -168,7 +173,8 @@ static inline rs_ret rs_init_app_cb_args(
     // The 1st app allocates all worker sleep states (as per the reasons
     // mentioned in spawn_app_and_worker_threads() in rs_main.c).
     if (!app_args->app_i) {
-        RS_CACHE_ALIGNED_CALLOC(*app_args->worker_sleep_states, conf->worker_c);
+        RS_CASTED_CACHE_ALIGNED_CALLOC(*app_args->worker_sleep_states,
+            rs_sleep_state, conf->worker_c);
     }
     // worker_sleep_states must not be assigned to rs->worker_sleep_states here;
     // because for apps other than the 1st, there is no guarantee yet that the
@@ -183,7 +189,8 @@ static inline rs_ret rs_init_app_cb_args(
     rs->wbuf_size = conf_app->wbuf_size;
     
     rs->ring_queue->size = conf_app->update_queue_size;
-    RS_CALLOC(rs->ring_queue->updates, conf_app->update_queue_size);
+    RS_CASTED_CALLOC(rs->ring_queue->updates, rs_ring_update,
+        conf_app->update_queue_size);
     return RS_OK;
 }
 
@@ -210,7 +217,8 @@ static inline rs_ret rs_get_consumers_from_producers(
     // spawn_app_and_worker_threads(), this app thread should now wait for every
     // worker thread to initialize its paired inbound ring, and obtain the
     // corresponding "r" pointer.
-    RS_CALLOC(sched->inbound_consumers, rs->conf->worker_c);
+    RS_CASTED_CALLOC(sched->inbound_consumers, rs_ring_consumer,
+        rs->conf->worker_c);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         for (;;) {
             // Simply wait for sched->inbound_consumers[i].r to become non-NULL,
@@ -222,7 +230,8 @@ static inline rs_ret rs_get_consumers_from_producers(
                     i, sched->inbound_consumers[i].r);
                 break;
             }
-            thrd_sleep(&(struct timespec){ .tv_nsec = 1000000 }, NULL); // 1 ms
+            struct timespec timespec = { .tv_nsec = 1000000 };
+            thrd_sleep(&timespec, NULL); // 1 ms
         }
     }
     // All inbound consumers are initialized now, which means all worker threads
@@ -238,12 +247,12 @@ static inline rs_ret rs_wait_for_worker(
     struct rs_sleep_state * app_sleep_state,
     uint64_t timeout_microsec
 ) {
+    struct timespec timespec = {
+        .tv_sec = timeout_microsec / 1000000,
+        .tv_nsec = 1000 * (timeout_microsec % 1000000)
+    };
     struct timespec const * timeout = timeout_microsec == RS_TIME_INFINITE ?
-        NULL :
-        &(struct timespec){
-            .tv_sec = timeout_microsec / 1000000,
-            .tv_nsec = 1000 * (timeout_microsec % 1000000)
-        };
+        NULL : &timespec;
     if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAIT_PRIVATE,
         true, timeout, NULL, 0) != -1 || errno == EAGAIN) {
         // May return immediately with errno == EAGAIN when a worker thread
@@ -257,8 +266,8 @@ static inline rs_ret rs_wait_for_worker(
         return RS_AGAIN; // Indicate that this function should be called again
         // to go back to sleep, because there was no worker thread activity.
     }
-    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, &%d, "
-        "FUTEX_WAIT_PRIVATE, 1, timeout, NULL, 0)", app_sleep_state->is_asleep);
+    RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, &app_sleep_state->"
+        "is_asleep, FUTEX_WAIT_PRIVATE, 1, timeout, NULL, 0)");
     return RS_FATAL;
 }
 
@@ -365,7 +374,7 @@ static inline rs_wait_for_inbound_msg(
         }
         RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
         rs->cb = RS_CB_TIMER;
-        rs_ret timer_ret = sched->timer_cb(rs);
+        int timer_ret = sched->timer_cb(rs);
         switch (timer_ret) {
         case -1:
             RS_LOG(LOG_WARNING,

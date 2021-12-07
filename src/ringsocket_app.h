@@ -165,9 +165,15 @@ struct rs_app_schedule {
 // #############################################################################
 // # RS_APP() ##################################################################
 
+#ifdef __cplusplus
+#define RS_PREVENT_MANGLING extern "C"
+#else
+#define RS_PREVENT_MANGLING
+#endif
+
 #define RS_APP(init_macro, open_macro, read_macro, close_macro, timer_macro) \
 \
-rs_ret ringsocket_app( \
+RS_PREVENT_MANGLING rs_ret ringsocket_app( \
     struct rs_app_args * app_args \
 ) { \
     /* Update RS_LOG_VARS below to match the values obtained in rs_conf.c */ \
@@ -175,10 +181,10 @@ rs_ret ringsocket_app( \
     sprintf(_rs_thread_id_str, "%s: ", \
         app_args->conf->apps[app_args->app_i].name); \
     \
-    struct rs_app_cb_args rs = { \
-        .cb = RS_CB_INIT, \
-        .ring_queue = &(struct rs_ring_queue){0} \
-    }; \
+    struct rs_ring_queue _ring_queue = {0}; \
+    struct rs_app_cb_args rs = {0}; \
+    rs.cb = RS_CB_INIT; \
+    rs.ring_queue = &_ring_queue; \
     /* All RS_APP() helper functions are located in ringsocket_helper.h. */ \
     RS_GUARD_APP(rs_init_app_cb_args(app_args, &rs)); \
     \
@@ -219,7 +225,7 @@ rs_ret ringsocket_app( \
             continue; \
         } \
         rs.cb = RS_CB_READ; \
-        rs.read_data_kind = imsg->data_kind; \
+        rs.read_data_kind = (enum rs_data_kind) imsg->data_kind; \
         size_t payload_i = 0; \
         _##read_macro; /* Should expand _RS_READ_... */ \
     } \

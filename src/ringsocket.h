@@ -38,11 +38,12 @@ static inline uint64_t rs_get_client_id(
     rs_t const * rs
 ) {
     rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
-    return *((uint64_t *) (uint32_t []){
+    uint32_t u32tuple[] = {
         // Offset worker index by 1 to prevent ever returning an ID value of 0.
         rs->inbound_worker_i + 1,
         rs->inbound_peer_i
-    });
+    };
+    return *((uint64_t *) u32tuple);
 }
 
 static inline int rs_get_client_addr(
@@ -50,8 +51,8 @@ static inline int rs_get_client_addr(
     struct sockaddr_storage * addr
 ) {
     rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
-    return getpeername(rs->inbound_socket_fd, (struct sockaddr *) addr,
-        &(socklen_t){sizeof(struct sockaddr_storage)});
+    socklen_t size = (socklen_t) sizeof(struct sockaddr_storage);
+    return getpeername(rs->inbound_socket_fd, (struct sockaddr *) addr, &size);
 }
 
 static inline uint64_t rs_get_endpoint_id(
@@ -266,8 +267,8 @@ static inline void rs_to_cur(
     enum rs_data_kind data_kind
 ) {
     rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
-    rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE,
-        (uint32_t []){rs->inbound_peer_i}, 1, data_kind);
+    rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE, &rs->inbound_peer_i,
+        1, data_kind);
     rs->wbuf_i = 0;
 }
 
@@ -346,8 +347,8 @@ static inline void rs_to_every_except_cur(
     rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
-            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE,
-                (uint32_t []){rs->inbound_peer_i}, 1, data_kind);
+            rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, &rs->inbound_peer_i,
+                1, data_kind);
         } else {
             rs_send(rs, i, RS_OUTBOUND_EVERY, NULL, 0, data_kind);
         }

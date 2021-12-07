@@ -154,7 +154,11 @@ static inline void rs_set_wsframe_is_final(
 static inline enum rs_wsframe_opcode rs_get_wsframe_opcode(
     union rs_wsframe const * frame
 ) {
+#ifdef __cplusplus
+    return static_cast<rs_wsframe_opcode>(frame->opcode_x0F & 0x0F);
+#else
     return frame->opcode_x0F & 0x0F;
+#endif
 }
 
 static inline void rs_set_wsframe_opcode(
@@ -259,7 +263,7 @@ static inline union rs_wsframe * rs_get_next_wsframe_cs(
 
 
 static inline uint64_t rs_get_wsframe_cs_payload(
-    union rs_wsframe const * frame,
+    union rs_wsframe * frame,
     uint8_t * * payload
 ) {
     uint64_t payload_size = frame->payload_size_x7F & 0x7F;

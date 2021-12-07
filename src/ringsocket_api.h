@@ -31,9 +31,19 @@
 //    |
 //    \-------------------------------> [ Any RingSocket app translation units ]
 
+#ifdef __cplusplus
+#include <atomic>
+// If C++, the following 3 C11 symbols need to be redefined to their C++
+// templated equivalents, lest compiler complaints about unknown type occur.
+#define atomic_uint_least32_t std::atomic<std::uint_least32_t>
+#define atomic_uintptr_t std::atomic<std::uintptr_t>
+#define memory_order_relaxed std::memory_order_relaxed
+#else
+#include <stdatomic.h> // C11: atomic_[load|store]_explicit()
+#endif
+
 #include <errno.h> // errno for RS_LOG_ERRNO()
 #include <stdalign.h> // C11: aligned_alloc() for RS_CACHE_ALIGNED_CALLOC()
-#include <stdatomic.h> // C11: atomic_[load|store]_explicit()
 #include <stddef.h> // size_t and NULL for heap memory macros below
 #include <stdint.h> // (u)int[8|16|32|64]_t, size_t, etc
 #include <stdio.h> // (f)printf() (for when syslog() isn't being used)
@@ -124,7 +134,15 @@ enum rs_data_kind {
 #define RS_STRINGIFY(str) RS_STRINGIFIED(str)
 
 // Is this machine little-endian or big-endian?
+#ifdef __cplusplus
+static inline bool rs_is_little_endian() {
+    uint32_t const u32 = 1U;
+    return *reinterpret_cast<uint8_t const *>(&u32);
+}
+#define RS_IS_LITTLE_ENDIAN rs_is_little_endian()
+#else
 #define RS_IS_LITTLE_ENDIAN (*((uint8_t *) (uint32_t []){1}))
+#endif
 
 // Swap between network byte order and host byte order: reverse the bytes if
 // the machine is little-endian, else do nothing.
@@ -258,27 +276,37 @@ do { \
 // #############################################################################
 // # Heap memory management macros #############################################
 
-#define RS_CALLOC(pointer, elem_c) do { \
+#ifdef __cplusplus
+#define RS_USELESS_CAST(type) (type *)
+#else
+#define RS_USELESS_CAST(type)
+#endif
+
+#define RS_CALLOC(pointer, elem_c) RS_CASTED_CALLOC(pointer, , elem_c)
+#define RS_CASTED_CALLOC(pointer, type, elem_c) do { \
     if (pointer) { \
         RS_LOG(LOG_CRIT, "Pointer argument of RS_CALLOC(pointer, elem_c) " \
             "must be NULL."); \
         return RS_FATAL; \
     } \
-    (pointer) = calloc((elem_c), sizeof(*(pointer))); \
+    (pointer) = RS_USELESS_CAST(type) calloc((elem_c), sizeof(*(pointer))); \
     if (!(pointer)) { \
         RS_LOG(LOG_ALERT, "Failed to calloc()."); \
         return RS_FATAL; \
     } \
 } while (0)
 
-#define RS_CACHE_ALIGNED_CALLOC(pointer, elem_c) do { \
+#define RS_CACHE_ALIGNED_CALLOC(pointer, elem_c) \
+    RS_CASTED_CACHE_ALIGNED_CALLOC(pointer, , elem_c)
+#define RS_CASTED_CACHE_ALIGNED_CALLOC(pointer, type, elem_c) do { \
     if (pointer) { \
         RS_LOG(LOG_CRIT, "Pointer argument of " \
             "RS_CACHE_ALIGNED_CALLOC(pointer, elem_c) must be NULL."); \
         return RS_FATAL; \
     } \
     size_t alloc_size = (elem_c) * sizeof(*(pointer)); \
-    (pointer) = aligned_alloc(RS_CACHE_LINE_SIZE, alloc_size); \
+    (pointer) = \
+        RS_USELESS_CAST(type) aligned_alloc(RS_CACHE_LINE_SIZE, alloc_size); \
     if (!(pointer)) { \
         RS_LOG(LOG_ALERT, "Failed to aligned_alloc()."); \
         return RS_FATAL; \
@@ -286,14 +314,16 @@ do { \
     memset((pointer), 0, alloc_size); \
 } while (0)
 
-#define RS_REALLOC(pointer, elem_c) do { \
+#define RS_REALLOC(pointer, elem_c) RS_CASTED_REALLOC(pointer, , elem_c)
+#define RS_CASTED_REALLOC(pointer, type, elem_c) do { \
     if (!(pointer)) { \
         RS_LOG(LOG_CRIT, "Pointer argument of RS_REALLOC(pointer, " \
             "elem_c) must not be NULL."); \
         return RS_FATAL; \
     } \
     size_t type_size = sizeof(*(pointer)); \
-    (pointer) = realloc((pointer), (elem_c) * type_size); \
+    (pointer) = \
+        RS_USELESS_CAST(type) realloc((pointer), (elem_c) * type_size); \
     if (!(pointer)) { \
         RS_LOG(LOG_ALERT, "Failed to realloc()."); \
         return RS_FATAL; \

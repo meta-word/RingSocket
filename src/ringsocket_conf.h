@@ -123,6 +123,8 @@ struct rs_conf_endpoint {
 // # The following functions are defined here instead of in rs_conf.c mainly to
 // # allow their reuse outside of RingSocket itself (e.g., by rst_client_echo.c)
 
+#ifndef __cplusplus
+
 static inline rs_ret rs_set_log_level(
     char const * log_level_str
 ) {
@@ -220,3 +222,5 @@ static inline rs_ret rs_parse_canon_ws_url(
     }
     return RS_OK;
 }
+
+#endif

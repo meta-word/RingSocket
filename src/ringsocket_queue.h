@@ -112,9 +112,8 @@ static inline rs_ret rs_wake_up_app(
         RS_ATOMIC_STORE_RELAXED(&app_sleep_state->is_asleep, false);
         if (syscall(SYS_futex, &app_sleep_state->is_asleep, FUTEX_WAKE_PRIVATE,
             1, NULL, NULL, 0) == -1) {
-            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, %d, "
-                "FUTEX_WAKE_PRIVATE, ...) for app_i %" PRIu32,
-                app_sleep_state->is_asleep, app_i);
+            RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful syscall(SYS_futex, false, "
+                "FUTEX_WAKE_PRIVATE, ...) for app_i %" PRIu32, app_i);
             return RS_FATAL;
         }
         //RS_LOG(LOG_DEBUG, "Called syscall(SYS_futex, %d, FUTEX_WAKE_PRIVATE, "
@@ -135,7 +134,8 @@ static inline rs_ret rs_wake_up_worker(
     RS_ATOMIC_LOAD_RELAXED(&worker_sleep_state->is_asleep, worker_is_asleep);
     if (worker_is_asleep) {
         RS_ATOMIC_STORE_RELAXED(&worker_sleep_state->is_asleep, false);
-        if (write(worker_eventfd, (uint64_t []){1}, 8) != 8) {
+        const uint64_t unused_value = 1ULL;
+        if (write(worker_eventfd, &unused_value, 8) != 8) {
             RS_LOG_ERRNO(LOG_CRIT, "Unsuccessful write(worker_eventfd, ...) to "
                 "worker #%" PRIu32, worker_i + 1);
             return RS_FATAL;
@@ -163,32 +163,37 @@ static inline rs_ret rs_enqueue_ring_update(
     queue->oldest_i %= queue->size;
     // If an update exists at the oldest index, carry out dequeue procedures.
     if (update->ring_position) {
+#ifdef __cplusplus
+        uintptr_t position = reinterpret_cast<uintptr_t>(update->ring_position);
+#else
+        atomic_uintptr_t position = (atomic_uintptr_t) update->ring_position;
+#endif
         if (eventfds) { // This function was called by an app thread.
             if (update->is_write) {
                 RS_ATOMIC_STORE_RELAXED(
                     &ring_pairs[update->thread_i]->outbound_ring.w,
-                    (atomic_uintptr_t) update->ring_position
+                    position
                 );
                 RS_GUARD(rs_wake_up_worker(sleep_states + update->thread_i,
                     eventfds[update->thread_i], update->thread_i));
             } else {
                 RS_ATOMIC_STORE_RELAXED(
                     &ring_pairs[update->thread_i]->inbound_ring.r,
-                    (atomic_uintptr_t) update->ring_position
+                    position
                 );
             }
         } else { // This function was called by a worker thread.
             if (update->is_write) {
                 RS_ATOMIC_STORE_RELAXED(
                     &ring_pairs[update->thread_i]->inbound_ring.w,
-                    (atomic_uintptr_t) update->ring_position
+                    position
                 );
                 RS_GUARD(rs_wake_up_app(sleep_states + update->thread_i,
                     update->thread_i));
             } else {
                 RS_ATOMIC_STORE_RELAXED(
                     &ring_pairs[update->thread_i]->outbound_ring.r,
-                    (atomic_uintptr_t) update->ring_position
+                    position
                 );
             }
         }
@@ -215,12 +220,19 @@ static inline rs_ret rs_flush_ring_updates(
         do {
             struct rs_ring_update * update = queue->updates + j;
             if (update->ring_position && update->thread_i == i) {
+#ifdef __cplusplus
+                uintptr_t position =
+                    reinterpret_cast<uintptr_t>(update->ring_position);
+#else
+                atomic_uintptr_t position =
+                    (atomic_uintptr_t) update->ring_position;
+#endif
                 if (eventfds) { // This function was called by an app thread.
                     if (update->is_write) {
                         if (!updated_to_newer_w) {
                             RS_ATOMIC_STORE_RELAXED(
                                 &ring_pairs[update->thread_i]->outbound_ring.w,
-                                (atomic_uintptr_t) update->ring_position
+                                position
                             );
                             RS_GUARD(rs_wake_up_worker(sleep_states +
                                 update->thread_i, eventfds[update->thread_i],
@@ -230,7 +242,7 @@ static inline rs_ret rs_flush_ring_updates(
                     } else if (!updated_to_newer_r) {
                         RS_ATOMIC_STORE_RELAXED(
                             &ring_pairs[update->thread_i]->inbound_ring.r,
-                            (atomic_uintptr_t) update->ring_position
+                            position
                         );
                         updated_to_newer_r = true;
                     }
@@ -239,7 +251,7 @@ static inline rs_ret rs_flush_ring_updates(
                         if (!updated_to_newer_w) {
                             RS_ATOMIC_STORE_RELAXED(
                                 &ring_pairs[update->thread_i]->inbound_ring.w,
-                                (atomic_uintptr_t) update->ring_position
+                                position
                             );
                             RS_GUARD(rs_wake_up_app(sleep_states +
                                 update->thread_i, update->thread_i));
@@ -248,7 +260,7 @@ static inline rs_ret rs_flush_ring_updates(
                     } else if (!updated_to_newer_r) {
                         RS_ATOMIC_STORE_RELAXED(
                             &ring_pairs[update->thread_i]->outbound_ring.r,
-                            (atomic_uintptr_t) update->ring_position
+                            position
                         );
                         updated_to_newer_r = true;
                     }

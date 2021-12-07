@@ -183,9 +183,10 @@ static inline rs_ret rs_produce_ring_msg(
                 prod->prev_ring = prod->ring;
                 prod->ring = NULL;
                 prod->ring_size *= alloc_multiplier;
-                // Use RS_CACHE_ALIGNED_CALLOC() to eliminate possibility of
-                // false sharing with preceding or trailing heap bytes.
-                RS_CACHE_ALIGNED_CALLOC(prod->ring, prod->ring_size);
+                // Use RS_(CASTED_)CACHE_ALIGNED_CALLOC() to eliminate the risk
+                // of false sharing with preceding or trailing heap bytes.
+                RS_CASTED_CACHE_ALIGNED_CALLOC(prod->ring, uint8_t,
+                    prod->ring_size);
                 RS_LOG(LOG_NOTICE, "Allocated a new %zu byte ring buffer at %p",
                     prod->ring_size, prod->ring);
             } else {
