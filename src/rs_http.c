@@ -473,15 +473,15 @@ static rs_ret parse_http_upgrade_request(
             break;
         }
         skip_this_conn_value:
-        if (RS_H_ICH(',')) goto parse_next_conn_value;
-        if (RS_H_ICH('\r')) goto parse_line_feed;
+        if (RS_H_CH(',')) goto parse_next_conn_value;
+        if (RS_H_CH('\r')) goto parse_line_feed;
         RS_H_GETCH(47);
         goto skip_this_conn_value;
     case 'H': case 'h':
         RS_H_GETCH(48); if (!RS_H_ICH('O')) break;
         RS_H_GETCH(49); if (!RS_H_ICH('S')) break;
         RS_H_GETCH(50); if (!RS_H_ICH('T')) break;
-        RS_H_GETCH(51); if (!RS_H_ICH(':')) break;
+        RS_H_GETCH(51); if (!RS_H_CH(':')) break;
         RS_H_GETCH_AND_SKIP_OPTIONAL_WHITESPACE(52);
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
@@ -508,7 +508,7 @@ static rs_ret parse_http_upgrade_request(
         RS_H_GETCH(57); if (!RS_H_ICH('G')) break;
         RS_H_GETCH(58); if (!RS_H_ICH('I')) break;
         RS_H_GETCH(59); if (!RS_H_ICH('N')) break;
-        RS_H_GETCH(60); if (!RS_H_ICH(':')) break;
+        RS_H_GETCH(60); if (!RS_H_CH(':')) break;
         RS_H_GETCH_AND_SKIP_OPTIONAL_WHITESPACE(61);
         unsaved_str = ch;
         while (*ch != '\r' && *ch != ' ' && *ch != '\t') {
