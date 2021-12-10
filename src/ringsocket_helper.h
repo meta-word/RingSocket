@@ -284,7 +284,7 @@ static inline rs_ret rs_get_cur_time_microsec(
     return RS_OK;
 }
 
-static inline rs_wait_for_inbound_msg(
+static inline rs_ret rs_wait_for_inbound_msg(
     rs_t * rs,
     struct rs_app_schedule * sched,
     struct rs_inbound_msg * * imsg,
