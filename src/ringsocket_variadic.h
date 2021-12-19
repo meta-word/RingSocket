@@ -47,6 +47,8 @@
 #define RS_MACRIFY_TYPE(identifier, ...) identifier(__VA_ARGS__)
 #define RS_MACRIFY_LOG(identifier, ...) identifier(__VA_ARGS__)
 #define RS_MACRIFY_EACH(identifier, ...) identifier(__VA_ARGS__)
+#define RS_MACRIFY_METHOD(identifier, ...) identifier(__VA_ARGS__)
+#define RS_MACRIFY_ELEMC(identifier, ...) identifier(__VA_ARGS__)
 
 #define RS_256( \
     a001, a002, a003, a004, a005, a006, a007, a008, a009, a010, a011, a012, \

@@ -128,7 +128,9 @@ enum rs_callback {
 };
 
 struct rs_app_cb_args { // AKA rs_t (typedef located in ringsocket_api.h)
+//#ifndef __cplusplus
     void * app_data;
+//#endif
     struct rs_conf const * conf;
     struct rs_ring_pair * * ring_pairs;
     struct rs_ring_producer * outbound_producers;
@@ -149,7 +151,6 @@ struct rs_app_cb_args { // AKA rs_t (typedef located in ringsocket_api.h)
 struct rs_app_schedule {
     struct rs_sleep_state * sleep_state;
     struct rs_ring_consumer * inbound_consumers;
-    int (* timer_cb)(rs_t *);
     uint64_t timestamp_microsec;
     uint64_t interval_microsec;
     bool disable_sleep_timeout;
@@ -164,24 +165,76 @@ struct rs_app_schedule {
 #define RS_GUARD_APP(call) if ((call) != RS_OK) RS_APP_FATAL
 
 // #############################################################################
-// # RS_APP() ##################################################################
+// # C++: casting of enum class values to int, based on operator+ ##############
+
+// This template makes it less cumbersome to cast any custom enum class return
+// value from C++ callback functions to int (without generating compiler
+// complaints, or writing more boilerplate than a single + per invocation).
+
+// Based on https://stackoverflow.com/a/42198760/765294 by user Pixelchemist.
 
 #ifdef __cplusplus
-#define RS_PREVENT_MANGLING extern "C"
-#else
-#define RS_PREVENT_MANGLING
+template <typename T>
+constexpr auto operator+(T e) noexcept
+    -> std::enable_if_t<std::is_enum<T>::value, std::underlying_type_t<T>>
+{
+    return static_cast<std::underlying_type_t<T>>(e);
+}
 #endif
 
-#define RS_APP(init_macro, open_macro, read_macro, close_macro, timer_macro) \
-\
-RS_PREVENT_MANGLING rs_ret ringsocket_app( \
-    struct rs_app_args * app_args \
-) { \
+// #############################################################################
+// # RS_APP() ##################################################################
+
+// See the RS_LOG() section in ringsocket_api.h for explanation of RS_LOG_VARS.
+#ifdef __cplusplus
+// The slightly involved C++ version:
+#define RS_APP(app_obj_type, open_macro, read_macro, close_macro, timer_macro) \
+/* Templating app_obj_type as typename T allows more straightforward type */ \
+/* referencing than when passing it through the macro invocation hierarchy. */ \
+template <typename T> \
+static rs_ret _ringsocket_app(struct rs_app_args * app_args) { \
+    T app_obj; \
+    RS_APP_BODY( \
+        RS_INIT_NONE, open_macro, read_macro, close_macro, timer_macro); \
+} \
+/* Declare C linkage, instantiate <typename T>, and catch any exceptions. */ \
+extern "C" rs_ret ringsocket_app(struct rs_app_args * app_args) { \
     /* Update RS_LOG_VARS below to match the values obtained in rs_conf.c */ \
+    _rs_log_facility = app_args->log_facility; \
+    _rs_log_max = app_args->log_max; \
+    sprintf(_rs_thread_id_str, "%s: ", \
+        app_args->conf->apps[app_args->app_i].name); \
+    try { \
+        _ringsocket_app<app_obj_type>(app_args); \
+    } catch (std::exception const & e) { \
+        RS_LOG(LOG_CRIT, \
+            "Shutting down: app threw an exception: %s", e.what()); \
+    } catch (...) { \
+        RS_LOG(LOG_CRIT, \
+            "Shutting down: app threw an unrecognized exception."); \
+    } \
+    RS_APP_FATAL; \
+} \
+\
+RS_LOG_VARS
+#else
+// The Plain C version:
+#define RS_APP(init_macro, open_macro, read_macro, close_macro, timer_macro) \
+rs_ret ringsocket_app(struct rs_app_args * app_args) { \
+    /* Update RS_LOG_VARS below to match the values obtained in rs_conf.c */ \
+    _rs_log_facility = app_args->log_facility; \
     _rs_log_max = app_args->log_max; \
     sprintf(_rs_thread_id_str, "%s: ", \
         app_args->conf->apps[app_args->app_i].name); \
     \
+    RS_APP_BODY(init_macro, open_macro, read_macro, close_macro, timer_macro); \
+} \
+\
+RS_LOG_VARS
+#endif
+
+#define RS_APP_BODY( \
+    init_macro, open_macro, read_macro, close_macro, timer_macro) \
     struct rs_ring_queue _ring_queue = {0}; \
     struct rs_app_cb_args rs = {0}; \
     rs.cb = RS_CB_INIT; \
@@ -207,8 +260,8 @@ RS_PREVENT_MANGLING rs_ret ringsocket_app( \
     \
     struct rs_inbound_msg * imsg = NULL; \
     size_t payload_size = 0; \
-    while (rs_wait_for_inbound_msg(&rs, &sched, &imsg, &payload_size) == \
-        RS_OK) { \
+    while (rs_wait_for_inbound_msg(&rs, &sched, &imsg, &payload_size \
+        _PARAMS_##timer_macro) == RS_OK) { \
         rs.inbound_peer_i = imsg->peer_i; \
         rs.inbound_socket_fd = imsg->socket_fd; \
         rs.inbound_endpoint_id = imsg->endpoint_id; \
@@ -230,14 +283,12 @@ RS_PREVENT_MANGLING rs_ret ringsocket_app( \
         size_t payload_i = 0; \
         _##read_macro; /* Should expand _RS_READ_... */ \
     } \
-    RS_APP_FATAL; \
-} \
-\
-RS_LOG_VARS // See the RS_LOG() section in ringsocket_api.h for explanation.
+    RS_APP_FATAL
 
 // #############################################################################
 // # RS_INIT() #################################################################
 
+#ifndef __cplusplus
 #define _RS_INIT(...) \
 RS_MACRIFY_INIT( \
     RS_256_2( \
@@ -255,7 +306,8 @@ RS_MACRIFY_INIT( \
     /* Omit do {} while loop to keep app_data array in function scope */ \
     uint8_t app_data[app_data_byte_c] = {0}; \
     rs.app_data = app_data; \
-    _RS_INIT_WITHOUT_APP_DATA(init_cb) \
+    _RS_INIT_WITHOUT_APP_DATA(init_cb)
+#endif
 
 #define _RS_INIT_NONE
 
@@ -264,7 +316,6 @@ RS_MACRIFY_INIT( \
 
 #define _RS_TIMER_WAKE(timer_cb, timer_interval) \
 do { \
-    sched.timer_cb = timer_cb; \
     sched.interval_microsec = timer_interval; \
 } while (0) \
 
@@ -276,10 +327,26 @@ do { \
 
 #define _RS_TIMER_NONE
 
+#ifdef __cplusplus
+#define _PARAMS_RS_TIMER_WAKE(timer_cb, timer_interval) , &T::timer_cb, app_obj
+#define _PARAMS_RS_TIMER_SLEEP(timer_cb, timer_interval) , &T::timer_cb, app_obj
+#define _PARAMS_RS_TIMER_NONE , nullptr, app_obj
+#else
+#define _PARAMS_RS_TIMER_WAKE(timer_cb, timer_interval) , timer_cb
+#define _PARAMS_RS_TIMER_SLEEP(timer_cb, timer_interval) , timer_cb
+#define _PARAMS_RS_TIMER_NONE , NULL
+#endif
+
 // #############################################################################
 // # RS_OPEN() #################################################################
 
-#define _RS_OPEN(open_cb) \
+#ifdef __cplusplus
+#define _RS_OPEN(open_cb) _RS_OPEN_GENERIC(+(app_obj.open_cb))
+#else
+#define _RS_OPEN(open_cb) _RS_OPEN_GENERIC(open_cb)
+#endif
+
+#define _RS_OPEN_GENERIC(open_cb) \
 do { \
     RS_GUARD_APP(rs_ack_peer_open(&rs)); \
     rs.cb = RS_CB_OPEN; \
@@ -291,7 +358,13 @@ do { \
 // #############################################################################
 // # RS_CLOSE() ################################################################
 
-#define _RS_CLOSE(close_cb) \
+#ifdef __cplusplus
+#define _RS_CLOSE(close_cb) _RS_CLOSE_GENERIC(+(app_obj.close_cb))
+#else
+#define _RS_CLOSE(close_cb) _RS_CLOSE_GENERIC(close_cb)
+#endif
+
+#define _RS_CLOSE_GENERIC(close_cb) \
 do { \
     rs.cb = RS_CB_CLOSE; \
     RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
@@ -313,21 +386,21 @@ do { \
 } while (0)
 
 #define _RS_CASE_BIN(cb_i, ...) \
-    case cb_i: \
+    case +cb_i: \
         { \
             _RS_READ_BIN(__VA_ARGS__); \
         } \
         break
 
 #define _RS_CASE_UTF8(cb_i, ...) \
-    case cb_i: \
+    case +cb_i: \
         { \
             _RS_READ_UTF8(__VA_ARGS__); \
         } \
         break
 
 #define _RS_CASE_ANY(cb_i, ...) \
-    case cb_i: \
+    case +cb_i: \
         { \
             _RS_READ_ANY(__VA_ARGS__); \
         } \
@@ -349,7 +422,25 @@ do { \
     _RS_READ_ANY(__VA_ARGS__); \
 } while (0)
 
+#ifdef __cplusplus
 #define _RS_READ_ANY(...) \
+    RS_MACRIFY_METHOD( \
+        RS_256_2( \
+            RS_READ_ANY_METHOD_WITHOUT_ARGS, \
+            RS_READ_ANY_METHOD_WITH_ARGS, \
+            __VA_ARGS__ \
+        ), \
+        __VA_ARGS__ \
+    )
+
+#define RS_READ_ANY_METHOD_WITHOUT_ARGS(read_cb) RS_A00(+(app_obj.read_cb))
+#define RS_READ_ANY_METHOD_WITH_ARGS(read_cb, ...) \
+    RS_READ_ANY_GENERIC(+(app_obj.read_cb), __VA_ARGS__)
+#else
+#define _RS_READ_ANY(...) RS_READ_ANY_GENERIC(__VA_ARGS__)
+#endif
+
+#define RS_READ_ANY_GENERIC(...) \
     RS_MACRIFY_ARGC( \
         RS_256_16( \
             RS_A00, RS_A01, RS_A02, RS_A03, \

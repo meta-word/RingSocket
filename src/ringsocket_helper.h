@@ -284,11 +284,20 @@ static inline rs_ret rs_get_cur_time_microsec(
     return RS_OK;
 }
 
+#ifdef __cplusplus
+template<typename T>
+#endif
 static inline rs_ret rs_wait_for_inbound_msg(
     rs_t * rs,
     struct rs_app_schedule * sched,
     struct rs_inbound_msg * * imsg,
-    size_t * payload_size
+    size_t * payload_size,
+#ifdef __cplusplus
+    int (T :: * timer_cb)(rs_t *),
+    T & app_obj
+#else
+    int (* timer_cb)(rs_t *)
+#endif
 ) {
     bool disable_sleep_timeout_once = false;
     size_t idle_c = 0;
@@ -341,7 +350,7 @@ static inline rs_ret rs_wait_for_inbound_msg(
             continue;
         }
         idle_c = 0;
-        if (disable_sleep_timeout_once || !sched->timer_cb) {
+        if (disable_sleep_timeout_once || !timer_cb) {
             RS_LOG(LOG_DEBUG, "Going to sleep without setting a timeout...");
             RS_GUARD(rs_wait_for_worker(sched->sleep_state, RS_TIME_INFINITE));
             RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
@@ -374,7 +383,11 @@ static inline rs_ret rs_wait_for_inbound_msg(
         }
         RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
         rs->cb = RS_CB_TIMER;
-        int timer_ret = sched->timer_cb(rs);
+#ifdef __cplusplus
+        int timer_ret = (app_obj.*timer_cb)(rs);
+#else
+        int timer_ret = timer_cb(rs);
+#endif
         switch (timer_ret) {
         case -1:
             RS_LOG(LOG_WARNING,
@@ -383,7 +396,7 @@ static inline rs_ret rs_wait_for_inbound_msg(
         case 0:
             RS_LOG(LOG_NOTICE, "Timer callback returned 0, which means it will "
                 "not be called again.");
-            sched->timer_cb = NULL;
+            timer_cb = NULL;
             continue;
         default:
             if (timer_ret < 0) {
