@@ -208,8 +208,7 @@ extern "C" rs_ret ringsocket_app(struct rs_app_args * app_args) { \
     /* Update RS_LOG_VARS below to match the values obtained in rs_conf.c */ \
     _rs_log_facility = app_args->log_facility; \
     _rs_log_max = app_args->log_max; \
-    sprintf(_rs_thread_id_str, "%s: ", \
-        app_args->conf->apps[app_args->app_i].name); \
+    rs_set_thread_id(app_args->conf->apps[app_args->app_i].name); \
     try { \
         _ringsocket_app<app_obj_type>(app_args); \
     } catch (std::exception const & e) { \
@@ -230,9 +229,7 @@ rs_ret ringsocket_app(struct rs_app_args * app_args) { \
     /* Update RS_LOG_VARS below to match the values obtained in rs_conf.c */ \
     _rs_log_facility = app_args->log_facility; \
     _rs_log_max = app_args->log_max; \
-    sprintf(_rs_thread_id_str, "%s: ", \
-        app_args->conf->apps[app_args->app_i].name); \
-    \
+    rs_set_thread_id(app_args->conf->apps[app_args->app_i].name); \
     RS_APP_BODY(init_macro, open_macro, read_macro, close_macro, timer_macro); \
 } \
 \

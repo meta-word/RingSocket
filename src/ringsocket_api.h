@@ -220,9 +220,9 @@ extern int _rs_log_max;
 // * During RingSocket startup: unused (i.e., an empty "").
 // * Worker threads: "Worker #%u: " with a %u of (worker_i + 1).
 // * App threads: "App %s: " with %s matching the app conf's JSON "name" keyval.
-extern thread_local char _rs_thread_id_str[];
 #define RS_APP_NAME_MAX_STRLEN 32
 #define RS_THREAD_ID_MAX_STRLEN (RS_APP_NAME_MAX_STRLEN + RS_CONST_STRLEN(": "))
+extern thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1];
 
 // Accordingly, the following macro must be invoked in exactly one translation
 // unit, in order to declare the two variables above. In the case of apps, this

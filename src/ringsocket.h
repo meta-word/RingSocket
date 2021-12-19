@@ -89,6 +89,9 @@ static inline void * rs_get_app_data(
     return rs->app_data;
 }
 
+// #############################################################################
+// # rs_w_*(): WebSocket message chunk writing functions for RingSocket apps ###
+
 static inline void rs_w_p(
     rs_t * rs,
     void const * src,
@@ -285,6 +288,9 @@ static inline void rs_w_span_hton(
 }
 #endif
 
+// #############################################################################
+// # rs_to_*(): WebSocket message recipient setter functions for RS apps #######
+
 static inline void rs_to_single(
     rs_t * rs,
     enum rs_data_kind data_kind,
@@ -427,3 +433,23 @@ static inline void rs_to_every_except_cur(
     }
     rs->wbuf_i = 0;
 }
+
+// #############################################################################
+// # rs_set_thread_id(): set the thread ID string prefix as used by RS_LOG() ###
+
+#ifdef __cplusplus
+static inline void rs_set_thread_id(
+    std::string const & new_thread_id
+) {
+    snprintf(_rs_thread_id_str, sizeof(_rs_thread_id_str),
+        "%s:", new_thread_id.c_str());
+}
+#else
+static inline void rs_set_thread_id(
+    char const * new_thread_id
+) {
+    snprintf(_rs_thread_id_str, sizeof(_rs_thread_id_str),
+        "%s:", new_thread_id);
+}
+#endif
+
