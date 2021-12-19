@@ -252,44 +252,46 @@ static inline char * rs_get_timestamp_str(void) {
 do { \
     if ((lvl) <= _rs_log_max) { \
         if (_rs_log_facility == RS_LOG_TO_SYSLOG) { \
-            syslog((lvl), "%s%s():" RS_STRINGIFY(__LINE__) fmt, __VA_ARGS__); \
+            syslog((lvl), "%s%s():" fmt, __VA_ARGS__); \
         } else { \
-            char * t = rs_get_timestamp_str(); \
+            char * time_str = rs_get_timestamp_str(); \
             switch (lvl) { \
             case LOG_ALERT: default: fprintf(stderr, "%s ALERT:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+                fmt "\n", time_str, __VA_ARGS__); break; \
             case LOG_CRIT: fprintf(stderr, "%s CRITICAL:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+                fmt "\n", time_str, __VA_ARGS__); break; \
             case LOG_ERR: fprintf(stderr, "%s ERROR:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+                fmt "\n", time_str, __VA_ARGS__); break; \
             case LOG_WARNING: printf("%s WARNING:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+                fmt "\n", time_str, __VA_ARGS__); break; \
             case LOG_NOTICE: printf("%s NOTICE:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+                fmt "\n", time_str, __VA_ARGS__); break; \
             case LOG_INFO: printf("%s INFO:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+                fmt "\n", time_str, __VA_ARGS__); break; \
             case LOG_DEBUG: printf("%s DEBUG:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); \
+                fmt "\n", time_str, __VA_ARGS__); \
             } \
         } \
     } \
 } while (0)
 
 #define _RS_LOG_1(lvl) \
-    _RS_LOG((lvl), , _rs_thread_id_str, __func__)
+    _RS_LOG((lvl), RS_STRINGIFY(__LINE__), _rs_thread_id_str, __func__)
 #define _RS_LOG_2(lvl, fmt) \
-    _RS_LOG((lvl), ": " fmt, _rs_thread_id_str, __func__)
+    _RS_LOG((lvl), RS_STRINGIFY(__LINE__) ": " fmt, _rs_thread_id_str, __func__)
 #define _RS_LOG_MORE(lvl, fmt, ...) \
-    _RS_LOG((lvl), ": " fmt, _rs_thread_id_str, __func__, __VA_ARGS__)
+    _RS_LOG((lvl), RS_STRINGIFY(__LINE__) ": " fmt, _rs_thread_id_str, \
+        __func__, __VA_ARGS__)
 
 #define _RS_LOG_ERRNO_1(lvl) \
-    _RS_LOG((lvl), ": %s", _rs_thread_id_str, __func__, strerror(errno))
-#define _RS_LOG_ERRNO_2(lvl, fmt) \
-    _RS_LOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
+    _RS_LOG((lvl), RS_STRINGIFY(__LINE__) ": %s", _rs_thread_id_str, __func__, \
         strerror(errno))
+#define _RS_LOG_ERRNO_2(lvl, fmt) \
+    _RS_LOG((lvl), RS_STRINGIFY(__LINE__) ": " fmt ": %s", _rs_thread_id_str, \
+        __func__, strerror(errno))
 #define _RS_LOG_ERRNO_MORE(lvl, fmt, ...) \
-    _RS_LOG((lvl), ": " fmt ": %s", _rs_thread_id_str, __func__, \
-        __VA_ARGS__, strerror(errno))
+    _RS_LOG((lvl), RS_STRINGIFY(__LINE__) ": " fmt ": %s", _rs_thread_id_str, \
+        __func__, __VA_ARGS__, strerror(errno))
 
 // #############################################################################
 // # Heap memory management macros #############################################

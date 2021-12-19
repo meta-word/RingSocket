@@ -453,3 +453,84 @@ static inline void rs_set_thread_id(
 }
 #endif
 
+// #############################################################################
+// # C++20/fmtlib-based "format string free" versions of RS_LOG() ##############
+
+// With a full-featured C++20 compiler or fmtlib, instead of writing...
+// RS_LOG(LOG_INFO, "Player %s has %u remaining lives.", username, live_c);
+// ...you can write the same thing more concisely/elegantly as:
+// RS_INFO("Player ", username, " has ", live_c, " remaining lives.");
+
+// Hopefully GCC and Clang will finally implement std::format soon, but for the
+// time being use the reference library instead: https://github.com/fmtlib/fmt
+
+#ifdef __cplusplus
+
+#ifdef __cpp_lib_format
+#include <format>
+#define RS_MAKE_FORMAT_ARGS std::make_format_args
+#define RS_FORMAT_ARGS std::format_args
+#define RS_VFORMAT std::vformat
+#else
+// This getting evaluated means the compiler doesn't support the std::format
+// portion of C++20. Plan B: try to include the fmt library in header-only mode.
+#define FMT_HEADER_ONLY
+#include <fmt/format.h>
+#define RS_MAKE_FORMAT_ARGS fmt::make_format_args
+#define RS_FORMAT_ARGS fmt::format_args
+#define RS_VFORMAT fmt::vformat
+#endif
+
+static inline void rs_log_vformat(
+    int log_level,
+    char const * function_name,
+    std::string_view format,
+    RS_FORMAT_ARGS args
+) {
+    try {
+        auto formatted_str = RS_VFORMAT(format, args);
+        _RS_LOG(log_level, "%s", _rs_thread_id_str, function_name,
+            formatted_str.c_str());
+    } catch (...) {
+        RS_LOG(LOG_CRIT, "Internal rs_log_vformat() error.");
+    }
+}
+
+template <typename ... Args>
+static inline constexpr void rs_log_format(
+    int log_level,
+    char const * function_name,
+    Args && ... args
+) {
+    // Create a C++20 std::format string of "{}" sequences. E.g., "{}{}{}".
+    std::array<char, 2 * (sizeof ... (Args)) + 1> braces{};
+    for (char * p{&braces[0]}, * const p_over{&braces[braces.size() - 1]};
+        p < p_over;) {
+        *p++ = '{';
+        *p++ = '}';
+    }
+    rs_log_vformat(log_level, function_name, std::string_view{&braces[0]},
+        RS_MAKE_FORMAT_ARGS(args...));
+}
+
+// Facilitate log level branch prediction to reduce function call overhead.
+#define RS_DEBUG(...) do { if (LOG_DEBUG <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_DEBUG, __VA_ARGS__); } while (0)
+#define RS_INFO(...) do { if (LOG_INFO <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_INFO, __VA_ARGS__); } while (0)
+#define RS_NOTICE(...) do { if (LOG_NOTICE <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_NOTICE, __VA_ARGS__); } while (0)
+#define RS_WARNING(...) do { if (LOG_WARNING <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_WARNING, __VA_ARGS__); } while (0)
+#define RS_ERR(...) do { if (LOG_ERR <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_ERR, __VA_ARGS__); } while (0)
+#define RS_CRIT(...) do { if (LOG_CRIT <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_CRIT, __VA_ARGS__); } while (0)
+#define RS_ALERT(...) do { if (LOG_ALERT <= _rs_log_max) \
+    RS_LOG_FORMAT(LOG_ALERT, __VA_ARGS__); } while (0)
+
+// __LINE__ and __func__ need to be included prior to making a function call.
+#define RS_LOG_FORMAT(lvl, ...) \
+    rs_log_format(lvl, __func__, RS_STRINGIFY(__LINE__) ": ", __VA_ARGS__)
+
+#endif // End of __cplusplus
