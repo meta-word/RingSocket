@@ -34,6 +34,12 @@
 // #############################################################################
 // # Initial Arguments app threads receive when spawned ########################
 
+#ifdef __cplusplus
+#include <array>
+#include <string>
+#include <vector>
+#endif
+
 struct rs_app_args {
     struct rs_conf const * conf;
     // Worker_c length ring_pair array to be allocated by the called app
@@ -694,11 +700,24 @@ do { \
     payload_i += (elem_c) * sizeof(type); \
 } while (0)
 
+#ifdef __cplusplus
+#define RS_NET_ARR(name_i, type, elem_c) \
+    RS_READ_CHECK(elem_c * sizeof(type)); \
+    std::array<type, elem_c> v##name_i; \
+    RS_NET_MEMCPY(&v##name_i[0], elem_c, type)
+#else
 #define RS_NET_ARR(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
     type v##name_i[elem_c] = {0}; \
     RS_NET_MEMCPY(v##name_i, elem_c, type)
+#endif
 
+#ifdef __cplusplus
+#define _01RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
+    std::vector<type> v1(elem_c); \
+    RS_NET_MEMCPY(&v1[0], elem_c, type)
+#else
 #define _01RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[max_elem_c] = {0}; \
@@ -722,6 +741,7 @@ do { \
         RS_APP_FATAL; \
     } \
     RS_NET_MEMCPY(v1, elem_c, type)
+#endif
 
 #define RS_NTOH_ASSIGN(var, type) \
 do { \
@@ -739,6 +759,15 @@ do { \
     type v##name_i = 0; \
     RS_NTOH_ASSIGN(v##name_i, type)
 
+#ifdef __cplusplus
+#define RS_NTOH_ARR(name_i, type, elem_c) \
+    RS_READ_CHECK(elem_c * sizeof(type)); \
+    std::array<type, elem_c> v##name_i; \
+    for (auto && elem : v##name_i) { \
+        RS_NTOH_ASSIGN(elem, type); \
+    } \
+    do { ; } while (0)
+#else
 #define RS_NTOH_ARR(name_i, type, elem_c) \
     RS_READ_CHECK(elem_c * sizeof(type)); \
     type v##name_i[elem_c] = {0}; \
@@ -746,7 +775,17 @@ do { \
         RS_NTOH_ASSIGN(v##name_i[i], type); \
     } \
     do { ; } while (0)
+#endif
 
+#ifdef __cplusplus
+#define _01RS_NTOH_ARR_MAX(type, min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
+    std::vector<type> v1(elem_c); \
+    for (auto && elem : v1) { \
+        RS_NTOH_ASSIGN(elem, type); \
+    } \
+    do { ; } while (0)
+#else
 #define _01RS_NTOH_ARR_MAX(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[max_elem_c] = {0}; \
@@ -782,11 +821,19 @@ do { \
         RS_NTOH_ASSIGN(v1[i], type); \
     } \
     do { ; } while (0)
+#endif
 
+#ifdef __cplusplus
+#define _01RS_STR(min_elem_c, max_elem_c) \
+    RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
+    std::string v1(reinterpret_cast<char const *>(imsg->payload + payload_i), \
+        elem_c); \
+    payload_i + elem_c
+#else
 #define _01RS_STR(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
     char v1[(max_elem_c) + 1] = {0}; \
-    RS_NET_MEMCPY(v1, elem_c, char); \
+    RS_NET_MEMCPY(v1, elem_c, char);
 
 #define _01RS_STR_STA(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
@@ -809,19 +856,41 @@ do { \
     } \
     RS_NET_MEMCPY(v1, elem_c, char); \
     v1[elem_c] = '\0'
+#endif
 
 // Determine whether to include a final "elem_c" parameter in the calback call,
 // depending on whether the corresponding "v1" parameter has a variable length.
-#define __RS_NET(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
-#define __RS_NET_STA(...) RS_ELEM_C_PARAM
-#define __RS_NET_VLA(...) RS_ELEM_C_PARAM
-#define __RS_NET_HEAP(...) RS_ELEM_C_PARAM
-#define __RS_NTOH(...) RS_256_3(,, RS_ELEM_C_PARAM, __VA_ARGS__)
-#define __RS_NTOH_STA(...) RS_ELEM_C_PARAM
-#define __RS_NTOH_VLA(...) RS_ELEM_C_PARAM
-#define __RS_NTOH_HEAP(...) RS_ELEM_C_PARAM
-#define __RS_STR(...) RS_ELEM_C_PARAM
-#define __RS_STR_STA(...) RS_ELEM_C_PARAM
-#define __RS_STR_VLA(...) RS_ELEM_C_PARAM
-#define __RS_STR_HEAP(...) RS_ELEM_C_PARAM
-#define RS_ELEM_C_PARAM , elem_c
+
+// These take a dummy empty parameter to allow their macro names to be specified
+// without caused unwanted early substitution.
+#define RS_WITHOUT_ELEM_C_PARAM()
+#define RS_WITH_ELEM_C_PARAM() , elem_c
+
+#ifdef __cplusplus
+#define __RS_NET(...) RS_WITHOUT_ELEM_C_PARAM()
+#define __RS_NTOH(...) RS_WITHOUT_ELEM_C_PARAM()
+#else
+#define __RS_NET(...) RS_MACRIFY_ELEMC( \
+    RS_256_3( \
+        RS_WITHOUT_ELEM_C_PARAM, \
+        RS_WITHOUT_ELEM_C_PARAM, \
+        RS_WITH_ELEM_C_PARAM, \
+        __VA_ARGS__), \
+    )
+#define __RS_NTOH(...) __RS_NET(__VA_ARGS__)
+
+#define __RS_NET_STA(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_NTOH_STA(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_NET_VLA(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_NTOH_VLA(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_NET_HEAP(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_NTOH_HEAP(...) RS_WITH_ELEM_C_PARAM()
+#endif
+
+#ifdef __cplusplus
+#define __RS_STR(...) RS_WITHOUT_ELEM_C_PARAM()
+#else
+#define __RS_STR(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_STR_VLA(...) RS_WITH_ELEM_C_PARAM()
+#define __RS_STR_HEAP(...) RS_WITH_ELEM_C_PARAM()
+#endif
