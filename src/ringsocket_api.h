@@ -36,7 +36,7 @@
 // If C++, the following 3 C11 symbols need to be redefined to their C++
 // templated equivalents, lest compiler complaints about unknown type occur.
 #define atomic_uint_least32_t std::atomic<uint_least32_t>
-#define atomic_uintptr_t std::atomic<std::uintptr_t>
+#define atomic_uintptr_t std::atomic<uintptr_t>
 #define memory_order_relaxed std::memory_order_relaxed
 #else
 #include <stdatomic.h> // C11: atomic_[load|store]_explicit()
