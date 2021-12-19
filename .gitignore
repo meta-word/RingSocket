@@ -3,5 +3,6 @@
 *.so
 *.so.*
 /.objects
+/.vscode
 /ringsocket
 /tests/rst_client_echo
