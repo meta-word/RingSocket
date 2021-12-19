@@ -52,6 +52,7 @@
 #include <stdlib.h> // calloc(), realloc(), free() for heap memory macros below
 #include <string.h> // memset() for RS_CACHE_ALIGNED_CALLOC()
 #include <syslog.h> // syslog() for RS_LOG()
+#include <time.h> // clock_gettime(), localtime_r()
 #include <threads.h> // C11: thread_local for RS_LOG()
 
 // #############################################################################
@@ -232,6 +233,20 @@ int _rs_log_facility = RS_LOG_TO_STDOUT_AND_STDERR; \
 int _rs_log_max = LOG_NOTICE; \
 thread_local char _rs_thread_id_str[RS_THREAD_ID_MAX_STRLEN + 1] = {0}
 
+// When not using Syslog, generate our own timestamps to prefix RSLOG() with.
+static inline char * rs_get_timestamp_str(void) {
+    struct timespec ts = {0};
+    if (clock_gettime(CLOCK_REALTIME_COARSE, &ts) == -1) {
+        return "[clock_gettime() ERROR]";
+    }
+    struct tm local_time = {0};
+    localtime_r(&ts.tv_sec, &local_time);
+    thread_local static char buf[sizeof("2021-12-31 23:59:59.123")] = {0};
+    size_t i = strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S.", &local_time);
+    sprintf(buf + i, "%ld", ts.tv_nsec / 1000000);
+    return buf;
+}
+
 // The log wrapper core:
 #define _RS_LOG(lvl, fmt, ...) \
 do { \
@@ -239,21 +254,22 @@ do { \
         if (_rs_log_facility == RS_LOG_TO_SYSLOG) { \
             syslog((lvl), "%s%s():" RS_STRINGIFY(__LINE__) fmt, __VA_ARGS__); \
         } else { \
+            char * t = rs_get_timestamp_str(); \
             switch (lvl) { \
-            case LOG_ALERT: default: fprintf(stderr, "ALERT:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
-            case LOG_CRIT: fprintf(stderr, "CRITICAL:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
-            case LOG_ERR: fprintf(stderr, "ERROR:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
-            case LOG_WARNING: printf("WARNING:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
-            case LOG_NOTICE: printf("NOTICE:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
-            case LOG_INFO: printf("INFO:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); break; \
-            case LOG_DEBUG: printf("DEBUG:%s%s():" \
-                RS_STRINGIFY(__LINE__) fmt "\n", __VA_ARGS__); \
+            case LOG_ALERT: default: fprintf(stderr, "%s ALERT:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+            case LOG_CRIT: fprintf(stderr, "%s CRITICAL:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+            case LOG_ERR: fprintf(stderr, "%s ERROR:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+            case LOG_WARNING: printf("%s WARNING:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+            case LOG_NOTICE: printf("%s NOTICE:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+            case LOG_INFO: printf("%s INFO:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); break; \
+            case LOG_DEBUG: printf("%s DEBUG:%s%s():" \
+                RS_STRINGIFY(__LINE__) fmt "\n", t, __VA_ARGS__); \
             } \
         } \
     } \

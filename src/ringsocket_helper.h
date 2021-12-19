@@ -31,8 +31,6 @@
 //    |
 //    \-------------------------------> [ Any RingSocket app translation units ]
 
-#include <time.h> // clock_gettime()
-
 // #############################################################################
 // # Internal app callback helper functions (don't call these from app code) ###
 
