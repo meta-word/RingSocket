@@ -78,8 +78,6 @@ rs_ret handle_peer_events(
         case RS_LAYER_HTTP:
             RS_GUARD(handle_http_io(worker, peer));
             if (peer->layer == RS_LAYER_WEBSOCKET) {
-                RS_LOG(LOG_DEBUG, "Sending peer_i %zu open to app_i %u...",
-                    peer_i, peer->app_i);
                 RS_GUARD(send_open_to_app(worker, peer, peer_i));
                 // The WebSocket Upgrade response was only just sent, so it is
                 // not possible to have already received a WebSocket message:

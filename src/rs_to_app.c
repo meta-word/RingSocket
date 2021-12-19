@@ -86,8 +86,12 @@ rs_ret send_open_to_app(
     uint32_t peer_i
 ) {
     if (!worker->conf->apps[peer->app_i].wants_open_notification) {
+        RS_LOG(LOG_DEBUG, "Not sending peer_i %zu open to app_i %u, because of "
+            "JSON setting \"no_open_cb\": true.", peer_i, peer->app_i);
         return RS_OK;
     }
+    RS_LOG(LOG_DEBUG, "Sending peer_i %zu open to app_i %u...",
+        peer_i, peer->app_i);
     RS_GUARD(send_msg_to_app(worker, peer, peer_i, 0, RS_BIN, RS_INBOUND_OPEN));
     peer->ws.owref_c = RS_AWAITING_APP_OPEN_ACK;
     return RS_OK;
@@ -109,7 +113,12 @@ rs_ret send_close_to_app(
     union rs_peer const * peer,
     uint32_t peer_i
 ) {
-    return worker->conf->apps[peer->app_i].wants_close_notification ?
-        send_msg_to_app(worker, peer, peer_i, 0, RS_BIN, RS_INBOUND_CLOSE) :
-        RS_OK;
+    if (!worker->conf->apps[peer->app_i].wants_close_notification) {
+        RS_LOG(LOG_DEBUG, "Not sending peer_i %zu close to app_i %u, because "
+            "of JSON setting \"no_close_cb\": true.", peer_i, peer->app_i);
+        return RS_OK;
+    }
+    RS_LOG(LOG_DEBUG, "Sending peer_i %zu close to app_i %u...",
+        peer_i, peer->app_i);
+    return send_msg_to_app(worker, peer, peer_i, 0, RS_BIN, RS_INBOUND_CLOSE);
 }
