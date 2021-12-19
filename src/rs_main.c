@@ -335,6 +335,7 @@ static rs_ret spawn_app_and_worker_threads(
         app_args[i].worker_sleep_states = &worker_sleep_states;
         app_args[i].worker_eventfds = worker_eventfds;
         app_args[i].app_i = i;
+        app_args[i].log_facility = _rs_log_facility;
         app_args[i].log_max = _rs_log_max;
         // Run the app callback as a dedicated (long-lived) C11 thread
         if (thrd_create((thrd_t []){0}, app_cbs[i], app_args + i) !=

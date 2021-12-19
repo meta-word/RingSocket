@@ -42,6 +42,7 @@ struct rs_app_args {
     struct rs_sleep_state * * worker_sleep_states;
     int const * worker_eventfds;
     size_t app_i;
+    enum rs_log_facility log_facility;
     int log_max;
 };
 
