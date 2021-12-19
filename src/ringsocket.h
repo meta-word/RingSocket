@@ -34,6 +34,14 @@
 // #############################################################################
 // # RingSocket app callback API helper functions ##############################
 
+#ifdef __cplusplus
+#include <string_view>
+#include <type_traits>
+#if __cplusplus >= 202002L
+#include <span>
+#endif
+#endif
+
 static inline uint64_t rs_get_client_id(
     rs_t const * rs
 ) {
@@ -93,12 +101,21 @@ static inline void rs_w_p(
     rs->wbuf_i += size;
 }
 
+#ifdef __cplusplus
+static inline void rs_w_str(
+    rs_t * rs,
+    std::string_view str
+) {
+    rs_w_p(rs, &str[0], str.size());
+}
+#else
 static inline void rs_w_str(
     rs_t * rs,
     char const * str // Must be null-terminated
 ) {
     rs_w_p(rs, str, strlen(str));
 }
+#endif
 
 static inline void rs_w_uint8(
     rs_t * rs,
@@ -212,6 +229,61 @@ static inline void rs_w_int64_hton(
 ) {
     rs_w_uint64_hton(rs, i64);
 }
+
+#if __cplusplus >= 202002L
+template<class T, std::size_t N>
+static inline void rs_w_span(
+    rs_t * rs,
+    std::span<T const, N> span
+) {
+    rs_w_p(rs, &span[0], span.size_bytes());
+}
+
+template <typename T>
+static inline void rs_w_span(
+    rs_t * rs,
+    T const & range
+) {
+    rs_w_span(rs, std::span(range));
+}
+
+template<class T, std::size_t N>
+static inline void rs_w_span_hton(
+    rs_t * rs,
+    std::span<T const, N> span
+) {
+    static_assert(std::is_integral_v<T> &&
+        (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8),
+        "rs_w_span_hton() only supports integer types of size 2, 4, or 8.");
+    rs_guard_cb(__func__, rs->cb,
+        RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
+    RS_GUARD_APP(rs_check_app_wsize(rs, span.size_bytes()));
+    if constexpr (sizeof(T) == 2) {
+        for (T const elem : span) {
+            *((uint16_t *) (rs->wbuf + rs->wbuf_i)) = RS_HTON16(elem);
+            rs->wbuf_i += 2;
+        }
+    } else if constexpr (sizeof(T) == 4) {
+        for (T const elem : span) {
+            *((uint32_t *) (rs->wbuf + rs->wbuf_i)) = RS_HTON32(elem);
+            rs->wbuf_i += 4;
+        }
+    } else {
+        for (T const elem : span) {
+            *((uint64_t *) (rs->wbuf + rs->wbuf_i)) = RS_HTON64(elem);
+            rs->wbuf_i += 8;
+        }
+    }
+}
+
+template<typename T>
+static inline void rs_w_span_hton(
+    rs_t * rs,
+    T const & range
+) {
+    rs_w_span_hton(rs, std::span(range));
+}
+#endif
 
 static inline void rs_to_single(
     rs_t * rs,
