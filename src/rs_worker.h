@@ -4,13 +4,14 @@
 
 #pragma once
 
-#include <assert.h> // C11: static_assert()
-#include <openssl/ssl.h>
-
 // Including <ringsocket.h> here would include app helper functions contained in
 // <ringsocket.h> and <ringsocket_helper.h> that are of no use to worker
 // threads. Instead, commence the RingSocket "include chain" "2 steps up" at:
 #include <ringsocket_app.h>
+
+#include <openssl/ssl.h>
+
+#include <assert.h> // C11: static_assert()
 
 // #############################################################################
 // # struct rs_worker & Co. ####################################################

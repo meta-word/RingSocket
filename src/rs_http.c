@@ -2,9 +2,10 @@
 // Copyright © 2021 MetaWord Inc
 // Copyright © 2019-2021 William Budd
 
+#include "rs_http.h"
+
 #include "rs_event.h" // set_shutdown_deadline()
 #include "rs_hash.h" // get_websocket_key_hash()
-#include "rs_http.h"
 #include "rs_tcp.h" // read_tcp(), write_tcp()
 #include "rs_tls.h" // read_tls(), write_tls()
 #include "rs_util.h" // get_addr_str()

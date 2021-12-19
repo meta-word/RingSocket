@@ -2,8 +2,9 @@
 // Copyright © 2021 MetaWord Inc
 // Copyright © 2019-2021 William Budd
 
-#include "rs_tcp.h" // write_bidirectional_tcp_shutdown()
 #include "rs_tls.h"
+
+#include "rs_tcp.h" // write_bidirectional_tcp_shutdown()
 #include "rs_util.h" // get_addr_str()
 
 #include <openssl/conf.h>

@@ -31,7 +31,6 @@
 //    |
 //    \-------------------------------> [ Any RingSocket app translation units ]
 
-#define _GNU_SOURCE // syscall()
 #include <inttypes.h> // PRI print format of stdint.h types
 #include <linux/futex.h> // FUTEX_WAKE_PRIVATE
 #include <sys/syscall.h> // SYS_futex

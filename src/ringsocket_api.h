@@ -4,6 +4,8 @@
 
 #pragma once
 
+#define _GNU_SOURCE // syscall(), CLOCK_*_COARSE, etc
+
 #include <ringsocket_variadic.h>
 // <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
 //   |

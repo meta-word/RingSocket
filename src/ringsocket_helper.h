@@ -4,8 +4,6 @@
 
 #pragma once
 
-#define _POSIX_C_SOURCE 201112L // CLOCK_MONOTONIC_COARSE
-
 #include <ringsocket_app.h>
 // <ringsocket_variadic.h>           # Arity-based macro expansion helper macros
 //   |

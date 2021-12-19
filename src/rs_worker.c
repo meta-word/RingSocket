@@ -2,13 +2,14 @@
 // Copyright © 2021 MetaWord Inc
 // Copyright © 2019-2021 William Budd
 
+#include "rs_worker.h"
+
 #include "rs_event.h" // loop_over_events()
 #include "rs_from_app.h" // get_outbound_readers(), init_owrefs()
 #include "rs_hash.h" // init_hash_state()
 #include "rs_slot.h" // init_slots()
 #include "rs_tls.h" // create_tls_contexts()
 #include "rs_to_app.h" // init_inbound_rings()
-#include "rs_worker.h"
 
 static rs_ret init_ring_update_queue(
     struct rs_worker * worker

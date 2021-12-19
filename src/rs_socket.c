@@ -4,9 +4,10 @@
 
 #define _GNU_SOURCE // accept4()
 
+#include "rs_socket.h"
+
 #include "rs_event.h" // rs_event_kind
 #include "rs_slot.h" // alloc_slot(), free_slot()
-#include "rs_socket.h"
 #include "rs_util.h" // get_addr_str()
 
 #include <linux/filter.h> // struct sock_filter

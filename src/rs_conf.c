@@ -3,10 +3,12 @@
 // Copyright © 2019-2021 William Budd
 
 #include "rs_conf.h"
+
 #include "rs_tls.h" // derive_cert_index_from_hostname()
 
+#include <jgrandson.h> // JSON conf file parsing: https://github/meta-word/jgrandson
+
 #include <ifaddrs.h> // getifaddrs()
-#include <jgrandson.h> // JSON conf file parsing: https://github/wbudd/jgrandson
 #include <net/if.h> // IF_NAMESIZE
 
 RS_LOG_VARS; // See the RS_LOG() section in ringsocket_api.h for explanation.

@@ -2,8 +2,9 @@
 // Copyright © 2021 MetaWord Inc
 // Copyright © 2019-2021 William Budd
 
-#include "rs_slot.h" // free_slot()
 #include "rs_tcp.h"
+
+#include "rs_slot.h" // free_slot()
 #include "rs_tls.h" // init_tls_session()
 #include "rs_util.h" // get_addr_str()
 
