@@ -14,7 +14,7 @@ WORK_DIR = /srv/ws
 RS_CACHE_LINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
 
 CC = gcc
-CFLAGS = -Wall -Wextra -Wpedantic -Wshadow -std=c11 -isystem src \
+CFLAGS = -Wall -Wextra -Wpedantic -Wshadow -std=c17 -isystem src \
 	-DRS_CACHE_LINE_SIZE=$(RS_CACHE_LINE_SIZE)
 CFLAGS_OPTIM = -O3 -flto -fuse-linker-plugin
 LFLAGS_OPTIM = -flto -fuse-linker-plugin -fuse-ld=gold
