@@ -243,7 +243,7 @@ static inline char * rs_get_timestamp_str(void) {
     localtime_r(&ts.tv_sec, &local_time);
     thread_local static char buf[sizeof("2021-12-31 23:59:59.123")] = {0};
     size_t i = strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S.", &local_time);
-    sprintf(buf + i, "%ld", ts.tv_nsec / 1000000);
+    sprintf(buf + i, "%03ld", ts.tv_nsec / 1000000);
     return buf;
 }
 
