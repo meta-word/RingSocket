@@ -32,6 +32,50 @@
 //    \-------------------------------> [ Any RingSocket app translation units ]
 
 // #############################################################################
+// # RingSocket app callback return value enums ################################
+
+#ifndef __cplusplus
+typedef enum {
+    RS_INIT_FATAL  = -1,
+    RS_INIT_OK     = 0
+} rs_init_ret;
+#endif
+
+// No enums are defined for app open and close callbacks. Instead, they are
+// expected to return an integer. This is done so that apps can define their own
+// custom WebSocket close status codes. See the docs: App callback return value.
+
+#ifdef __cplusplus
+enum class rs_close_ret {
+#else
+typedef enum {
+#endif
+    RS_CLOSE_FATAL = -1,
+    RS_CLOSE_OK    = 0
+#ifdef __cplusplus
+};
+#else
+} rs_close_ret;
+#endif
+
+#ifdef __cplusplus
+enum class rs_timer_ret {
+#else
+typedef enum {
+#endif
+    RS_TIMER_FATAL = -1,
+    RS_TIMER_MIN   = 0, // Call again after the configured mininum interval.
+    RS_TIMER_HOLD  = 1, // Call again with an interval unchanged from this time.
+    RS_TIMER_INCR  = 2, // Add the configured increment to next call's interval.
+    RS_TIMER_MAX   = 3, // Call again after the configured maximum interval.
+    RS_TIMER_NEVER = 4  // Don't you dare ever calling me again!
+#ifdef __cplusplus
+};
+#else
+} rs_timer_ret;
+#endif
+
+// #############################################################################
 // # Internal app callback helper functions (don't call these from app code) ###
 
 static inline void rs_guard_cb(
@@ -289,13 +333,12 @@ static inline rs_ret rs_wait_for_inbound_msg(
     struct rs_inbound_msg * * imsg,
     size_t * payload_size,
 #ifdef __cplusplus
-    int (T :: * timer_cb)(rs_t *),
+    rs_timer_ret (T :: * timer_cb)(rs_t *),
     T & app_obj
 #else
-    int (* timer_cb)(rs_t *)
+    rs_timer_ret (* timer_cb)(rs_t *)
 #endif
 ) {
-    bool disable_sleep_timeout_once = false;
     size_t idle_c = 0;
     for (;;rs->inbound_worker_i++, rs->inbound_worker_i %= rs->conf->worker_c) {
         struct rs_ring_atomic * inbound_ring =
@@ -306,6 +349,10 @@ static inline rs_ret rs_wait_for_inbound_msg(
         if (cmsg) {
             *imsg = (struct rs_inbound_msg *) cmsg->msg;
             *payload_size = cmsg->size - sizeof(**imsg);
+            // Reset the timer interval to its configured minimum, given that
+            // this received message may be the start of some flurry of
+            // activity. (This has no effect when timer_cb == NULL.)
+            sched->interval_microsec = sched->interval_microsec_min;
             return RS_OK;
         }
         if (++idle_c == 2 * RS_MAX(4, rs->conf->worker_c)) {
@@ -346,12 +393,11 @@ static inline rs_ret rs_wait_for_inbound_msg(
             continue;
         }
         idle_c = 0;
-        if (disable_sleep_timeout_once || !timer_cb) {
+        if (!timer_cb) {
             RS_LOG(LOG_DEBUG, "Going to sleep without setting a timeout...");
             RS_GUARD(rs_wait_for_worker(sched->sleep_state, RS_TIME_INFINITE));
             RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
             RS_LOG(LOG_DEBUG, "Awoken by a worker thread.");
-            disable_sleep_timeout_once = false;
             continue;
         }
         uint64_t timestamp_microsec = 0;
@@ -380,34 +426,61 @@ static inline rs_ret rs_wait_for_inbound_msg(
         RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
         rs->cb = RS_CB_TIMER;
 #ifdef __cplusplus
-        int timer_ret = (app_obj.*timer_cb)(rs);
+        rs_timer_ret timer_ret = (app_obj.*timer_cb)(rs);
 #else
-        int timer_ret = timer_cb(rs);
+        rs_timer_ret timer_ret = timer_cb(rs);
 #endif
         switch (timer_ret) {
-        case -1:
+#ifdef __cplusplus
+        case rs_timer_ret::RS_TIMER_FATAL:
+#else
+        case RS_TIMER_FATAL:
+#endif
             RS_LOG(LOG_WARNING,
-                "Shutting down: timer callback returned -1 (fatal error).");
+                "Shutting down: timer callback returned RS_TIMER_FATAL (-1).");
             return RS_FATAL;
-        case 0:
-            RS_LOG(LOG_NOTICE, "Timer callback returned 0, which means it will "
-                "not be called again.");
+#ifdef __cplusplus
+        case rs_timer_ret::RS_TIMER_MIN:
+#else
+        case RS_TIMER_MIN:
+#endif
+            sched->interval_microsec = sched->interval_microsec_min;
+            continue;
+#ifdef __cplusplus
+        case rs_timer_ret::RS_TIMER_HOLD:
+#else
+        case RS_TIMER_HOLD:
+#endif
+            continue;
+ #ifdef __cplusplus
+        case rs_timer_ret::RS_TIMER_INCR:
+#else
+        case RS_TIMER_INCR:
+#endif
+            sched->interval_microsec += sched->interval_microsec_incr;
+            if (sched->interval_microsec <= sched->interval_microsec_max) {
+                continue;
+            } // fall through
+#ifdef __cplusplus
+        case rs_timer_ret::RS_TIMER_MAX:
+#else
+        case RS_TIMER_MAX:
+#endif
+            sched->interval_microsec = sched->interval_microsec_max;
+            continue;
+#ifdef __cplusplus
+        case rs_timer_ret::RS_TIMER_NEVER:
+#else
+        case RS_TIMER_NEVER:
+#endif
+            RS_LOG(LOG_NOTICE, "Timer callback returned RS_TIMER_NEVER, "
+                "which means it will not be called again.");
             timer_cb = NULL;
             continue;
         default:
-            if (timer_ret < 0) {
-                RS_LOG(LOG_ERR, "Shutting down: timer callback returned an "
-                    "invalid value: %" PRIu64 ". Valid values are -1 (fatal "
-                    "error), 0 (don't call the timer callback again), and any "
-                    "value greater than 0 (the number of microseconds after "
-                    "which the timer callback wishes to be called again).",
-                    timer_ret);
-                return RS_FATAL;
-            }
-            sched->interval_microsec = timer_ret;
-        }
-        if (sched->disable_sleep_timeout) {
-            disable_sleep_timeout_once = true;
+            RS_LOG(LOG_ERR, "Shutting down: timer callback returned an "
+                "invalid value: %" PRIu64, timer_ret);
+            return RS_FATAL;
         }
     }
 }
@@ -459,19 +532,50 @@ static inline rs_ret rs_close_peer(
     return RS_OK;
 }
 
+#ifndef __cplusplus
 static inline rs_ret rs_guard_init_cb(
-    int ret
+    rs_t * rs,
+    rs_init_ret ret
 ) {
     switch (ret) {
-    case -1:
+    case RS_INIT_FATAL:
         RS_LOG(LOG_WARNING,
-            "Shutting down: callback returned -1 (fatal error).");
+            "Shutting down: init callback returned RS_INIT_FATAL (-1).");
         break;
-    case 0:
+    case RS_INIT_OK:
         return RS_OK;
     default:
-        RS_LOG(LOG_ERR, "Shutting down: callback returned an invalid value: "
-            "%d. Valid values are -1 (fatal error) and 0 (success). ", ret);
+        RS_LOG(LOG_ERR, "Shutting down: init callback returned an invalid "
+            "value: %d. Valid values are RS_INIT_OK (0) and "
+            "RS_INIT_FATAL (-1).", ret);
+    }
+    return RS_FATAL;
+}
+#endif
+
+static inline rs_ret rs_guard_close_cb(
+    rs_t * rs,
+    rs_close_ret ret
+) {
+    switch (ret) {
+#ifdef __cplusplus
+        case rs_close_ret::RS_CLOSE_FATAL:
+#else
+        case RS_CLOSE_FATAL:
+#endif
+        RS_LOG(LOG_WARNING,
+            "Shutting down: close callback returned RS_CLOSE_FATAL (-1).");
+        break;
+#ifdef __cplusplus
+        case rs_close_ret::RS_CLOSE_OK:
+#else
+        case RS_CLOSE_OK:
+#endif
+        return RS_OK;
+    default:
+        RS_LOG(LOG_ERR, "Shutting down: close callback returned an invalid "
+            "value: %d. Valid values are RS_CLOSE_OK (0) and "
+            "RS_CLOSE_FATAL (-1).", ret);
     }
     return RS_FATAL;
 }

@@ -31,9 +31,6 @@
 //    |
 //    \-------------------------------> [ Any RingSocket app translation units ]
 
-// #############################################################################
-// # RingSocket app callback API helper functions ##############################
-
 #ifdef __cplusplus
 #include <string_view>
 #include <type_traits>
@@ -41,6 +38,9 @@
 #include <span>
 #endif
 #endif
+
+// #############################################################################
+// # RingSocket app callback API helper functions ##############################
 
 static inline uint64_t rs_get_client_id(
     rs_t const * rs
@@ -83,11 +83,13 @@ static inline struct rs_conf const * rs_get_conf(
     return rs->conf;
 }
 
+#ifndef __cplusplus
 static inline void * rs_get_app_data(
     rs_t const * rs
 ) {
     return rs->app_data;
 }
+#endif
 
 // #############################################################################
 // # rs_w_*(): WebSocket message chunk writing functions for RingSocket apps ###

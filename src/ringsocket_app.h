@@ -159,7 +159,9 @@ struct rs_app_schedule {
     struct rs_ring_consumer * inbound_consumers;
     uint64_t timestamp_microsec;
     uint64_t interval_microsec;
-    bool disable_sleep_timeout;
+    uint64_t interval_microsec_min;
+    uint64_t interval_microsec_incr;
+    uint64_t interval_microsec_max;
 };
 
 // #############################################################################
@@ -317,26 +319,21 @@ RS_MACRIFY_INIT( \
 // #############################################################################
 // # RS_TIMER_...() ############################################################
 
-#define _RS_TIMER_WAKE(timer_cb, timer_interval) \
+#define _RS_TIMER(timer_cb, \
+    timer_interval_min, timer_interval_incr, timer_interval_max) \
 do { \
-    sched.interval_microsec = timer_interval; \
+    sched.interval_microsec_min = timer_interval_min; \
+    sched.interval_microsec_incr = timer_interval_incr; \
+    sched.interval_microsec_max = timer_interval_max; \
 } while (0) \
-
-#define _RS_TIMER_SLEEP(timer_cb, timer_interval) \
-do { \
-    _RS_TIMER_WAKE(timer_cb, timer_interval); \
-    sched.disable_sleep_timeout = true; \
-} while (0)
 
 #define _RS_TIMER_NONE
 
 #ifdef __cplusplus
-#define _PARAMS_RS_TIMER_WAKE(timer_cb, timer_interval) , &T::timer_cb, app_obj
-#define _PARAMS_RS_TIMER_SLEEP(timer_cb, timer_interval) , &T::timer_cb, app_obj
+#define _PARAMS_RS_TIMER(timer_cb, ...) , &T::timer_cb, app_obj
 #define _PARAMS_RS_TIMER_NONE , nullptr, app_obj
 #else
-#define _PARAMS_RS_TIMER_WAKE(timer_cb, timer_interval) , timer_cb
-#define _PARAMS_RS_TIMER_SLEEP(timer_cb, timer_interval) , timer_cb
+#define _PARAMS_RS_TIMER(timer_cb, ...) , timer_cb
 #define _PARAMS_RS_TIMER_NONE , NULL
 #endif
 
@@ -362,7 +359,7 @@ do { \
 // # RS_CLOSE() ################################################################
 
 #ifdef __cplusplus
-#define _RS_CLOSE(close_cb) _RS_CLOSE_GENERIC(+(app_obj.close_cb))
+#define _RS_CLOSE(close_cb) _RS_CLOSE_GENERIC(app_obj.close_cb)
 #else
 #define _RS_CLOSE(close_cb) _RS_CLOSE_GENERIC(close_cb)
 #endif
@@ -370,7 +367,7 @@ do { \
 #define _RS_CLOSE_GENERIC(close_cb) \
 do { \
     rs.cb = RS_CB_CLOSE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, close_cb(&rs))); \
+    RS_GUARD_APP(rs_guard_close_cb(&rs, close_cb(&rs))); \
 } while (0)
 
 #define _RS_CLOSE_NONE

@@ -80,6 +80,8 @@ typedef struct rs_app_cb_args rs_t;
 // #############################################################################
 // # rs_ret & Co. ##############################################################
 
+// This enum is primarily intended for internal RingSocket usage.
+// For app callback return value enums, refer to ringsocket.h instead.
 typedef enum {
     RS_OK = 0,
 
