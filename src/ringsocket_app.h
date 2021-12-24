@@ -134,9 +134,9 @@ enum rs_callback {
 };
 
 struct rs_app_cb_args { // AKA rs_t (typedef located in ringsocket_api.h)
-//#ifndef __cplusplus
+#ifndef __cplusplus
     void * app_data;
-//#endif
+#endif
     struct rs_conf const * conf;
     struct rs_ring_pair * * ring_pairs;
     struct rs_ring_producer * outbound_producers;
@@ -341,7 +341,7 @@ do { \
 // # RS_OPEN() #################################################################
 
 #ifdef __cplusplus
-#define _RS_OPEN(open_cb) _RS_OPEN_GENERIC(+(app_obj.open_cb))
+#define _RS_OPEN(open_cb) _RS_OPEN_GENERIC(app_obj.open_cb)
 #else
 #define _RS_OPEN(open_cb) _RS_OPEN_GENERIC(open_cb)
 #endif
@@ -350,7 +350,7 @@ do { \
 do { \
     RS_GUARD_APP(rs_ack_peer_open(&rs)); \
     rs.cb = RS_CB_OPEN; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, open_cb(&rs))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, open_cb(&rs))); \
 } while (0)
 
 #define _RS_OPEN_NONE
@@ -367,7 +367,7 @@ do { \
 #define _RS_CLOSE_GENERIC(close_cb) \
 do { \
     rs.cb = RS_CB_CLOSE; \
-    RS_GUARD_APP(rs_guard_close_cb(&rs, close_cb(&rs))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, close_cb(&rs))); \
 } while (0)
 
 #define _RS_CLOSE_NONE
@@ -433,9 +433,9 @@ do { \
         __VA_ARGS__ \
     )
 
-#define RS_READ_ANY_METHOD_WITHOUT_ARGS(read_cb) RS_A00(+(app_obj.read_cb))
+#define RS_READ_ANY_METHOD_WITHOUT_ARGS(read_cb) RS_A00(app_obj.read_cb)
 #define RS_READ_ANY_METHOD_WITH_ARGS(read_cb, ...) \
-    RS_READ_ANY_GENERIC(+(app_obj.read_cb), __VA_ARGS__)
+    RS_READ_ANY_GENERIC(app_obj.read_cb, __VA_ARGS__)
 #else
 #define _RS_READ_ANY(...) RS_READ_ANY_GENERIC(__VA_ARGS__)
 #endif
@@ -461,64 +461,64 @@ do { \
 #define RS_READ_ABORT(ws_close_code) \
 do { \
     RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_close_peer(&rs, (ws_close_code))); \
+    RS_GUARD_APP(rs_close_peer(&rs, rs.inbound_worker_i, rs.inbound_peer_i, \
+        (ws_close_code))); \
     goto call_close_cb; \
 } while (0)
 
 #define RS_A00(cb) \
 do { \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs))); \
 } while (0)
 
 #define RS_A01(cb, a01) \
 do { \
     _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v1 __##a01))); \
 } while (0)
 
 #define RS_A02(cb, a02, a01) \
 do { \
     _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A03(cb, a03, a02, a01) \
 do { \
     _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A04(cb, a04, a03, a02, a01) \
 do { \
     _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v4, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v4, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A05(cb, a05, a04, a03, a02, a01) \
 do { \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v5, v4, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A06(cb, a06, a05, a04, a03, a02, a01) \
 do { \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v6, v5, v4, v3, v2, v1 \
-        __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v6, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A07(cb, a07, a06, a05, a04, a03, a02, a01) \
 do { \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v7, v6, v5, v4, v3, v2, v1 \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v7, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
 
@@ -527,7 +527,7 @@ do { \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v8, v7, v6, v5, v4, v3, v2, v1 \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v8, v7, v6, v5, v4, v3, v2, v1 \
         __##a01))); \
 } while (0)
 
@@ -536,8 +536,8 @@ do { \
     _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; \
     _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v9, v8, v7, v6, v5, v4, v3, v2, \
-        v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v9, v8, v7, v6, v5, v4, v3, v2, v1 \
+        __##a01))); \
 } while (0)
 
 #define RS_A10(cb, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
@@ -545,8 +545,8 @@ do { \
     _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; \
     _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v10, v9, v8, v7, v6, v5, v4, \
-        v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v10, v9, v8, v7, v6, v5, v4, v3, v2, \
+        v1 __##a01))); \
 } while (0)
 
 #define RS_A11(cb, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
@@ -554,8 +554,8 @@ do { \
     _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; _05##a05; \
     _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v11, v10, v9, v8, v7, v6, v5, \
-        v4, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v11, v10, v9, v8, v7, v6, v5, v4, \
+        v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A12(cb, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, a01) \
@@ -563,8 +563,8 @@ do { \
     _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; _06##a06; \
     _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v12, v11, v10, v9, v8, v7, v6, \
-        v5, v4, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v12, v11, v10, v9, v8, v7, v6, v5, \
+        v4, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A13(cb, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, a02, \
@@ -573,8 +573,8 @@ do { \
     _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; _07##a07; \
     _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v13, v12, v11, v10, v9, v8, v7, \
-        v6, v5, v4, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v13, v12, v11, v10, v9, v8, v7, v6, \
+        v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A14(cb, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, a03, \
@@ -583,8 +583,8 @@ do { \
     _14##a14, _13##a13, _12##a12; _11##a11; _10##a10; _09##a09; _08##a08; \
     _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v14, v13, v12, v11, v10, v9, \
-        v8, v7, v6, v5, v4, v3 v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v14, v13, v12, v11, v10, v9, v8, v7, \
+        v6, v5, v4, v3 v2, v1 __##a01))); \
 } while (0)
 
 #define RS_A15(cb, a15, a14, a13, a12, a11, a10, a09, a08, a07, a06, a05, a04, \
@@ -594,8 +594,8 @@ do { \
     _08##a08; _07##a07; _06##a06; _05##a05; _04##a04; _03##a03; _02##a02; \
     _01##a01; \
     RS_READ_CHECK_EXACT; RS_ENQUEUE_APP_READ_UPDATE; \
-    RS_GUARD_APP(rs_guard_peer_cb(&rs, cb(&rs, v15, v14, v13, v12, v11, v10, \
-        v9, v8, v7, v6, v5, v4, v3, v2, v1 __##a01))); \
+    RS_GUARD_APP(rs_guard_cb(&rs, cb(&rs, v15, v14, v13, v12, v11, v10, v9, \
+        v8, v7, v6, v5, v4, v3, v2, v1 __##a01))); \
 } while (0)
 
 #define _15RS_NET(...) _RS_NET(15, __VA_ARGS__)

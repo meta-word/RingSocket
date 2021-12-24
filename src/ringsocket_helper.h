@@ -34,41 +34,32 @@
 // #############################################################################
 // # RingSocket app callback return value enums ################################
 
-#ifndef __cplusplus
-typedef enum {
-    RS_INIT_FATAL  = -1,
-    RS_INIT_OK     = 0
-} rs_init_ret;
-#endif
-
-// No enums are defined for app open and close callbacks. Instead, they are
-// expected to return an integer. This is done so that apps can define their own
-// custom WebSocket close status codes. See the docs: App callback return value.
-
+// The return value expected of all app callbacks except for the timer callback:
 #ifdef __cplusplus
-enum class rs_close_ret {
+enum class rs_cb_ret {
 #else
 typedef enum {
 #endif
-    RS_CLOSE_FATAL = -1,
-    RS_CLOSE_OK    = 0
+    RS_CB_FATAL,
+    RS_CB_OK
 #ifdef __cplusplus
 };
 #else
-} rs_close_ret;
+} rs_cb_ret;
 #endif
 
+// The return value expected of the timer callback:
 #ifdef __cplusplus
 enum class rs_timer_ret {
 #else
 typedef enum {
 #endif
-    RS_TIMER_FATAL = -1,
-    RS_TIMER_MIN   = 0, // Call again after the configured mininum interval.
-    RS_TIMER_HOLD  = 1, // Call again with an interval unchanged from this time.
-    RS_TIMER_INCR  = 2, // Add the configured increment to next call's interval.
-    RS_TIMER_MAX   = 3, // Call again after the configured maximum interval.
-    RS_TIMER_NEVER = 4  // Don't you dare ever calling me again!
+    RS_TIMER_FATAL,
+    RS_TIMER_MIN,  // Call me again after the configured mininum interval.
+    RS_TIMER_HOLD, // Call me again with an interval unchanged from this time.
+    RS_TIMER_INCR, // Add the configured increment to next call's interval.
+    RS_TIMER_MAX,  // Call me again after the configured maximum interval.
+    RS_TIMER_NEVER // Don't you dare ever calling me again.
 #ifdef __cplusplus
 };
 #else
@@ -78,7 +69,7 @@ typedef enum {
 // #############################################################################
 // # Internal app callback helper functions (don't call these from app code) ###
 
-static inline void rs_guard_cb(
+static inline void rs_guard_cb_kind(
     char const * function_str,
     unsigned cb,
     unsigned allowed_cb_mask
@@ -118,7 +109,7 @@ static inline void rs_send(
     uint32_t recipient_c,
     enum rs_data_kind data_kind
 ) {
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
 
     if (rs->wbuf_i > rs->conf->max_ws_msg_size) {
@@ -424,12 +415,14 @@ static inline rs_ret rs_wait_for_inbound_msg(
             sched->timestamp_microsec = timestamp_microsec;
         }
         RS_ATOMIC_STORE_RELAXED(&sched->sleep_state->is_asleep, false);
+
         rs->cb = RS_CB_TIMER;
 #ifdef __cplusplus
         rs_timer_ret timer_ret = (app_obj.*timer_cb)(rs);
 #else
         rs_timer_ret timer_ret = timer_cb(rs);
 #endif
+
         switch (timer_ret) {
 #ifdef __cplusplus
         case rs_timer_ret::RS_TIMER_FATAL:
@@ -505,15 +498,16 @@ static inline rs_ret rs_ack_peer_open(
 
 static inline rs_ret rs_close_peer(
     rs_t * rs,
+    size_t worker_i,
+    uint32_t recipient,
     uint16_t ws_close_code
 ) {
-    struct rs_ring_producer * prod =
-        rs->outbound_producers + rs->inbound_worker_i;
+    struct rs_ring_producer * prod = rs->outbound_producers + worker_i;
     RS_GUARD(rs_produce_ring_msg(
         &rs->ring_pairs[rs->inbound_worker_i]->outbound_ring, prod,
         rs->conf->realloc_multiplier, 9));
     *prod->w++ = RS_OUTBOUND_SINGLE;
-    *((uint32_t *) prod->w) = rs->inbound_peer_i;
+    *((uint32_t *) prod->w) = recipient;
     prod->w += 4;
 
     union rs_wsframe * frame = (union rs_wsframe *) prod->w;
@@ -527,78 +521,33 @@ static inline rs_ret rs_close_peer(
         &net_bytes, sizeof(net_bytes));
  
     RS_GUARD(rs_enqueue_ring_update(rs->ring_queue, rs->ring_pairs,
-        rs->worker_sleep_states, rs->worker_eventfds, prod->w,
-        rs->inbound_worker_i, true));
+        rs->worker_sleep_states, rs->worker_eventfds, prod->w, worker_i, true));
     return RS_OK;
 }
 
-#ifndef __cplusplus
-static inline rs_ret rs_guard_init_cb(
+static inline rs_ret rs_guard_cb(
     rs_t * rs,
-    rs_init_ret ret
+    rs_cb_ret cb_ret
 ) {
-    switch (ret) {
-    case RS_INIT_FATAL:
-        RS_LOG(LOG_WARNING,
-            "Shutting down: init callback returned RS_INIT_FATAL (-1).");
-        break;
-    case RS_INIT_OK:
-        return RS_OK;
-    default:
-        RS_LOG(LOG_ERR, "Shutting down: init callback returned an invalid "
-            "value: %d. Valid values are RS_INIT_OK (0) and "
-            "RS_INIT_FATAL (-1).", ret);
-    }
-    return RS_FATAL;
-}
-#endif
-
-static inline rs_ret rs_guard_close_cb(
-    rs_t * rs,
-    rs_close_ret ret
-) {
-    switch (ret) {
+    switch (cb_ret) {
 #ifdef __cplusplus
-        case rs_close_ret::RS_CLOSE_FATAL:
+    case rs_cb_ret::RS_CB_FATAL:
 #else
-        case RS_CLOSE_FATAL:
+    case RS_CB_FATAL:
 #endif
         RS_LOG(LOG_WARNING,
-            "Shutting down: close callback returned RS_CLOSE_FATAL (-1).");
+            "Shutting down: init callback returned RS_CB_FATAL.");
         break;
 #ifdef __cplusplus
-        case rs_close_ret::RS_CLOSE_OK:
+    case rs_cb_ret::RS_CB_OK:
 #else
-        case RS_CLOSE_OK:
+    case RS_CB_OK:
 #endif
         return RS_OK;
     default:
-        RS_LOG(LOG_ERR, "Shutting down: close callback returned an invalid "
-            "value: %d. Valid values are RS_CLOSE_OK (0) and "
-            "RS_CLOSE_FATAL (-1).", ret);
+        RS_LOG(LOG_ERR,
+            "Shutting down: init callback returned an invalid value: %d. "
+            "Recognized values are RS_CB_OK and RS_CB_FATAL.", cb_ret);
     }
-    return RS_FATAL;
-}
-
-static inline rs_ret rs_guard_peer_cb(
-    rs_t * rs,
-    int ret
-) {
-    switch (ret) {
-    case -1:
-        RS_LOG(LOG_WARNING,
-            "Shutting down: read/open callback returned -1 (fatal error).");
-        return RS_FATAL;
-    case 0:
-        return RS_OK;
-    default:
-        if (ret >= 4000 && ret < 4900) {
-            return rs_close_peer(rs, ret);
-        }
-    }
-    RS_LOG(LOG_ERR, "Shutting down: read/open callback returned an invalid "
-        "value: %d. Valid values are -1 (fatal error), 0 (success), and any "
-        "value within the range 4000 through 4899 (private use WebSocket close "
-        "codes).", ret);
     return RS_FATAL;
 }

@@ -21,7 +21,7 @@ APP_STRESS_SONAME = $(APP_STRESS_NAME).so
 RS_CACHE_LINE_SIZE := $(shell getconf LEVEL1_DCACHE_LINESIZE)
 
 CC = gcc
-FLAGS = -Wall -Wextra -Wpedantic -std=c11 -O3
+FLAGS = -Wall -Wextra -Wpedantic -std=c17 -O3
 FLAGS_SO = -fpic -shared -Wl,-z,relro,-z,now -DRS_CACHE_LINE_SIZE=$(RS_CACHE_LINE_SIZE)
 
 .PHONY: all

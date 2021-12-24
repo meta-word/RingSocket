@@ -45,7 +45,7 @@
 static inline uint64_t rs_get_client_id(
     rs_t const * rs
 ) {
-    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
+    rs_guard_cb_kind(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
     uint32_t u32tuple[] = {
         // Offset worker index by 1 to prevent ever returning an ID value of 0.
         rs->inbound_worker_i + 1,
@@ -58,7 +58,7 @@ static inline int rs_get_client_addr(
     rs_t const * rs,
     struct sockaddr_storage * addr
 ) {
-    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
+    rs_guard_cb_kind(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
     socklen_t size = (socklen_t) sizeof(struct sockaddr_storage);
     return getpeername(rs->inbound_socket_fd, (struct sockaddr *) addr, &size);
 }
@@ -66,14 +66,14 @@ static inline int rs_get_client_addr(
 static inline uint64_t rs_get_endpoint_id(
     rs_t const * rs
 ) {
-    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
+    rs_guard_cb_kind(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE);
     return rs->inbound_endpoint_id;
 }
 
 static inline enum rs_data_kind rs_get_read_data_kind(
     rs_t const * rs
 ) {
-    rs_guard_cb(__func__, rs->cb, RS_CB_READ);
+    rs_guard_cb_kind(__func__, rs->cb, RS_CB_READ);
     return rs->read_data_kind;
 }
 
@@ -99,7 +99,7 @@ static inline void rs_w_p(
     void const * src,
     size_t size
 ) {
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, size));
     memcpy(rs->wbuf + rs->wbuf_i, src, size);
@@ -126,7 +126,7 @@ static inline void rs_w_uint8(
     rs_t * rs,
     uint8_t u8
 ) {
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 1));
     rs->wbuf[rs->wbuf_i++] = u8;
@@ -136,7 +136,7 @@ static inline void rs_w_uint16(
     rs_t * rs,
     uint16_t u16
 ) {
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 2));
     *((uint16_t *) (rs->wbuf + rs->wbuf_i)) = u16;
@@ -147,7 +147,7 @@ static inline void rs_w_uint32(
     rs_t * rs,
     uint32_t u32
 ) {
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 4));
     *((uint32_t *) (rs->wbuf + rs->wbuf_i)) = u32;
@@ -158,7 +158,7 @@ static inline void rs_w_uint64(
     rs_t * rs,
     uint64_t u64
 ) {
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, 8));
     *((uint64_t *) (rs->wbuf + rs->wbuf_i)) = u64;
@@ -260,7 +260,7 @@ static inline void rs_w_span_hton(
     static_assert(std::is_integral_v<T> &&
         (sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8),
         "rs_w_span_hton() only supports integer types of size 2, 4, or 8.");
-    rs_guard_cb(__func__, rs->cb,
+    rs_guard_cb_kind(__func__, rs->cb,
         RS_CB_OPEN | RS_CB_READ | RS_CB_CLOSE | RS_CB_TIMER);
     RS_GUARD_APP(rs_check_app_wsize(rs, span.size_bytes()));
     if constexpr (sizeof(T) == 2) {
@@ -346,7 +346,7 @@ static inline void rs_to_cur(
     rs_t * rs,
     enum rs_data_kind data_kind
 ) {
-    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
+    rs_guard_cb_kind(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
     rs_send(rs, rs->inbound_worker_i, RS_OUTBOUND_SINGLE, &rs->inbound_peer_i,
         1, data_kind);
     rs->wbuf_i = 0;
@@ -424,7 +424,7 @@ static inline void rs_to_every_except_cur(
     rs_t * rs,
     enum rs_data_kind data_kind
 ) {
-    rs_guard_cb(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
+    rs_guard_cb_kind(__func__, rs->cb, RS_CB_OPEN | RS_CB_READ);
     for (size_t i = 0; i < rs->conf->worker_c; i++) {
         if (i == rs->inbound_worker_i) {
             rs_send(rs, i, RS_OUTBOUND_EVERY_EXCEPT_SINGLE, &rs->inbound_peer_i,
@@ -434,6 +434,33 @@ static inline void rs_to_every_except_cur(
         }
     }
     rs->wbuf_i = 0;
+}
+
+// #############################################################################
+// # rs_close() and rs_close_cur(): shut down a client WebSocket connection ####
+
+static inline void rs_close(
+    rs_t * rs,
+    uint64_t client_id,
+    unsigned ws_close_code
+) {
+    if (ws_close_code < 4000 || ws_close_code >= 4900) {
+        RS_LOG(LOG_ERR, "rs_close() given an invalid WebSocket close code "
+            "value: %d. As per RFC 6455, only private use values in the range "
+            "4000 through 4899 are allowed to be used for app-defined "
+            "purposes. (RingSocket reserves the range 4900 through 4999 for "
+            "its own ends.) Changing close code to 4899.");
+        ws_close_code = 4899;
+    }
+    uint32_t * u32 = (uint32_t *) &client_id;
+    rs_close_peer(rs, *u32 - 1, u32[1], ws_close_code);
+}
+
+static inline void rs_close_cur(
+    rs_t * rs,
+    unsigned ws_close_code
+) {
+    rs_close(rs, rs_get_client_id(rs), ws_close_code);
 }
 
 // #############################################################################

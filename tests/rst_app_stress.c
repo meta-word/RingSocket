@@ -12,12 +12,6 @@
 #define RST_MAX_MSG_CONTENT_SIZE 0x800000 // 8 MB
 #define RST_MAX_SIMUL_TOTAL_MSG_BYTE_C 0x4000000 // 64 MB
 
-typedef enum {
-    RST_FATAL = -1,
-    RST_OK = 0,
-    RST_TOO_MANY_CLIENTS = 4000
-} rst_ret;
-
 struct rst_client {
     uint64_t msg_ids[RST_MAX_SIMUL_MSG_PER_CLIENT_C];
     uint64_t client_id;
@@ -75,7 +69,7 @@ static void shuffle_clients(
     }
 }
 
-static rst_ret send_anything_anywhere(
+static rs_cb_ret send_anything_anywhere(
     rs_t * rs,
     struct rst_stress * s,
     uint64_t cur_client_id
@@ -196,10 +190,10 @@ static rst_ret send_anything_anywhere(
             rs_to_multi(rs, RS_BIN, s->recip_ids, recipient_c);
         }
     }
-    return RST_OK;
+    return RS_CB_OK;
 }
 
-rst_ret init_cb(
+rs_cb_ret init_cb(
     rs_t * rs
 ) {
     struct rs_conf const * conf = rs_get_conf(rs);
@@ -209,17 +203,17 @@ rst_ret init_cb(
     RS_LOG(LOG_DEBUG, "s->max_msg_content_size: %zu", s->max_msg_content_size);
     // Feed some quasi-crappy seed to quasi-crappy rand().
     srand((unsigned) time(NULL));
-    return RST_OK;
+    return RS_CB_OK;
 }
 
-rst_ret open_cb(
+rs_cb_ret open_cb(
     rs_t * rs
 ) {
     struct rst_stress * s = rs_get_app_data(rs);
     if (s->client_c >= RST_MAX_CLIENT_C) {
         RS_LOG(LOG_ERR, "Maximum client count of " RS_STRINGIFY(RS_MAX_CLIENT_C)
             " exceeded");
-        return RST_FATAL;
+        return RS_CB_FATAL;
     }
     if (!s->client_c) {
         sleep(1);
@@ -229,7 +223,7 @@ rst_ret open_cb(
     struct sockaddr_storage addr = {0};
     if (rs_get_client_addr(rs, &addr) == -1) {
         RS_LOG_ERRNO(LOG_ERR, "Unsuccessful rs_get_client_addr()");
-        return RST_FATAL;
+        return RS_CB_FATAL;
     }
     client->port = RS_NTOH16(addr.ss_family == AF_INET6 ?
         ((struct sockaddr_in6 *) &addr)->sin6_port :
@@ -239,11 +233,11 @@ rst_ret open_cb(
     s->avail_client_c++;
     RS_LOG(LOG_DEBUG, "Connection established with new client on remote port "
         "%d: client_c is now %" PRIu32, client->port, s->client_c);
-    return s->is_read_only_phase ? RS_OK :
+    return s->is_read_only_phase ? RS_CB_OK :
         send_anything_anywhere(rs, s, client->client_id);
 }
 
-rst_ret read_cb(
+rs_cb_ret read_cb(
     rs_t * rs,
     uint64_t msg_id,
     uint64_t declared_size,
@@ -254,20 +248,20 @@ rst_ret read_cb(
     struct rst_client * client = get_client(rs, s);
     if (!client) {
         RS_LOG(LOG_CRIT, "get_client() failed unexpectedly. Shutting down...");
-        return RST_FATAL;
+        return RS_CB_FATAL;
     }
     if (declared_size != content_size) {
         RS_LOG(LOG_ERR, "Received a message from remote port %d with a "
             "declared content size of %zu despite its actual content size of "
             "%zu", client->port, declared_size, content_size);
-        return RST_FATAL;
+        return RS_CB_FATAL;
     }
     for (size_t i = 0; i < content_size; i++) {
         if (content[i] != 255 - i % 256) { // See send_anything_anywhere()
             RS_LOG(LOG_ERR, "Received from remote port %d a content byte at "
                 "index %zu with a value of %" PRIu8 " instead of the expected "
                 "value %" PRIu8, client->port, i, content[i], 255 - i % 256);
-            return RST_FATAL;
+            return RS_CB_FATAL;
         }
     }
     // rs_to_every*() calls may cause worker threads to include new recipients
@@ -298,7 +292,7 @@ rst_ret read_cb(
             PRIu64 " not included in its array of size %d of pending "
             "verifications (client->earliest_msg_id_seen: %" PRIu64 ")",
             client->port, msg_id, client->msg_c, client->earliest_msg_id_seen);
-        return RST_FATAL;
+        return RS_CB_FATAL;
     }
     validated:
     RS_LOG(LOG_DEBUG, "Validated 16+%zu byte message with ID %" PRIu64
@@ -306,7 +300,7 @@ rst_ret read_cb(
         content_size, msg_id, client->port, s->total_msg_byte_c);
     if (s->is_read_only_phase) {
         if (s->total_msg_byte_c) {
-            return RS_OK;
+            return RS_CB_OK;
         }
         RS_LOG(LOG_INFO, "Received and verified echo responses to every "
             "message sent. Re-enabling message writing.");
@@ -314,16 +308,16 @@ rst_ret read_cb(
         return send_anything_anywhere(rs, s, client->client_id);
     }
     return client->msg_c > RST_MAX_SIMUL_MSG_PER_CLIENT_C / 2 ?
-        RS_OK : send_anything_anywhere(rs, s, client->client_id);
+        RS_CB_OK : send_anything_anywhere(rs, s, client->client_id);
 }
 
-rst_ret close_cb(
+rs_cb_ret close_cb(
     rs_t * rs
 ) {
     (void) rs;
     RS_LOG(LOG_CRIT, "The stress app expects to be the side doing any "
         "connection closing, not the other way around!");
-    return RST_FATAL;
+    return RS_CB_FATAL;
 }
 
 RS_APP(

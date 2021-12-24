@@ -6,14 +6,14 @@
 
 #define RST_MAX_ECHO_BYTE_C 0x1000000 // 16 MB (based on ...nothing really)
 
-int echo(
+rs_cb_ret echo(
     rs_t * rs,
     uint8_t * msg,
     size_t msg_byte_c
 ) {
     rs_w_p(rs, msg, msg_byte_c);
     rs_to_cur(rs, rs_get_read_data_kind(rs));
-    return 0;
+    return RS_CB_OK;
 }
 
 RS_APP(
