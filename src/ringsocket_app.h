@@ -707,27 +707,27 @@ do { \
 #endif
 
 #ifdef __cplusplus
-#define _01RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
+#define RS_NET_ARR_MAX(name_i, type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     std::vector<type> v1(elem_c); \
     RS_NET_MEMCPY(&v1[0], elem_c, type)
 #else
-#define _01RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
+#define RS_NET_ARR_MAX(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[max_elem_c] = {0}; \
     RS_NET_MEMCPY(v1, elem_c, type)
 
-#define _01RS_NET_STA(type, min_elem_c, max_elem_c) \
+#define RS_NET_STA(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     thread_local static type v1[max_elem_c] = {0}; \
     RS_NET_MEMCPY(v1, elem_c, type)
 
-#define _01RS_NET_VLA(type, min_elem_c, max_elem_c) \
+#define RS_NET_VLA(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type v1[elem_c]; /* VLA */ \
     RS_NET_MEMCPY(v1, elem_c, type)
 
-#define _01RS_NET_HEAP(type, min_elem_c, max_elem_c) \
+#define RS_NET_HEAP(type, min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(type, min_elem_c, max_elem_c); \
     type * v1 = malloc(elem_c); \
     if (!v1) { \
@@ -824,24 +824,24 @@ do { \
         elem_c); \
     payload_i + elem_c
 #else
-#define _01RS_STR(min_elem_c, max_elem_c) \
+#define RS_STR(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
     char v1[(max_elem_c) + 1] = {0}; \
     RS_NET_MEMCPY(v1, elem_c, char);
 
-#define _01RS_STR_STA(min_elem_c, max_elem_c) \
+#define RS_STR_STA(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
     thread_local static char v1[(max_elem_c) + 1] = {0}; \
     RS_NET_MEMCPY(v1, elem_c, char); \
     v1[elem_c] = '\0'
 
-#define _01RS_STR_VLA(min_elem_c, max_elem_c) \
+#define RS_STR_VLA(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
     char v1[elem_c + 1]; /* VLA */ \
     RS_NET_MEMCPY(v1, elem_c, char); \
     v1[elem_c] = '\0'
 
-#define _01RS_STR_HEAP(min_elem_c, max_elem_c) \
+#define RS_STR_HEAP(min_elem_c, max_elem_c) \
     RS_READ_CHECK_RANGE(char, min_elem_c, max_elem_c); \
     char * v1 = malloc(elem_c + 1); \
     if (!v1) { \
