@@ -536,9 +536,9 @@ static rs_ret read_websocket(
             }
         case RS_AGAIN:
             if (parse_is_incomplete) {
-                RS_LOG(LOG_DEBUG, "RS_AGAIN occurred while attempting to read "
-                    "the remainder of a partially parsed WebSocket message: "
-                    "calling save_websocket_parse_state()");
+                //RS_LOG(LOG_DEBUG, "RS_AGAIN occurred while attempting to "
+                //    "read the remainder of a partially parsed WebSocket "
+                //    "message: calling save_websocket_parse_state()");
                 RS_GUARD(save_websocket_parse_state(worker, peer, &wsp));
                 return RS_AGAIN;
             }

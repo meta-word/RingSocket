@@ -73,11 +73,11 @@ static rs_ret send_newest_msg(
             peer->ws.owref_i = worker->newest_owref_i;
         }
         (*remaining_recipient_c)++;
-        //RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
-        //    "peer %" PRIu32 " yet, because its continuation state is "
-        //    "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu16 ").",
-        //    frame_size, peer_i, peer->continuation == RS_CONT_PARSING ?
-        //    "PARS" : "SEND", peer->ws.owref_c);
+        RS_LOG(LOG_DEBUG, "Not sending newest %zu byte message from app to "
+            "peer %" PRIu32 " yet, because its continuation state is "
+            "RS_CONT_%sING (resultant peer->ws.owref_c: %" PRIu16 ").",
+            frame_size, peer_i, peer->continuation == RS_CONT_PARSING ?
+            "PARS" : "SEND", peer->ws.owref_c);
         return RS_OK;
     }
     switch (peer->is_encrypted ? write_tls(worker, peer, frame, frame_size) :
@@ -403,7 +403,7 @@ static void decrement_pending_owref_count(
     enqueue_ring_update(worker, (uint8_t *) worker->owrefs[owref_i].cmsg, app_i,
         false);
     worker->oldest_owref_i_by_app[app_i] = owref_i;
-    RS_LOG(LOG_INFO, "Enqueued ring update for app_i %zu up to the message "
+    RS_LOG(LOG_DEBUG, "Enqueued ring update for app_i %zu up to the message "
         "corresponding to owref_i: %zu", app_i, owref_i);
 }
 
@@ -464,7 +464,8 @@ rs_ret send_pending_owrefs(
             return RS_FATAL;
         }
         decrement_pending_owref_count(worker, peer->ws.owref_i);
-        if (!peer->ws.owref_c || peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK) {
+        if (peer->ws.owref_c == RS_AWAITING_APP_OPEN_ACK ||
+            !--peer->ws.owref_c) {
             return RS_OK;
         }
         peer->ws.owref_i = find_next_owref_for_peer(worker, peer_i,
